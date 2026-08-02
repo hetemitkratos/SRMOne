@@ -173,9 +173,9 @@ export default function Dashboard() {
   return (
     <div className="min-h-screen bg-[#F4F0EB] text-[#1A1A1A] font-sans flex flex-col selection:bg-black/10 selection:text-black">
       <header className="sticky top-0 z-40 w-full px-6 py-3 lg:py-4 flex items-center justify-between bg-[#F4F0EB]/95 backdrop-blur-md border-b border-slate-200/50">
-        <div className="flex items-center gap-2.5 flex-shrink-0">
-          <img src="/assets/logo.png" alt="Logo" className="w-9 h-9 object-contain" />
-          <span className="font-display font-black text-[22px] tracking-tight block uppercase whitespace-nowrap">SRM ONE</span>
+        <div className="flex items-center gap-2 sm:gap-2.5 flex-shrink-0">
+          <img src="/assets/logo.png" alt="Logo" className="w-8 h-8 sm:w-9 sm:h-9 object-contain" />
+          <span className="font-display font-black text-[18px] sm:text-[22px] tracking-tight block uppercase whitespace-nowrap">SRM ONE</span>
         </div>
 
         <nav className="hidden lg:flex items-center bg-[#F9F7F4] rounded-full shadow-sm border border-slate-200/60 p-1 mx-4 overflow-x-auto hide-scrollbar relative">
@@ -203,7 +203,7 @@ export default function Dashboard() {
           ))}
         </nav>
 
-        <div className="flex items-center gap-3 flex-shrink-0">
+        <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0">
           <button
             onClick={handlePlacementClick}
             className="hidden md:inline-flex items-center gap-2 rounded-full bg-[#1A1A1A] text-white px-4 py-2.5 text-sm font-bold hover:bg-black transition-colors cursor-pointer shadow-sm"
@@ -215,29 +215,29 @@ export default function Dashboard() {
 
           <button
             onClick={() => navigate("/placement/notices")}
-            className="relative w-10 h-10 sm:w-11 sm:h-11 rounded-full bg-white flex items-center justify-center text-slate-500 hover:text-[#1A1A1A] hover:bg-slate-50 transition-colors shadow-sm flex cursor-pointer border border-slate-100"
+            className="relative w-9 h-9 sm:w-11 sm:h-11 rounded-full bg-white flex items-center justify-center text-slate-500 hover:text-[#1A1A1A] hover:bg-slate-50 transition-colors shadow-sm cursor-pointer border border-slate-100"
             title="Notices"
           >
-            <Mail size={18} strokeWidth={2.5} />
+            <Mail className="w-[16px] h-[16px] sm:w-[18px] sm:h-[18px]" strokeWidth={2.5} />
           </button>
           <NotificationBell />
 
           <div className="relative ml-1 flex items-center">
             <button
               onClick={() => setProfileMenuOpen(!profileMenuOpen)}
-              className="relative flex items-center justify-center cursor-pointer group rounded-full w-11 h-11"
+              className="relative flex items-center justify-center cursor-pointer group rounded-full w-9 h-9 sm:w-11 sm:h-11"
               title="Profile Menu"
             >
               {loading ? (
-                <div className="w-11 h-11 rounded-full bg-slate-200 animate-pulse" />
+                <div className="w-9 h-9 sm:w-11 sm:h-11 rounded-full bg-slate-200 animate-pulse" />
               ) : studentInfo?.PhotoUrl ? (
                 <img
                   src={studentInfo.PhotoUrl}
                   alt="Profile"
-                  className="w-11 h-11 rounded-full object-cover border-2 border-white shadow-sm transition-transform group-hover:scale-105"
+                  className="w-9 h-9 sm:w-11 sm:h-11 rounded-full object-cover border-2 border-white shadow-sm transition-transform group-hover:scale-105"
                 />
               ) : (
-                <div className="w-11 h-11 rounded-full bg-[#1A1A1A] text-white flex items-center justify-center font-bold text-sm border-2 border-white shadow-sm transition-transform group-hover:scale-105">
+                <div className="w-9 h-9 sm:w-11 sm:h-11 rounded-full bg-[#1A1A1A] text-white flex items-center justify-center font-bold text-xs sm:text-sm border-2 border-white shadow-sm transition-transform group-hover:scale-105">
                   {initials}
                 </div>
               )}
@@ -337,10 +337,10 @@ export default function Dashboard() {
           </div>
 
           <button
-            className="lg:hidden w-11 h-11 flex items-center justify-center rounded-full bg-white shadow-sm border border-slate-100 ml-2"
+            className="lg:hidden w-9 h-9 sm:w-11 sm:h-11 flex items-center justify-center rounded-full bg-white shadow-sm border border-slate-100 ml-0.5 sm:ml-2 cursor-pointer"
             onClick={() => setMobileOpen(true)}
           >
-            <Menu size={20} />
+            <Menu className="w-[18px] h-[18px] sm:w-[20px] sm:h-[20px]" />
           </button>
         </div>
       </header>
