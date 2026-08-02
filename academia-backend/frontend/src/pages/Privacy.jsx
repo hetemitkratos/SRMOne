@@ -24,12 +24,11 @@ const SECTIONS = [
     title: "2. Data We Collect",
     body: (
       <>
-        <h3>2.1 Credentials (Temporary)</h3>
+        <h3>2.1 Credentials</h3>
         <ul>
           <li>
-            <strong>SRMIST username (email):</strong> Used to authenticate with the Academia portal
-            and identify your session. Stored in browser <code>localStorage</code> for the duration
-            of your login.
+            <strong>SRMIST email:</strong> Used to authenticate with the Academia portal and identify
+            your session. Stored in browser <code>localStorage</code> for the duration of your login.
           </li>
           <li>
             <strong>SRMIST password:</strong> Used <strong>only</strong> during the login handshake
@@ -37,37 +36,56 @@ const SECTIONS = [
             browser.</strong> Discarded from memory immediately after authentication succeeds.
           </li>
           <li>
-            <strong>Session cookies (JWT tokens):</strong> Stored in server memory during your active
-            session. Cleared when you log out or the session expires (typically 30 minutes of
-            inactivity).
+            <strong>Haveloc placement password:</strong> Encrypted using AES-256-CBC and stored in
+            our Supabase database to enable automatic placement login. You can disconnect and erase
+            this at any time from the Placement settings.
+          </li>
+          <li>
+            <strong>Session cookies:</strong> Stored in server memory during your active session.
+            Cleared when you log out or the session expires (30 minutes of inactivity).
           </li>
         </ul>
 
-        <h3>2.2 Academic Data (Retrieved On-Demand)</h3>
+        <h3>2.2 Academic Data (Cached & Snapshotted)</h3>
         <p>
-          The following data is fetched from SRM Academia and Haveloc portals in real time when you
-          access the Service. This data is cached in server memory during your session to improve
-          performance but is <strong>not persisted to disk</strong>:
+          The following data is fetched from SRM Academia in real time and cached in server memory
+          during your session. Some data is also persisted to our Supabase database for history and
+          cross-device access:
         </p>
         <ul>
-          <li>Student profile: name, registration number, department, batch, semester, campus.</li>
-          <li>Attendance records per course.</li>
-          <li>Marks and grade history.</li>
-          <li>Timetable and class schedule.</li>
-          <li>Academic calendar.</li>
-          <li>Placement data: company listings, job postings, application tracker, placement cycles.</li>
-          <li>Student photo (from SRM's profile report system).</li>
+          <li>Student profile: name, registration number, department, batch, semester, campus, photo.</li>
+          <li>Attendance records per course — <strong>daily snapshots</strong> stored in Supabase for trend analysis.</li>
+          <li>Marks and grade history (in-memory only).</li>
+          <li>Timetable and class schedule (in-memory only).</li>
+          <li>Academic calendar (in-memory only).</li>
         </ul>
 
-        <h3>2.3 Faculty Data (Public)</h3>
+        <h3>2.3 Placement Data</h3>
+        <ul>
+          <li>Company listings, job postings, application tracker, placement cycles.</li>
+          <li><strong>Job bookmarks</strong> with personal notes — stored in Supabase, accessible across devices.</li>
+          <li>Placement notices and policies (cached in-memory).</li>
+        </ul>
+
+        <h3>2.4 Faculty Data (Public)</h3>
         <p>
-          Faculty names, designations, departments, email addresses, campus, and profile photos are
-          scraped from SRM University's <strong>public-facing website</strong>{" "}
-          (srmist.edu.in/faculty/). This data is publicly accessible without authentication and is
-          cached server-side (with a 1-hour TTL) to avoid repeated scraping.
+          Faculty names, designations, departments, email addresses, campus, profile photos, and
+          detailed profiles (education, publications, awards, work experience) are sourced from SRM
+          University's <strong>public-facing website</strong> (srmist.edu.in/faculty/). This data is
+          publicly accessible without authentication and is cached in our Supabase database (1-hour
+          TTL) and in your browser's <code>localStorage</code> (24-hour TTL) to avoid repeated
+          scraping.
         </p>
 
-        <h3>2.4 Usage Data (Minimal)</h3>
+        <h3>2.5 Notifications</h3>
+        <p>
+          The Service generates in-app notifications for events such as welcome messages, low
+          attendance alerts, new job postings, upcoming holidays, and new placement notices. These
+          notifications are stored in Supabase and linked to your email address. You can mark
+          notifications as read or clear them at any time.
+        </p>
+
+        <h3>2.6 Usage Data (Minimal)</h3>
         <p>
           The Service does not use analytics, tracking pixels, or advertising SDKs. Server logs may
           include anonymized error messages and request timestamps for debugging purposes. These
@@ -95,8 +113,20 @@ const SECTIONS = [
             that repeated requests are faster.
           </li>
           <li>
-            <strong>Faculty photos:</strong> To display faculty profile photos alongside your
-            timetable and attendance for easy identification.
+            <strong>Attendance trends:</strong> To snapshot daily attendance and show historical
+            trends and predictions.
+          </li>
+          <li>
+            <strong>Job tracking:</strong> To save bookmarked jobs with personal notes, accessible
+            across your devices.
+          </li>
+          <li>
+            <strong>Notifications:</strong> To alert you about low attendance, new jobs, holidays,
+            and placement notices.
+          </li>
+          <li>
+            <strong>Faculty profiles:</strong> To display faculty photos and detailed profiles
+            alongside your timetable and attendance.
           </li>
         </ul>
         <p>
@@ -115,33 +145,49 @@ const SECTIONS = [
     title: "4. Data Storage & Retention",
     body: (
       <>
-        <h3>4.1 In-Memory Only (Not Persisted)</h3>
+        <h3>4.1 In-Memory (Session Data)</h3>
         <p>
-          All academic and placement data is stored in server memory (RAM) during your active
-          session. When you log out or the session expires, all cached data is garbage-collected.
-          We do <strong>not</strong> maintain a database of student records.
+          Academic and placement data fetched during your active session is stored in server memory
+          (RAM). When you log out or the session expires, all cached data is garbage-collected.
+          This includes timetable, marks, calendar, and placement listings.
         </p>
 
-        <h3>4.2 Browser Storage</h3>
-        <p>The following is stored in your browser's <code>localStorage</code>:</p>
+        <h3>4.2 Supabase Database (Persisted)</h3>
+        <p>The following data is persisted in our Supabase database:</p>
         <ul>
           <li>
-            <code>srm_user</code>: Your email address (to identify you across page refreshes).
+            <strong>Placement credentials</strong> (encrypted with AES-256-CBC) — retained until you
+            disconnect your placement account.
           </li>
           <li>
-            <code>placement_user</code>: Your Haveloc username (for the placement dashboard).
+            <strong>Attendance snapshots</strong> — daily snapshots retained for trend analysis.
+            Deletable on request.
+          </li>
+          <li>
+            <strong>Job bookmarks</strong> with notes — retained until you manually remove them.
+          </li>
+          <li>
+            <strong>Notifications</strong> — retained for 90 days, then automatically purged.
+          </li>
+          <li>
+            <strong>Faculty profile cache</strong> — public data, 1-hour TTL, auto-refreshed.
+          </li>
+          <li>
+            <strong>Notification settings</strong> — your preferences for which alerts to receive.
           </li>
         </ul>
-        <p>
-          No passwords, tokens, or academic data is stored in the browser. You can clear this data at
-          any time by logging out or clearing your browser storage.
-        </p>
 
-        <h3>4.3 Faculty Cache (Server-Side)</h3>
+        <h3>4.3 Browser Storage</h3>
+        <p>The following is stored in your browser's <code>localStorage</code>:</p>
+        <ul>
+          <li><code>srm_user</code>: Your email address (to identify you across page refreshes).</li>
+          <li><code>placement_user</code>: Your Haveloc username (for the placement dashboard).</li>
+          <li>Faculty profile cache (24-hour TTL for faster loading).</li>
+          <li>UI preferences (theme, collapsed menus, dismissed banners).</li>
+        </ul>
         <p>
-          Faculty profile data (name, photo, designation) is cached server-side with a 1-hour
-          time-to-live (TTL). This cache is shared across all users to avoid redundant scraping of
-          SRM's public website. It contains only publicly available information.
+          No passwords or session tokens are stored in the browser. You can clear this data at any
+          time by logging out or clearing your browser storage.
         </p>
       </>
     ),
@@ -153,8 +199,17 @@ const SECTIONS = [
         <p>We take the following measures to protect your data:</p>
         <ul>
           <li>
-            <strong>No password storage:</strong> Passwords are never written to disk, database, or
-            logs. They exist in memory only for the duration of the login request.
+            <strong>No password storage:</strong> SRM passwords are never written to disk, database,
+            or logs. They exist in memory only for the duration of the login request.
+          </li>
+          <li>
+            <strong>Encrypted placement credentials:</strong> Haveloc passwords are encrypted using
+            AES-256-CBC before being stored in Supabase. The encryption key is held server-side only.
+          </li>
+          <li>
+            <strong>Row-Level Security (RLS):</strong> Supabase database access is restricted to the
+            backend service role. The frontend uses anonymous keys with strict RLS policies that
+            prevent cross-user data access.
           </li>
           <li>
             <strong>Session isolation:</strong> Each user's session is isolated. You can only access
@@ -202,6 +257,19 @@ const SECTIONS = [
             <strong>SRM public website (srmist.edu.in):</strong> We scrape publicly available faculty
             profile pages. No authentication is required for this data.
           </li>
+          <li>
+            <strong>Supabase (supabase.com):</strong> Hosts our database for encrypted placement
+            credentials, attendance snapshots, job bookmarks, notifications, and faculty cache.
+            Supabase is SOC 2 Type II compliant and encrypts data at rest and in transit.
+          </li>
+          <li>
+            <strong>Vercel (vercel.com):</strong> Hosts the frontend application. Subject to Vercel's
+            privacy policy.
+          </li>
+          <li>
+            <strong>Render (render.com):</strong> Hosts the backend API services. Subject to Render's
+            privacy policy.
+          </li>
         </ul>
         <p>
           We are not responsible for the privacy practices or data handling of these third-party
@@ -218,16 +286,22 @@ const SECTIONS = [
         <p>You have the following rights regarding your data:</p>
         <ul>
           <li>
-            <strong>Access:</strong> You can view all data the Service has about you by simply using
-            the dashboard — everything we retrieve is shown to you.
+            <strong>Access:</strong> You can view all data the Service has about you by using the
+            dashboard — everything we retrieve is shown to you.
           </li>
           <li>
-            <strong>Deletion:</strong> Logging out immediately clears your session and all cached
-            data from server memory. Clearing your browser storage removes the locally stored email.
+            <strong>Deletion:</strong> Logging out clears your session from server memory. You can
+            disconnect your placement account to erase encrypted credentials. You can request full
+            deletion of your Supabase records (attendance snapshots, bookmarks, notifications) by
+            contacting us.
           </li>
           <li>
-            <strong>Opt-out:</strong> You can stop using the Service at any time. Since we don't
-            persist data, there is nothing to "delete" beyond logging out.
+            <strong>Opt-out of notifications:</strong> You can disable specific notification types
+            (low attendance, new jobs, holidays, notices) from the notification settings panel.
+          </li>
+          <li>
+            <strong>Disconnect placement:</strong> You can disconnect your Haveloc placement account
+            at any time, which immediately erases your encrypted credentials from Supabase.
           </li>
           <li>
             <strong>Data portability:</strong> You can export your academic data by using the

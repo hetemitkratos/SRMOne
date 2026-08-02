@@ -47,12 +47,17 @@ const SECTIONS = [
         </p>
         <ul>
           <li>
-            <strong>Credentials are never stored in plaintext.</strong> Passwords are used only for
-            the duration of an active session and are not persisted to disk.
+            <strong>SRMIST credentials are never stored in plaintext.</strong> Passwords are used only
+            for the duration of an active session and are not persisted to disk.
           </li>
           <li>
             Session tokens (cookies) are stored in memory and cleared when you log out or the session
             expires.
+          </li>
+          <li>
+            <strong>Placement credentials</strong> (Haveloc password) are encrypted using AES-256-CBC
+            and stored in our Supabase database to enable automatic login. You can disconnect and
+            erase these at any time from the Placement settings.
           </li>
           <li>
             You must not share your credentials with any third party or allow unauthorized access to
@@ -69,8 +74,12 @@ const SECTIONS = [
         <p>The Service is provided for personal, non-commercial use to:</p>
         <ul>
           <li>View your attendance, marks, timetable, and academic calendar.</li>
+          <li>Track attendance trends over time with historical snapshots and predictions.</li>
           <li>Track placement opportunities, job applications, and interview schedules.</li>
-          <li>View faculty information and contact details.</li>
+          <li>Bookmark jobs with personal notes for later reference.</li>
+          <li>View faculty information, photos, and detailed academic profiles.</li>
+          <li>Receive in-app notifications for low attendance, new jobs, holidays, and notices.</li>
+          <li>Connect your Haveloc placement account for automatic login (optional).</li>
         </ul>
         <p>You agree NOT to:</p>
         <ul>
@@ -79,6 +88,7 @@ const SECTIONS = [
           <li>Reverse engineer, decompile, or disassemble any part of the Service.</li>
           <li>Use automated scripts, bots, or crawlers to overload or disrupt the Service.</li>
           <li>Resell, redistribute, or republish data obtained through the Service.</li>
+          <li>Share, sell, or distribute your account access or placement credentials to others.</li>
         </ul>
       </>
     ),
@@ -96,10 +106,13 @@ const SECTIONS = [
           <li>The Service will be available without interruption or downtime.</li>
           <li>All features (e.g., academic calendar, specific faculty pages) will function at all
             times, as they depend on the availability of upstream portals.</li>
+          <li>Notifications (low attendance, new jobs, holidays) will always be timely or accurate,
+            as they depend on data fetched from upstream portals.</li>
         </ul>
         <p>
           You should always verify critical information (attendance requirements, exam dates,
-          placement deadlines) directly with official university sources.
+          placement deadlines) directly with official university sources. Notifications are
+          informational only and should not be your sole source of truth.
         </p>
       </>
     ),
@@ -152,6 +165,7 @@ const SECTIONS = [
         <ul>
           <li>Any loss of data, grades, or academic standing resulting from reliance on the Service.</li>
           <li>Any missed deadlines, interviews, or opportunities due to Service unavailability.</li>
+          <li>Any failure to receive or act upon notifications (low attendance, new jobs, holidays).</li>
           <li>Any unauthorized access to your account due to your failure to protect your credentials.</li>
           <li>Any actions taken by the university or third parties in response to your use of the Service.</li>
         </ul>

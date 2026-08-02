@@ -1,25 +1,29 @@
-# Terms of Service for HackTrackr
+# Terms of Service for SRM One
 
-**Last Updated:** February 2, 2026
+**Last Updated:** August 2, 2026
 
 ## 1. Acceptance of Terms
 
-By accessing or using HackTrackr ("the Service"), you agree to be bound by these Terms of Service ("Terms"). If you do not agree to these Terms, do not use the Service.
+By accessing or using SRM One ("the Service"), you agree to be bound by these Terms of Service ("Terms"). If you do not agree to these Terms, do not use the Service.
+
+SRM One is an independent, student-built platform that aggregates data from SRM University's Academia portal and the Haveloc placement portal. SRM One is not affiliated with, endorsed by, or officially connected to SRM Institute of Science and Technology or Haveloc Technologies.
 
 ## 2. Description of Service
 
-HackTrackr is a unified dashboard application that provides:
+SRM One is a unified dashboard application that provides:
 - Integration with SRM Academia portal for academic data
 - Integration with Haveloc placement portal for job listings
-- Attendance tracking with historical trend analysis
+- Attendance tracking with historical trend analysis and predictions
 - Timetable and calendar synchronization
-- Job bookmarking and application tracking
+- Job bookmarking with personal notes
+- Faculty profile viewing with photos and detailed academic information
+- Real-time notifications (low attendance, new jobs, holidays, notices)
 - Multi-device settings synchronization
-- Real-time notifications
+- Automatic placement login with encrypted credential storage
 
 ## 3. Eligibility
 
-To use HackTrackr, you must:
+To use SRM One, you must:
 - Be a current student of SRM University
 - Have valid SRM Academia portal credentials
 - Be at least 18 years of age
@@ -34,12 +38,12 @@ To use HackTrackr, you must:
 
 ### 4.2 Placement Account Connection
 - Connecting your Haveloc placement account is optional
-- Placement credentials are encrypted and stored securely
-- You can disconnect your placement account at any time
-- We use your credentials only to fetch data on your behalf
+- Placement credentials are encrypted using AES-256-CBC and stored securely in Supabase
+- You can disconnect your placement account at any time, which immediately erases your credentials
+- We use your credentials only to fetch data on your behalf and enable automatic login
 
 ### 4.3 Account Security
-- Never share your HackTrackr session with others
+- Never share your SRM One session with others
 - Log out from shared or public devices
 - Notify us immediately of any unauthorized access
 - We are not liable for losses from unauthorized account use
@@ -73,7 +77,7 @@ You agree NOT to:
 ## 6. Intellectual Property
 
 ### 6.1 Our Rights
-- HackTrackr and its original content, features, and functionality are owned by us
+- SRM One and its original content, features, and functionality are owned by the development team
 - Our trademarks, logos, and brand features are protected
 - You may not use our intellectual property without permission
 
@@ -85,12 +89,13 @@ You agree NOT to:
 ### 6.3 Third-Party Content
 - SRM Academia data is property of SRM University
 - Haveloc placement data is property of respective companies and Haveloc
+- Faculty profile data is sourced from SRM University's public website
 - We do not claim ownership of third-party data displayed in the Service
 
 ## 7. Service Availability
 
 ### 7.1 Uptime
-- We strive for 99% uptime but do not guarantee uninterrupted service
+- We strive for high availability but do not guarantee uninterrupted service
 - The Service may be unavailable due to maintenance, updates, or technical issues
 - We are not liable for damages from service interruptions
 
@@ -117,7 +122,8 @@ You agree NOT to:
 - Report discrepancies to SRM or Haveloc directly
 
 ### 8.3 Data Security
-- We implement industry-standard security measures
+- We implement industry-standard security measures including AES-256-CBC encryption
+- Supabase Row-Level Security (RLS) restricts database access
 - However, no system is 100% secure
 - You use the Service at your own risk
 
@@ -131,15 +137,20 @@ THE SERVICE IS PROVIDED "AS IS" AND "AS AVAILABLE" WITHOUT WARRANTIES OF ANY KIN
 - Accuracy, reliability, or completeness of data
 
 ### 9.2 No Official Affiliation
-- HackTrackr is NOT officially affiliated with SRM University
-- HackTrackr is NOT officially affiliated with Haveloc
+- SRM One is NOT officially affiliated with SRM University
+- SRM One is NOT officially affiliated with Haveloc
 - We are an independent third-party service
 - Use of the Service does not imply endorsement by SRM or Haveloc
 
 ### 9.3 Academic Decisions
-- Do not rely solely on HackTrackr for critical academic decisions
+- Do not rely solely on SRM One for critical academic decisions
 - Always verify important information with official SRM sources
 - We are not responsible for academic consequences from data errors
+
+### 9.4 Notifications
+- Notifications (low attendance, new jobs, holidays, notices) are informational only
+- We do not guarantee timely or accurate notification delivery
+- You should always verify critical information with official sources
 
 ## 10. Limitation of Liability
 
@@ -150,6 +161,7 @@ We are not liable for any indirect, incidental, special, consequential, or punit
 - Loss of data or profits
 - Academic consequences (failed courses, attendance issues)
 - Missed job opportunities or placement issues
+- Failure to receive or act upon notifications
 - Unauthorized account access
 - Service interruptions or errors
 
@@ -158,7 +170,7 @@ Our total liability for any claims related to the Service is limited to ₹1,000
 
 ## 11. Indemnification
 
-You agree to indemnify and hold harmless HackTrackr, its developers, and affiliates from any claims, damages, losses, or expenses (including legal fees) arising from:
+You agree to indemnify and hold harmless SRM One, its developers, and affiliates from any claims, damages, losses, or expenses (including legal fees) arising from:
 - Your use of the Service
 - Your violation of these Terms
 - Your violation of any third-party rights
@@ -186,12 +198,12 @@ We may suspend or terminate your access if you:
 ## 13. Open Source
 
 ### 13.1 Source Code
-- HackTrackr is open source (GitHub: Harsx404/hacktrackr)
+- SRM One is open source (GitHub: Harsx404/hacktrackr)
 - You may view, fork, and contribute to the code
 - Contributions are subject to the repository's license
 
 ### 13.2 Self-Hosting
-- You may self-host HackTrackr for personal use
+- You may self-host SRM One for personal use
 - Commercial use requires separate permission
 - Self-hosted instances are your responsibility
 
@@ -209,7 +221,7 @@ Before filing a claim, contact us to attempt informal resolution. We will work i
 ## 15. Miscellaneous
 
 ### 15.1 Entire Agreement
-These Terms, together with our Privacy Policy, constitute the entire agreement between you and HackTrackr.
+These Terms, together with our Privacy Policy, constitute the entire agreement between you and SRM One.
 
 ### 15.2 Severability
 If any provision is found unenforceable, the remaining provisions remain in effect.
@@ -223,35 +235,8 @@ You may not assign these Terms. We may assign our rights and obligations to any 
 ### 15.5 Force Majeure
 We are not liable for delays or failures due to circumstances beyond our control (natural disasters, government actions, internet outages, etc.).
 
-## 16. Updates to Terms
-
-We may update these Terms from time to time. Changes will be effective:
-- Immediately upon posting for minor changes
-- 30 days after notice for material changes
-
-Continued use after changes constitutes acceptance. If you disagree with changes, stop using the Service.
-
-## 17. Contact Information
-
-For questions about these Terms:
-
-- **Email**: [your-email@example.com]
-- **GitHub**: https://github.com/Harsx404/hacktrackr
-- **Response Time**: We aim to respond within 48 hours
-
-## 18. Acknowledgments
-
-By using HackTrackr, you acknowledge that:
-- You have read and understood these Terms
-- You have read and understood our Privacy Policy
-- You agree to be bound by these Terms
-- You are using the Service at your own risk
-- You understand this is an unofficial third-party service
-
 ---
 
-**Effective Date:** February 2, 2026
+**Effective Date:** August 2, 2026
 
-**Version:** 1.0
-
-© 2026 HackTrackr. All rights reserved.
+By using SRM One, you acknowledge that you have read and understood these Terms of Service.
