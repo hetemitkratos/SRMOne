@@ -26,15 +26,15 @@ function resolveScraperCommand() {
   }
 
   // Option 3: Search for pre-built binary
+  // On Windows the binary has .exe extension; on Linux it doesn't
+  const ext = process.platform === "win32" ? ".exe" : "";
+  const binName = `haveloc-scraper${ext}`;
   const candidates = [
-    path.join(__dirname, "..", "..", "..", "..", "academia-backend", "academia-scraper", "haveloc-scraper.exe"),
-    path.join(__dirname, "..", "..", "..", "academia-backend", "academia-scraper", "haveloc-scraper.exe"),
-    path.join(__dirname, "..", "..", "..", "..", "haveloc-scraper", "haveloc-scraper.exe"),
-    path.join(__dirname, "..", "..", "..", "haveloc-scraper", "haveloc-scraper.exe"),
-    path.join(__dirname, "..", "..", "haveloc-scraper", "haveloc-scraper.exe"),
-    path.join(__dirname, "..", "..", "..", "..", "haveloc-scraper", "haveloc-scraper"),
-    path.join(__dirname, "..", "..", "..", "haveloc-scraper", "haveloc-scraper"),
-    path.join(__dirname, "..", "..", "haveloc-scraper", "haveloc-scraper"),
+    path.join(__dirname, "..", "..", "..", "..", "academia-backend", "academia-scraper", binName),
+    path.join(__dirname, "..", "..", "..", "academia-backend", "academia-scraper", binName),
+    path.join(__dirname, "..", "..", "..", "..", "haveloc-scraper", binName),
+    path.join(__dirname, "..", "..", "..", "haveloc-scraper", binName),
+    path.join(__dirname, "..", "..", "haveloc-scraper", binName),
     "haveloc-scraper",
   ];
 

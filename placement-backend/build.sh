@@ -1,5 +1,5 @@
 #!/bin/bash
-# Render build script — installs Go to user dir, builds Go binary, installs Node deps
+# Render build script — installs Go, builds haveloc scraper binary, installs Node deps
 # Render's Node runtime doesn't include Go and doesn't have sudo access
 
 set -e
@@ -23,12 +23,10 @@ echo "=== Installing Node dependencies ==="
 cd placement-backend
 npm install --omit=dev
 
-echo "=== Pre-downloading Go modules ==="
+echo "=== Building haveloc scraper binary ==="
 cd ../academia-backend/academia-scraper
 go mod download
-
-echo "=== Pre-building Go scraper binary ==="
-go build -o loginprobe ./cmd/loginprobe
-echo "Binary built: $(ls -la loginprobe)"
+go build -o haveloc-scraper ./cmd/haveloc
+echo "Haveloc scraper binary built: $(ls -la haveloc-scraper)"
 
 echo "=== Build complete ==="
