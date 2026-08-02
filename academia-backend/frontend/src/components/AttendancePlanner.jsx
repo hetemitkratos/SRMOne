@@ -147,10 +147,10 @@ function MarginCalculator({ records }) {
     <div className="space-y-6">
       {/* Target selector — dark hero card matching app style */}
       <div className="bg-[#1A1A1A] rounded-[32px] p-6 md:p-8 relative overflow-hidden">
-        <div className="absolute inset-y-0 right-0 h-full w-[35%] opacity-80 mix-blend-screen pointer-events-none p-4 flex items-center justify-end">
-          <img src="/assets/target_d6hf.svg" alt="Target" className="h-full w-full object-contain object-right" />
+        <div className="absolute inset-y-0 right-0 h-full w-[40%] opacity-80 mix-blend-screen pointer-events-none p-4 hidden sm:flex items-center justify-end">
+          <img src="/assets/target-achieved_o5y5.svg" alt="Target" className="h-full w-full object-contain object-right" />
         </div>
-        <div className="relative z-10">
+        <div className="relative z-10 w-full md:w-auto">
           <div className="flex items-center gap-2 mb-4">
             <Target size={18} className="text-mint" />
             <span className="font-bold text-sm text-white/80 uppercase tracking-wide">Target Attendance</span>
@@ -219,28 +219,48 @@ function MarginCalculator({ records }) {
       {/* Per-subject breakdown — white card */}
       <div className="bg-white rounded-[32px] p-6 md:p-8 border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.02)]">
         <h3 className="font-display font-bold text-xl text-[#1A1A1A] mb-4">Subject Breakdown</h3>
-        <div className="space-y-2">
+        <div className="space-y-3">
           {results.map((r) => (
             <div
               key={r.courseCode}
-              className="flex items-center gap-3 p-3 rounded-2xl border border-slate-100 hover:bg-slate-50/50 transition-colors"
+              className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 p-4 rounded-2xl border border-slate-100 bg-slate-50/30 hover:bg-slate-50/80 transition-colors"
             >
-              <span className="inline-block px-3 py-1 bg-[#1A1A1A] text-white text-[10px] font-bold rounded-full font-mono uppercase tracking-wider flex-shrink-0">
-                {r.courseCode}
-              </span>
-              <div className="flex-1 min-w-0">
-                <p className="text-xs text-slate-400 truncate">{r.courseTitle}</p>
-                <div className="flex items-center gap-2 mt-0.5">
-                  <span className="text-sm font-bold text-slate-700">{r.pct}%</span>
-                  {r.needed > 0 && (
-                    <>
-                      <span className="text-slate-300 text-xs">→</span>
-                      <span className="text-sm font-bold text-mint">{r.newPct}%</span>
-                    </>
-                  )}
+              <div className="min-w-0 w-full sm:w-auto">
+                <div className="flex justify-between items-start mb-2">
+                   <span className="inline-block px-2.5 py-1 bg-[#1A1A1A] text-white text-[10px] font-bold rounded-full font-mono uppercase tracking-wider flex-shrink-0">
+                     {r.courseCode}
+                   </span>
+                   {/* Pill moved to top right on mobile */}
+                   <div className="sm:hidden flex-shrink-0">
+                     {r.needed > 0 ? (
+                       <span className="text-xs font-bold px-2.5 py-1.5 rounded-md text-red-700 bg-red-100">
+                         Attend {r.needed} {r.needed > 1 ? "classes" : "class"}
+                       </span>
+                     ) : r.bunkable > 0 ? (
+                       <span className="text-xs font-bold px-2.5 py-1.5 rounded-md text-emerald-700 bg-emerald-100">
+                         Can bunk {r.bunkable}
+                       </span>
+                     ) : (
+                       <span className="text-xs font-bold px-2.5 py-1.5 rounded-md text-amber-700 bg-amber-100">
+                         On track
+                       </span>
+                     )}
+                   </div>
+                </div>
+                <p className="text-[14px] font-bold text-slate-800 truncate mb-1">{r.courseTitle}</p>
+                <div className="flex items-center gap-2">
+                   <span className="text-sm font-bold text-slate-600">Current: {r.pct}%</span>
+                   {r.needed > 0 && (
+                     <>
+                       <span className="text-slate-300 text-xs">→</span>
+                       <span className="text-sm font-bold text-mint">Target: {r.newPct}%</span>
+                     </>
+                   )}
                 </div>
               </div>
-              <div className="text-right flex-shrink-0">
+              
+              {/* Desktop pill */}
+              <div className="hidden sm:block flex-shrink-0">
                 {r.needed > 0 ? (
                   <span className="text-xs font-bold px-2.5 py-1.5 rounded-md text-red-700 bg-red-100">
                     Attend {r.needed} {r.needed > 1 ? "classes" : "class"}
@@ -315,21 +335,21 @@ function HolidayPlanner({ records, calendarMap, timetable }) {
     <div className="space-y-6">
       {/* Date range — dark hero card with illustration */}
       <div className="bg-[#1A1A1A] rounded-[32px] p-6 md:p-8 relative overflow-hidden">
-        <div className="absolute inset-y-0 right-0 h-full w-[35%] opacity-80 mix-blend-screen pointer-events-none p-4 flex items-center justify-end">
+        <div className="absolute inset-y-0 right-0 h-full w-[35%] opacity-80 mix-blend-screen pointer-events-none p-4 hidden sm:flex items-center justify-end">
           <img src="/assets/travel-plans_l0fo.svg" alt="Travel plans" className="h-full w-full object-contain object-right" />
         </div>
-        <div className="relative z-10">
+        <div className="relative z-10 w-full">
           <div className="flex items-center gap-2 mb-5">
             <Plane size={18} className="text-mint" />
             <span className="font-bold text-sm text-white/80 uppercase tracking-wide">Plan Your Holiday</span>
           </div>
-          <div className="grid grid-cols-2 gap-4 max-w-md">
+          <div className="grid grid-cols-2 gap-4 w-full md:max-w-md">
             <div>
               <label className="block text-[11px] font-bold text-white/50 uppercase tracking-wide mb-2">From</label>
               <input
                 type="date" value={fromDate} min={today}
                 onChange={(e) => setFromDate(e.target.value)}
-                className="w-full px-4 py-3 rounded-full text-sm font-medium bg-white/10 border border-white/20 text-white date-picker-dark focus:border-mint focus:ring-2 focus:ring-mint/20 outline-none cursor-pointer"
+                className="w-full px-4 py-3 rounded-full text-sm font-medium bg-white/10 border border-white/20 text-white [color-scheme:dark] focus:border-mint focus:ring-2 focus:ring-mint/20 outline-none cursor-pointer min-h-[48px]"
               />
             </div>
             <div>
@@ -337,7 +357,7 @@ function HolidayPlanner({ records, calendarMap, timetable }) {
               <input
                 type="date" value={toDate} min={fromDate || today}
                 onChange={(e) => setToDate(e.target.value)}
-                className="w-full px-4 py-3 rounded-full text-sm font-medium bg-white/10 border border-white/20 text-white date-picker-dark focus:border-mint focus:ring-2 focus:ring-mint/20 outline-none cursor-pointer"
+                className="w-full px-4 py-3 rounded-full text-sm font-medium bg-white/10 border border-white/20 text-white [color-scheme:dark] focus:border-mint focus:ring-2 focus:ring-mint/20 outline-none cursor-pointer min-h-[48px]"
               />
             </div>
           </div>
@@ -487,37 +507,52 @@ function HolidayPlanner({ records, calendarMap, timetable }) {
           {/* Per-subject projection — white card */}
           <div className="bg-white rounded-[32px] p-6 md:p-8 border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.02)]">
             <h3 className="font-display font-bold text-xl text-[#1A1A1A] mb-4">Subject Impact</h3>
-            <div className="space-y-2">
-              <div className="grid grid-cols-12 gap-2 px-3 pb-2 border-b border-slate-100">
-                <span className="col-span-3 text-[10px] font-bold text-slate-400 uppercase">Subject</span>
-                <span className="col-span-1 text-[10px] font-bold text-slate-400 uppercase text-right">Miss</span>
-                <span className="col-span-2 text-[10px] font-bold text-slate-400 uppercase text-right">Now</span>
-                <span className="col-span-2 text-[10px] font-bold text-slate-400 uppercase text-right">After</span>
-                <span className="col-span-2 text-[10px] font-bold text-slate-400 uppercase text-right">Drop</span>
-                <span className="col-span-2 text-[10px] font-bold text-slate-400 uppercase text-right">Recovery</span>
-              </div>
+            <div className="space-y-3 mt-4">
               {projections.map((p) => (
                 <div
                   key={p.courseCode}
-                  className="grid grid-cols-12 gap-2 items-center p-3 rounded-2xl border border-slate-100 hover:bg-slate-50/50 transition-colors"
+                  className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 p-4 rounded-2xl border border-slate-100 bg-slate-50/30 hover:bg-slate-50/80 transition-colors"
                 >
-                  <div className="col-span-3 min-w-0">
-                    <p className="font-mono text-[10px] font-bold text-slate-500 uppercase truncate">{p.courseCode}</p>
-                    <p className="text-xs text-slate-400 truncate">{p.courseTitle}</p>
+                  <div className="min-w-0 w-full sm:w-1/2">
+                    <div className="flex justify-between items-start mb-2">
+                       <span className="inline-block px-2.5 py-1 bg-[#1A1A1A] text-white text-[10px] font-bold rounded-full font-mono uppercase tracking-wider flex-shrink-0">
+                         {p.courseCode}
+                       </span>
+                       <div className="sm:hidden flex-shrink-0">
+                         {p.recoveryNeeded > 0 ? (
+                           <span className="text-xs font-bold px-2.5 py-1.5 rounded-md text-red-700 bg-red-100">
+                             Need {p.recoveryNeeded}
+                           </span>
+                         ) : (
+                           <span className="text-xs font-bold px-2.5 py-1.5 rounded-md text-emerald-700 bg-emerald-100">
+                             Still safe
+                           </span>
+                         )}
+                       </div>
+                    </div>
+                    <p className="text-[14px] font-bold text-slate-800 truncate mb-1">{p.courseTitle}</p>
+                    <p className="text-xs font-medium text-slate-500 mb-2">Missing <span className="font-bold text-violet-600">{p.missedForThis} classes</span></p>
                   </div>
-                  <div className="col-span-1 text-right">
-                    <span className="text-sm font-bold text-violet-600">{p.missedForThis}</span>
+                  
+                  <div className="flex items-center justify-between w-full sm:w-auto gap-4 bg-white p-3 sm:p-0 rounded-xl sm:rounded-none sm:bg-transparent">
+                    <div className="flex items-center gap-2">
+                       <div className="text-center">
+                         <p className="text-[10px] uppercase font-bold text-slate-400 mb-0.5">Now</p>
+                         <span className={`text-sm font-bold ${p.alreadyBelow ? "text-red-600" : "text-slate-700"}`}>{p.pct}%</span>
+                       </div>
+                       <span className="text-slate-300 text-xs mt-3">→</span>
+                       <div className="text-center">
+                         <p className="text-[10px] uppercase font-bold text-slate-400 mb-0.5">After</p>
+                         <span className={`text-sm font-bold ${parseFloat(p.newPct) < 75 ? "text-red-600" : "text-slate-700"}`}>{p.newPct}%</span>
+                       </div>
+                    </div>
+                    <div className="text-center">
+                       <p className="text-[10px] uppercase font-bold text-slate-400 mb-0.5">Drop</p>
+                       <span className="text-sm font-bold text-terracotta">-{p.drop}%</span>
+                    </div>
                   </div>
-                  <div className="col-span-2 text-right">
-                    <span className={`text-sm font-bold ${p.alreadyBelow ? "text-red-600" : "text-slate-700"}`}>{p.pct}%</span>
-                  </div>
-                  <div className="col-span-2 text-right">
-                    <span className={`text-sm font-bold ${parseFloat(p.newPct) < 75 ? "text-red-600" : "text-slate-700"}`}>{p.newPct}%</span>
-                  </div>
-                  <div className="col-span-2 text-right">
-                    <span className="text-sm font-bold text-terracotta">-{p.drop}%</span>
-                  </div>
-                  <div className="col-span-2 text-right">
+
+                  <div className="hidden sm:block flex-shrink-0 text-right">
                     {p.recoveryNeeded > 0 ? (
                       <span className="text-xs font-bold px-2.5 py-1.5 rounded-md text-red-700 bg-red-100">
                         Need {p.recoveryNeeded}

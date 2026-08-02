@@ -657,6 +657,11 @@ const app = express();
 // Security headers
 app.use(helmet());
 
+// Health check endpoint (public, for Render/UptimeRobot)
+app.get("/health", (_req, res) => {
+  res.json({ status: "ok", service: "academia-backend", timestamp: Date.now() });
+});
+
 // CORS — only allow configured origins
 app.use(cors({
   origin: (origin, cb) => {

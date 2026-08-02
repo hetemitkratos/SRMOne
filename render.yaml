@@ -1,0 +1,51 @@
+# Render Blueprint — deploys both backends as Docker web services
+# https://render.com/docs/blueprint-spec
+#
+# After connecting your GitHub repo, Render will read this file and create
+# both services automatically. Set the environment variables in the Render
+# dashboard (or they'll be prompted from the envVarGroups below).
+
+services:
+  # ─── Academia Backend (SRM portal scraper + API) ───────────────────────────
+  - type: web
+    name: academia-backend
+    runtime: docker
+    dockerfilePath: ./academia-backend/Dockerfile
+    dockerContext: .
+    plan: free
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3000
+      - key: ALLOWED_ORIGINS
+        sync: false  # Set in dashboard: https://srmone.in,https://www.srmone.in
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_KEY
+        sync: false
+
+  # ─── Placement Backend (Haveloc placement portal scraper + API) ──────────
+  - type: web
+    name: placement-backend
+    runtime: docker
+    dockerfilePath: ./placement-backend/Dockerfile
+    dockerContext: .
+    plan: free
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3001
+      - key: ALLOWED_ORIGINS
+        sync: false  # Set in dashboard: https://srmone.in,https://www.srmone.in
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_KEY
+        sync: false
+      - key: ENCRYPTION_KEY
+        sync: false  # 32-char hex key for encrypting placement passwords

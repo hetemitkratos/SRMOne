@@ -1,0 +1,60 @@
+# ─── Exclude everything not needed for the build ──────────────────────────────
+# This keeps Docker build context small and prevents secrets from leaking
+
+# Node
+node_modules
+npm-debug.log
+.npm
+
+# Go build artifacts
+academia-backend/academia-scraper/*.exe
+academia-backend/academia-scraper/loginprobe
+academia-backend/academia-scraper/haveloc-scraper
+academia-backend/.gocache
+
+# Environment files (NEVER include in Docker context)
+.env
+.env.local
+.env.*.local
+*.env
+
+# Git
+.git
+.gitignore
+
+# IDE
+.vscode
+.idea
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docs (not needed in runtime)
+*.md
+LICENSE
+
+# Test files
+tests
+**/*.test.js
+**/*.spec.js
+
+# Frontend (not needed in backend containers)
+academia-backend/frontend
+academia-backend/frontend/dist
+
+# Faculty scraper (not used by backend)
+academia-backend/faculty-scraper
+
+# Downloaded assets (not needed in backend)
+assests-downloaded
+
+# Supabase migrations (not needed in runtime)
+supabase
+
+# Devin/agent configs
+.devin
+.agents
+.claude
+.copilot
+.codeium

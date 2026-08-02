@@ -16,8 +16,26 @@ const SESSION_TTL_MS = 30 * 60 * 1000;
 const sessions = {};
 
 app.use(helmet({ contentSecurityPolicy: false }));
-app.use(cors({ origin: true, credentials: true }));
+
+// CORS — restrict to allowed origins in production
+const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || "").split(",").map(s => s.trim()).filter(Boolean);
+app.use(cors({
+  origin: (origin, cb) => {
+    if (!origin || ALLOWED_ORIGINS.length === 0 || ALLOWED_ORIGINS.includes(origin) ||
+        /^https?:\/\/(192\.168\.|10\.|172\.(1[6-9]|2[0-9]|3[01])\.|127\.|localhost)/.test(origin)) {
+      return cb(null, true);
+    }
+    return cb(new Error(`CORS: origin not allowed — ${origin}`));
+  },
+  credentials: true,
+}));
+
 app.use(express.json({ limit: "2mb" }));
+
+// Health check endpoint (public, for Render/UptimeRobot)
+app.get("/health", (_req, res) => {
+  res.json({ status: "ok", service: "placement-backend", timestamp: Date.now() });
+});
 
 app.use((req, res, next) => {
   res.ok = (data) => res.json({ success: true, ...data });
