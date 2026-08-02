@@ -10,6 +10,8 @@ const supabaseKey = process.env.SUPABASE_SERVICE_KEY || "";
 
 if (!supabaseUrl || !supabaseKey || supabaseKey === "your-service-role-key-here") {
   console.warn("[supabase] SUPABASE_URL or SUPABASE_SERVICE_KEY not configured. DB caching disabled.");
+} else {
+  console.log(`[supabase] Initialized with URL: ${supabaseUrl}`);
 }
 
 export const supabase = (supabaseUrl && supabaseKey && supabaseKey !== "your-service-role-key-here")
@@ -78,7 +80,11 @@ export async function saveAttendanceSnapshot(email, subjects, overallPct) {
     }, { onConflict: "academia_email,snapshot_date" })
     .select()
     .single();
-  if (error) console.error("[supabase] saveAttendanceSnapshot:", error.message);
+  if (error) {
+    console.error("[supabase] saveAttendanceSnapshot:", error.message);
+  } else {
+    console.log(`[supabase] ✓ Attendance snapshot saved for ${email} (${today}): ${overallPct?.toFixed(1)}%`);
+  }
   return data;
 }
 

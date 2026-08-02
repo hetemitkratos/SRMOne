@@ -130,40 +130,54 @@ export default function Attendance() {
       </div>
 
       {/* Attendance History Chart */}
-      {history.length > 0 && (
-        <div className="attendance-row bg-white rounded-[32px] p-6 md:p-8 border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.02)]" style={{ opacity: 0 }}>
-          <div className="flex items-center justify-between mb-6">
-            <h3 className="font-display font-bold text-2xl text-[#1A1A1A]">Attendance Trend</h3>
-            <div className="w-10 h-10 rounded-full bg-mint/20 flex items-center justify-center">
-              <LineChartIcon className="w-5 h-5 text-mint" />
-            </div>
+      <div className="attendance-row bg-white rounded-[32px] p-6 md:p-8 border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.02)]" style={{ opacity: 0 }}>
+        <div className="flex items-center justify-between mb-6">
+          <h3 className="font-display font-bold text-2xl text-[#1A1A1A]">Attendance Trend</h3>
+          <div className="w-10 h-10 rounded-full bg-mint/20 flex items-center justify-center">
+            <LineChartIcon className="w-5 h-5 text-mint" />
           </div>
-          <ResponsiveContainer width="100%" height={300}>
-            <LineChart data={history.map(h => ({
-              date: new Date(h.snapshot_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-              percentage: parseFloat(h.overall_percentage || 0)
-            }))}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
-              <XAxis dataKey="date" stroke="#6B7280" style={{ fontSize: '12px' }} />
-              <YAxis domain={[0, 100]} stroke="#6B7280" style={{ fontSize: '12px' }} />
-              <Tooltip 
-                contentStyle={{ 
-                  backgroundColor: '#1A1A1A', 
-                  border: 'none', 
-                  borderRadius: '12px',
-                  color: '#fff',
-                  fontSize: '14px',
-                  padding: '12px'
-                }}
-                formatter={(value) => [`${value.toFixed(1)}%`, 'Attendance']}
-              />
-              <ReferenceLine y={75} stroke="#F97316" strokeDasharray="5 5" label={{ value: '75% Threshold', position: 'insideTopRight', fill: '#F97316', fontSize: 12 }} />
-              <Line type="monotone" dataKey="percentage" stroke="#00D9A3" strokeWidth={3} dot={{ fill: '#00D9A3', r: 4 }} activeDot={{ r: 6 }} />
-            </LineChart>
-          </ResponsiveContainer>
-          <p className="text-sm text-slate-600 mt-4 text-center">Last 30 days attendance trend</p>
         </div>
-      )}
+        {history.length > 0 ? (
+          <>
+            <ResponsiveContainer width="100%" height={300}>
+              <LineChart data={history.map(h => ({
+                date: new Date(h.snapshot_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+                percentage: parseFloat(h.overall_percentage || 0)
+              }))}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
+                <XAxis dataKey="date" stroke="#6B7280" style={{ fontSize: '12px' }} />
+                <YAxis domain={[0, 100]} stroke="#6B7280" style={{ fontSize: '12px' }} />
+                <Tooltip 
+                  contentStyle={{ 
+                    backgroundColor: '#1A1A1A', 
+                    border: 'none', 
+                    borderRadius: '12px',
+                    color: '#fff',
+                    fontSize: '14px',
+                    padding: '12px'
+                  }}
+                  formatter={(value) => [`${value.toFixed(1)}%`, 'Attendance']}
+                />
+                <ReferenceLine y={75} stroke="#F97316" strokeDasharray="5 5" label={{ value: '75% Threshold', position: 'insideTopRight', fill: '#F97316', fontSize: 12 }} />
+                <Line type="monotone" dataKey="percentage" stroke="#00D9A3" strokeWidth={3} dot={{ fill: '#00D9A3', r: 4 }} activeDot={{ r: 6 }} />
+              </LineChart>
+            </ResponsiveContainer>
+            <p className="text-sm text-slate-600 mt-4 text-center">
+              {history.length === 1 
+                ? "First snapshot recorded — visit again to build your trend" 
+                : `Last ${history.length} days attendance trend`}
+            </p>
+          </>
+        ) : (
+          <div className="flex flex-col items-center justify-center py-12 text-center">
+            <div className="w-16 h-16 rounded-full bg-slate-100 flex items-center justify-center mb-4">
+              <LineChartIcon className="w-8 h-8 text-slate-300" />
+            </div>
+            <p className="text-slate-500 font-medium text-sm mb-1">No attendance history yet</p>
+            <p className="text-slate-400 text-xs">Your attendance trend will appear here after future visits. A snapshot is recorded each time you view this page.</p>
+          </div>
+        )}
+      </div>
 
       {/* Attendance list */}
       <div className="bg-white rounded-[32px] p-6 md:p-8 border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.02)]">
