@@ -8,6 +8,7 @@ import Loading from "../components/Loading.jsx";
 import FacultyAvatar from "../components/FacultyAvatar.jsx";
 import { buildCalendarMap, getDayStatus, getCurrentWeekDates, dateKey } from "../utils/calendarTimetableSync.js";
 import HolidayGif from "../components/HolidayGif.jsx";
+import PlacementConnectBanner from "../components/PlacementConnectBanner.jsx";
 
 function cleanName(name = "") {
   return String(name).replace(/\(.*?\)/g, "").trim();
@@ -152,6 +153,9 @@ export default function Overview() {
 
   return (
     <div className="space-y-6 pt-4">
+      {/* Placement Connect Banner (shows if not connected) */}
+      <PlacementConnectBanner />
+
       {/* 1. Top Section Grid */}
       <div className="grid lg:grid-cols-3 gap-6">
         
