@@ -5,7 +5,7 @@ const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
 const { runScraper } = require("../integrations/go/go_scraper_client");
 const { encryptPassword, decryptPassword } = require("../utils/crypto");
-const { storeCredentials, getCredentials, removeCredentials, updateAutoLoginStatus, supabase } = require("../utils/supabaseClient");
+const { storeCredentials, getCredentials, removeCredentials, updateAutoLoginStatus, supabase, createNotification, hasUnreadNotificationOfType } = require("../utils/supabaseClient");
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -301,7 +301,51 @@ function makeSectionEndpoint(sectionName, extraParams = {}) {
         endDate: req.query.endDate || "",
         filters: req.body.filters || [],
       });
-      return res.ok({ data: data[sectionName] });
+      const result = data[sectionName];
+
+      // Send notifications for new jobs and notices
+      const academiaEmail = req.headers["x-academia-email"];
+      if (academiaEmail && supabase) {
+        setImmediate(() => {
+          try {
+            if (sectionName === "jobs") {
+              const jobs = result?._embedded?.entityModels || [];
+              if (jobs.length > 0) {
+                hasUnreadNotificationOfType(academiaEmail, "new_job").then((hasUnread) => {
+                  if (!hasUnread) {
+                    const latestJob = jobs[0];
+                    createNotification(academiaEmail, {
+                      type: "new_job",
+                      title: "💼 New Job Posted",
+                      body: `${latestJob.title || latestJob.companyName || "New placement opportunity"} — check the Jobs page for details.`,
+                      data: { jobId: latestJob.id, jobTitle: latestJob.title },
+                    }).catch(() => {});
+                  }
+                }).catch(() => {});
+              }
+            } else if (sectionName === "notices") {
+              const notices = result?._embedded?.entityModels || [];
+              if (notices.length > 0) {
+                hasUnreadNotificationOfType(academiaEmail, "new_notice").then((hasUnread) => {
+                  if (!hasUnread) {
+                    const latestNotice = notices[0];
+                    createNotification(academiaEmail, {
+                      type: "new_notice",
+                      title: "📬 New Notice",
+                      body: `${latestNotice.title || latestNotice.subject || "New notice from placement cell"} — check the Notices page for details.`,
+                      data: { noticeId: latestNotice.id, noticeTitle: latestNotice.title },
+                    }).catch(() => {});
+                  }
+                }).catch(() => {});
+              }
+            }
+          } catch (err) {
+            console.error("[notifications] Section notif error:", err.message);
+          }
+        });
+      }
+
+      return res.ok({ data: result });
     } catch (err) {
       if (err.expired) return res.fail(401, err.message);
       return res.fail(500, err.message);

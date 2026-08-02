@@ -94,4 +94,32 @@ module.exports = {
   getCredentials,
   removeCredentials,
   updateAutoLoginStatus,
+  // Notification helpers (shared notifications table)
+  createNotification,
+  hasUnreadNotificationOfType,
 };
+
+// ─── Notifications (shared with academia backend) ────────────────────────────
+
+async function createNotification(email, { type, title, body, data = {} }) {
+  if (!supabase) return null;
+  const { data: notif, error } = await supabase
+    .from("notifications")
+    .insert({ academia_email: email, type, title, body, data })
+    .select()
+    .single();
+  if (error) console.error("[supabase] createNotification:", error.message);
+  return notif;
+}
+
+async function hasUnreadNotificationOfType(email, type) {
+  if (!supabase) return false;
+  const { count, error } = await supabase
+    .from("notifications")
+    .select("*", { count: "exact", head: true })
+    .eq("academia_email", email)
+    .eq("type", type)
+    .eq("read", false);
+  if (error) { console.error("[supabase] hasUnreadNotificationOfType:", error.message); return false; }
+  return (count || 0) > 0;
+}

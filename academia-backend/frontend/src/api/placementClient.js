@@ -1,12 +1,19 @@
 const BASE = "/placement-api";
 
+// Cache the academia email so we can send it as a header for notifications
+let _academiaEmail = null;
+export function setAcademiaEmail(email) { _academiaEmail = email; }
+
 async function request(path, options = {}) {
+  const headers = {
+    "Content-Type": "application/json",
+    ...(options.headers || {}),
+  };
+  if (_academiaEmail) headers["x-academia-email"] = _academiaEmail;
+
   const res = await fetch(`${BASE}${path}`, {
     ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...(options.headers || {}),
-    },
+    headers,
   });
 
   const text = await res.text();

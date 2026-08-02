@@ -150,6 +150,29 @@ export async function createNotification(email, { type, title, body, data = {} }
   return notif;
 }
 
+export async function hasNotificationOfType(email, type) {
+  if (!supabase) return false;
+  const { count, error } = await supabase
+    .from("notifications")
+    .select("*", { count: "exact", head: true })
+    .eq("academia_email", email)
+    .eq("type", type);
+  if (error) { console.error("[supabase] hasNotificationOfType:", error.message); return false; }
+  return (count || 0) > 0;
+}
+
+export async function hasUnreadNotificationOfType(email, type) {
+  if (!supabase) return false;
+  const { count, error } = await supabase
+    .from("notifications")
+    .select("*", { count: "exact", head: true })
+    .eq("academia_email", email)
+    .eq("type", type)
+    .eq("read", false);
+  if (error) { console.error("[supabase] hasUnreadNotificationOfType:", error.message); return false; }
+  return (count || 0) > 0;
+}
+
 export async function getNotifications(email, unreadOnly = false) {
   if (!supabase) return [];
   let query = supabase

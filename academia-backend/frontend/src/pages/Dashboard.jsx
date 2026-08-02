@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import anime from "animejs";
 import { useAuth } from "../hooks/useAuth.jsx";
 import { api } from "../api/client.js";
-import { placementApi } from "../api/placementClient.js";
+import { placementApi, setAcademiaEmail } from "../api/placementClient.js";
 import ImagePreview from "../components/ImagePreview.jsx";
 import NotificationBell from "../components/NotificationBell.jsx";
 import PlacementConnectModal from "../components/PlacementConnectModal.jsx";
@@ -29,6 +29,11 @@ export default function Dashboard() {
   const navigate = useNavigate();
   const location = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
+
+  // Set academia email for placement API notifications
+  useEffect(() => {
+    if (user?.email) setAcademiaEmail(user.email);
+  }, [user?.email]);
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const [photoPreviewOpen, setPhotoPreviewOpen] = useState(false);
   const [studentInfo, setStudentInfo] = useState(null);
@@ -208,7 +213,11 @@ export default function Dashboard() {
             {placementUser || placementConnected ? "Placement" : "Connect Placement"}
           </button>
 
-          <button className="w-11 h-11 rounded-full bg-white flex items-center justify-center text-slate-500 hover:text-[#1A1A1A] hover:bg-slate-50 transition-colors shadow-sm hidden sm:flex cursor-pointer border border-slate-100">
+          <button
+            onClick={() => navigate("/placement/notices")}
+            className="relative w-11 h-11 rounded-full bg-white flex items-center justify-center text-slate-500 hover:text-[#1A1A1A] hover:bg-slate-50 transition-colors shadow-sm hidden sm:flex cursor-pointer border border-slate-100"
+            title="Notices"
+          >
             <Mail size={19} strokeWidth={2.5} />
           </button>
           <div className="hidden sm:block">

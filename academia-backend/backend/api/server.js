@@ -804,6 +804,19 @@ app.post("/login", loginLimiter, async (req, res) => {
 
     log("LOGIN", `Login success for ${email}`);
     warmAcademiaSession(email);
+
+    // Send welcome notification on first login (only if no welcome sent before)
+    supabaseClient.hasNotificationOfType(email, "welcome").then((alreadySent) => {
+      if (!alreadySent) {
+        supabaseClient.createNotification(email, {
+          type: "welcome",
+          title: "Welcome to SRM One! 🎉",
+          body: "You're all set. Track attendance, view timetables, check marks, and browse placements — all in one place.",
+          data: { timestamp: new Date().toISOString() },
+        }).catch((err) => log("NOTIFICATIONS", `Welcome notif failed for ${email}: ${err.message}`));
+      }
+    }).catch(() => {});
+
     return res.ok({ message: "Login successful", cookieCount });
   } catch (err) {
     log("LOGIN", `Error for ${email}: ${err.message}`);
@@ -850,6 +863,27 @@ app.get("/attendance", async (req, res) => {
       supabaseClient.saveAttendanceSnapshot(email, attendance, overallPct).catch(err => 
         log("ATTENDANCE", `Snapshot save failed: ${err.message}`)
       );
+
+      // Low attendance alert — notify for subjects below 75% (once per subject)
+      const lowAttendanceSubjects = attendance.filter((subj) => {
+        const pct = parseFloat(subj.attendancePct || 0);
+        return pct < 75;
+      });
+      if (lowAttendanceSubjects.length > 0) {
+        supabaseClient.hasUnreadNotificationOfType(email, "low_attendance").then((hasUnread) => {
+          if (!hasUnread) {
+            const subjectList = lowAttendanceSubjects
+              .map((s) => `${s.courseCode || s.subject || "Subject"}: ${s.attendancePct}%`)
+              .join(", ");
+            supabaseClient.createNotification(email, {
+              type: "low_attendance",
+              title: "⚠️ Low Attendance Alert",
+              body: `${lowAttendanceSubjects.length} subject${lowAttendanceSubjects.length > 1 ? "s" : ""} below 75%: ${subjectList}. Check the attendance page for details.`,
+              data: { subjects: lowAttendanceSubjects.map((s) => ({ courseCode: s.courseCode, pct: s.attendancePct })) },
+            }).catch((err) => log("NOTIFICATIONS", `Low attendance notif failed: ${err.message}`));
+          }
+        }).catch(() => {});
+      }
     }
     
     return res.ok({ attendance, photosReady: areFacultyPhotosReady(s) });
@@ -1010,6 +1044,41 @@ app.get("/calendar", async (req, res) => {
           "Academic calendar page is unavailable right now",
       });
     }
+
+    // Check for upcoming holidays in the next 7 days and notify
+    setImmediate(() => {
+      try {
+        const today = new Date();
+        const nextWeek = new Date(today.getTime() + 7 * 24 * 60 * 60 * 1000);
+        const upcomingHolidays = [];
+        for (const month of calendar.months || []) {
+          for (const day of month.days || []) {
+            if (!day.date) continue;
+            const d = new Date(day.date);
+            if (d >= today && d <= nextWeek && (day.type === "holiday" || day.isHoliday)) {
+              upcomingHolidays.push({ date: day.date, event: day.event || day.title || "Holiday" });
+            }
+          }
+        }
+        if (upcomingHolidays.length > 0) {
+          supabaseClient.hasUnreadNotificationOfType(email, "holiday_alert").then((hasUnread) => {
+            if (!hasUnread) {
+              const holiday = upcomingHolidays[0];
+              const holidayDate = new Date(holiday.date).toLocaleDateString("en-IN", { day: "numeric", month: "short" });
+              supabaseClient.createNotification(email, {
+                type: "holiday_alert",
+                title: "📅 Upcoming Holiday",
+                body: `${holiday.event} on ${holidayDate}. No classes scheduled.${upcomingHolidays.length > 1 ? ` Plus ${upcomingHolidays.length - 1} more holiday(s) this week.` : ""}`,
+                data: { holidays: upcomingHolidays },
+              }).catch((err) => log("NOTIFICATIONS", `Holiday notif failed: ${err.message}`));
+            }
+          }).catch(() => {});
+        }
+      } catch (err) {
+        log("CALENDAR", `Holiday check failed for ${email}: ${err.message}`);
+      }
+    });
+
     return res.ok({ calendar, sem, available: true });
   } catch (err) {
     if (err.expired) return res.fail(401, "Session expired. Please login again.");
