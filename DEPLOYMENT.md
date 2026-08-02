@@ -174,23 +174,64 @@ https://srmone.in,https://www.srmone.in,https://hacktrackr-xxxx.vercel.app
 
 ---
 
-## Free Tier Limitations
+## Free Tier Limitations & 24/7 Keep-Alive
 
-### Render Free Tier
-- Services spin down after 15 min of inactivity
-- First request after spin-down takes ~30-50 seconds (cold start)
-- 750 hours/month of free runtime
-- No custom domains on free tier (use `.onrender.com` URLs)
+### Render Free Tier Math
+- **750 free hours/month** per account (not per service)
+- One service running 24/7 = ~720 hours/month → fits in 750 free hours
+- **Two services running 24/7 = ~1,440 hours/month → exceeds free tier!**
+- Services spin down after 15 min of inactivity (cold start = 30-50s)
+
+### The 24/7 Keep-Alive Trick (cron-job.org)
+
+Use [cron-job.org](https://cron-job.org) (completely free) to ping your Render
+backends every 14 minutes. This prevents them from spinning down, giving you
+a fast 24/7 backend for free.
+
+**IMPORTANT**: With 2 services, keeping both awake 24/7 uses ~1,440 hours/month
+which exceeds the 750 free hour limit. You have two options:
+
+#### Option A: Keep only the academia backend awake (recommended)
+The academia backend handles login + attendance + timetable — the core features.
+Let the placement backend sleep (it only cold-starts when users check placements).
+
+1. Go to https://cron-job.org → Create a free account
+2. Add a job:
+   - **URL**: `https://academia-backend-xxxx.onrender.com/health`
+   - **Schedule**: Every 14 minutes (`*/14 * * * *`)
+   - **Method**: GET
+3. This uses ~720 hours/month → stays within the 750 free hour limit
+
+#### Option B: Merge both backends into one Render service
+Combine both into a single Express app to use only 750 hours/month.
+This requires code changes (mount placement routes under `/placement` prefix).
+
+#### Option C: Let both sleep (no ping)
+- First request after 15 min idle takes 30-50 seconds (cold start)
+- Acceptable if usage is infrequent
+- Stays well within free tier without any ping setup
+
+### Setting up cron-job.org (for Option A)
+
+1. **Sign up** at https://cron-job.org (free, no credit card)
+2. Click **Create Cron Job**
+3. Configure:
+   - **Title**: `HackTrackr Academia Keep-Alive`
+   - **URL**: `https://academia-backend-xxxx.onrender.com/health`
+   - **Execution**: Every 14 minutes
+   - **Request Method**: GET
+   - **Timeout**: 30 seconds
+4. Save and enable the job
+
+The ping keeps the service warm. Each ping is a lightweight `/health` response
+(just `{ status: "ok" }`) so it won't consume meaningful resources.
 
 ### Vercel Free Tier
 - 100GB bandwidth/month
 - Unlimited static deployments
 - Automatic HTTPS
 - Custom domains included
-
-### Mitigation for Render cold starts:
-- Use UptimeRobot to ping `/health` every 10 minutes
-- This keeps services warm (but uses your free hours faster)
+- No cold starts (static files served instantly)
 
 ---
 

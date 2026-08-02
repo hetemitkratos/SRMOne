@@ -1,6 +1,13 @@
 # Render Blueprint — deploys both backends as Docker web services
 # https://render.com/docs/blueprint-spec
 #
+# ⚠️ FREE TIER LIMIT: 750 hours/month total (not per service).
+# Two services running 24/7 = ~1,440 hours → exceeds free tier.
+#
+# Recommended: Set up cron-job.org to ping ONLY the academia-backend
+# every 14 minutes to keep it warm (uses ~720 hours/month).
+# Let the placement-backend sleep (cold-starts when accessed).
+#
 # After connecting your GitHub repo, Render will read this file and create
 # both services automatically. Set the environment variables in the Render
 # dashboard (or they'll be prompted from the envVarGroups below).
