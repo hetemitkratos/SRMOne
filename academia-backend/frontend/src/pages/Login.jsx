@@ -1,15 +1,18 @@
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useNavigate, Link } from "react-router-dom";
-import { Loader2, Eye, EyeOff, Sparkles, GraduationCap, Calendar, BarChart2, Briefcase, ChevronDown, ChevronUp } from "lucide-react";
+import { Loader2, Eye, EyeOff, Sparkles, Briefcase, ChevronDown, ChevronUp } from "lucide-react";
 import { api } from "../api/client.js";
 import { placementApi } from "../api/placementClient.js";
 import { useAuth } from "../hooks/useAuth.jsx";
 
 function LogoMark({ size = 40 }) {
   return (
-    <img src="/assets/logo.png" alt="SRM One logo"
-      style={{ width: size, height: size, objectFit: "contain", flexShrink: 0 }} />
+    <img
+      src="/assets/logo.png"
+      alt="SRM One logo"
+      style={{ width: size, height: size, objectFit: "contain", flexShrink: 0 }}
+    />
   );
 }
 
@@ -22,71 +25,125 @@ export default function Login() {
   }, [user, navigate]);
 
   return (
-    <div className="min-h-screen bg-white font-sans text-slate-900 grid grid-cols-1 lg:grid-cols-2 relative overflow-hidden">
-      
-      {/* LEFT SIDE - BRANDING (App Theme) */}
+    <div className="min-h-screen bg-[#F4F0EB] font-sans text-slate-900 lg:grid lg:grid-cols-2 relative overflow-x-hidden">
+      {/* ─── DESKTOP LEFT: branding ─── */}
       <div className="hidden lg:flex flex-col justify-between bg-[#F8F6F0] text-slate-900 p-12 xl:p-16 relative overflow-hidden">
-        {/* Subtle Decorative Blurs */}
-        <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-orange-200/30 rounded-full blur-[100px] pointer-events-none mix-blend-multiply" />
-        <div className="absolute bottom-[-10%] right-[-5%] w-[30%] h-[40%] bg-blue-200/30 rounded-full blur-[100px] pointer-events-none mix-blend-multiply" />
+        <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-orange-200/20 rounded-full blur-[100px] pointer-events-none" />
+        <div className="absolute bottom-[-10%] right-[-5%] w-[30%] h-[40%] bg-[#BDE3D5]/30 rounded-full blur-[100px] pointer-events-none" />
 
-        {/* Top Header */}
-        <motion.div 
-          initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6 }}
-          className="relative z-10 flex items-center gap-3">
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.6 }}
+          className="relative z-10 flex items-center gap-3"
+        >
           <LogoMark size={36} />
-          <span className="font-bold text-[22px] tracking-tight text-slate-800">SRM One</span>
+          <span className="font-display font-bold text-[22px] tracking-tight text-slate-800">SRM One</span>
         </motion.div>
 
-        {/* Middle Content */}
         <div className="relative z-10 max-w-lg mt-12">
-          <motion.h1 
-            initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6, delay: 0.1 }}
-            className="text-[3.5rem] xl:text-[4.5rem] leading-[1.05] font-serif tracking-tight text-slate-900 mb-6">
-            Your Academic<br />Life, <span className="text-[#f97316]">Simplified.</span>
+          <motion.h1
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.6, delay: 0.1 }}
+            className="text-[3.5rem] xl:text-[4.5rem] leading-[1.05] font-display font-bold tracking-tight text-slate-900 mb-6"
+          >
+            Your Academic
+            <br />
+            Life, <span className="text-[#D97757]">Simplified.</span>
           </motion.h1>
-          
-          <motion.p 
-            initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6, delay: 0.2 }}
-            className="text-[17px] text-slate-600 leading-relaxed font-medium">
-            Personalized dashboards designed to help you succeed with the right attendance, marks, placement, and timetable tracking.
+
+          <motion.p
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.6, delay: 0.2 }}
+            className="text-[17px] text-slate-600 leading-relaxed font-medium"
+          >
+            Personalized dashboards for attendance, marks, placement, and timetable — all in one place.
           </motion.p>
         </div>
 
-        {/* Large Illustration */}
-        <motion.div 
-          initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.8, delay: 0.3 }}
-          className="relative z-10 flex-1 flex items-center justify-center mt-12 w-full max-w-[500px] mx-auto lg:mx-0">
-          <img src="/assets/online-learning.svg" alt="Academic Life Illustration" className="w-full h-auto drop-shadow-xl mix-blend-multiply" />
+        <motion.div
+          initial={{ opacity: 0, scale: 0.95 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ duration: 0.8, delay: 0.3 }}
+          className="relative z-10 flex-1 flex items-center justify-center mt-12 w-full max-w-[500px] mx-auto lg:mx-0"
+        >
+          <img
+            src="/assets/online-learning.svg"
+            alt="Academic life illustration"
+            className="w-full h-auto drop-shadow-xl mix-blend-multiply"
+          />
         </motion.div>
       </div>
 
-      {/* RIGHT SIDE - LOGIN FORM */}
-      <div className="flex flex-col justify-center px-8 sm:px-16 lg:px-24 xl:px-32 bg-white relative z-10 min-h-screen lg:min-h-0 py-12">
-        {/* Mobile Logo */}
-        <div className="lg:hidden flex justify-center mb-10">
-          <LogoMark size={48} />
+      {/* ─── MOBILE HERO + FORM / DESKTOP FORM ─── */}
+      <div className="flex flex-col min-h-screen lg:min-h-0 lg:justify-center relative z-10">
+        {/* Mobile hero — one quiet composition */}
+        <div className="lg:hidden px-8 pt-12 pb-2">
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.55, ease: [0.22, 1, 0.36, 1] }}
+            className="mx-auto w-full max-w-[340px] flex flex-col items-center text-center"
+          >
+            <div className="flex items-center justify-center gap-3">
+              <LogoMark size={40} />
+              <span className="font-display font-black text-[28px] tracking-[-0.03em] uppercase text-[#1A1A1A] leading-none">
+                SRM One
+              </span>
+            </div>
+
+            <p className="mt-6 text-[15px] leading-snug text-slate-600 font-medium tracking-tight">
+              Attendance, marks, placements
+              <br />
+              and timetable — in one place.
+            </p>
+
+            <motion.div
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.65, delay: 0.12, ease: [0.22, 1, 0.36, 1] }}
+              className="mt-8 w-[86%]"
+            >
+              <img
+                src="/assets/studying.svg"
+                alt=""
+                className="w-full h-auto select-none pointer-events-none"
+                draggable={false}
+              />
+            </motion.div>
+          </motion.div>
         </div>
 
-        <motion.div 
-          initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.6, delay: 0.2 }}
-          className="w-full max-w-md mx-auto">
-          
-          <div className="mb-10 text-center lg:text-left">
-            <h2 className="text-[32px] font-bold text-slate-900 tracking-tight leading-tight">Welcome back</h2>
-            <p className="text-slate-500 text-[16px] mt-2 font-medium">Sign in to your SRM student portal.</p>
-          </div>
+        {/* Form panel */}
+        <div className="flex-1 flex flex-col justify-start lg:justify-center px-6 sm:px-10 lg:px-24 xl:px-32 bg-white rounded-t-[32px] lg:rounded-none shadow-[0_-12px_40px_rgba(26,26,26,0.06)] lg:shadow-none pt-8 pb-12 lg:py-12 mt-4 lg:mt-0">
+          <motion.div
+            initial={{ opacity: 0, y: 14 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.5, delay: 0.08 }}
+            className="w-full max-w-md mx-auto"
+          >
+            <div className="mb-7">
+              <div className="hidden lg:flex items-center gap-2.5 mb-8">
+                <LogoMark size={32} />
+                <span className="font-display font-bold text-lg text-slate-800">SRM One</span>
+              </div>
+              <h2 className="text-[24px] sm:text-[30px] font-display font-bold text-[#1A1A1A] tracking-tight leading-none">
+                Welcome back
+              </h2>
+              <p className="text-slate-500 text-[14px] sm:text-[15px] mt-2 font-medium leading-relaxed">
+                Sign in with your SRM student ID.
+              </p>
+            </div>
 
-          <LoginForm />
-          
-        </motion.div>
+            <LoginForm />
+          </motion.div>
+        </div>
       </div>
-
     </div>
   );
 }
-
-
 
 function LoginForm() {
   const navigate = useNavigate();
@@ -98,7 +155,6 @@ function LoginForm() {
   const [error, setError] = useState("");
   const [agreed, setAgreed] = useState(false);
 
-  // Placement connect section
   const [showPlacement, setShowPlacement] = useState(false);
   const [placementUsername, setPlacementUsername] = useState("");
   const [placementPassword, setPlacementPassword] = useState("");
@@ -110,14 +166,14 @@ function LoginForm() {
     "e.g. ready for placements?",
     "e.g. checking those marks...",
     "e.g. what's the next interview?",
-    "e.g. aiming for 100% attendance?"
+    "e.g. aiming for 100% attendance?",
   ];
-  
+
   const passwordPlaceholders = [
     "Enter your super secret password",
     "Password goes here...",
     "Shh... keep it safe",
-    "Unlock your portal"
+    "Unlock your portal",
   ];
 
   const [placeholderIdx, setPlaceholderIdx] = useState(0);
@@ -132,15 +188,20 @@ function LoginForm() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError("");
-    if (!username || !password) { setError("Please fill in all fields."); return; }
-    if (!agreed) { setError("Please accept the Terms of Service and Privacy Policy to continue."); return; }
+    if (!username || !password) {
+      setError("Please fill in all fields.");
+      return;
+    }
+    if (!agreed) {
+      setError("Please accept the Terms of Service and Privacy Policy to continue.");
+      return;
+    }
     const email = `${username.trim().toLowerCase()}@srmist.edu.in`;
     setLoading(true);
     try {
       await api.login(email, password);
       login(email);
 
-      // Attempt silent placement auto-login (non-blocking — don't fail academia login if placement fails)
       try {
         const result = await placementApi.autoLogin(email);
         if (result.connected && result.username) {
@@ -148,7 +209,7 @@ function LoginForm() {
           setPlacementConnected(true);
         }
       } catch {
-        // Placement not connected or auto-login failed — user can connect later
+        // Placement not connected — user can connect later
       }
 
       navigate("/dashboard", { replace: true });
@@ -185,7 +246,12 @@ function LoginForm() {
     <>
       <AnimatePresence>
         {error && (
-          <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden mb-6">
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            className="overflow-hidden mb-5"
+          >
             <div className="px-4 py-3 rounded-2xl text-[14px] font-medium text-red-600 bg-red-50 border border-red-100 flex items-center gap-2">
               <span className="w-1.5 h-1.5 rounded-full bg-red-500 flex-shrink-0" />
               {error}
@@ -194,31 +260,50 @@ function LoginForm() {
         )}
       </AnimatePresence>
 
-      <form onSubmit={handleSubmit} className="flex flex-col gap-6">
+      <form onSubmit={handleSubmit} className="flex flex-col gap-5">
         <div>
-          <label className="block text-[12px] font-bold text-slate-500 uppercase tracking-wider mb-2 ml-1">Student ID</label>
+          <label className="block text-[11px] sm:text-[12px] font-bold text-slate-500 uppercase tracking-wider mb-2 ml-1">
+            Student ID
+          </label>
           <div className="relative group">
-            <input type="text" value={username} onChange={(e) => setUsername(e.target.value)}
-              placeholder={usernamePlaceholders[placeholderIdx]} autoCapitalize="none" autoCorrect="off"
-              className="w-full pl-6 pr-32 py-4 rounded-full text-[15px] font-medium outline-none transition-all border border-slate-200 bg-white shadow-[0_2px_10px_rgba(0,0,0,0.02)] text-slate-900 placeholder:text-slate-400 focus:border-slate-300 focus:ring-4 focus:ring-slate-100/50" />
-            <span className="absolute right-6 top-1/2 -translate-y-1/2 text-slate-400 text-[14px] font-medium pointer-events-none select-none group-focus-within:text-slate-600 transition-colors">@srmist.edu.in</span>
+            <input
+              type="text"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              placeholder={usernamePlaceholders[placeholderIdx]}
+              autoCapitalize="none"
+              autoCorrect="off"
+              className="w-full pl-5 sm:pl-6 pr-[7.5rem] sm:pr-32 py-3.5 sm:py-4 rounded-full text-[15px] font-medium outline-none transition-all border border-slate-200 bg-[#F8F6F0]/60 lg:bg-white shadow-[0_2px_10px_rgba(0,0,0,0.02)] text-slate-900 placeholder:text-slate-400 focus:border-slate-300 focus:ring-4 focus:ring-slate-100/50 focus:bg-white"
+            />
+            <span className="absolute right-4 sm:right-6 top-1/2 -translate-y-1/2 text-slate-400 text-[12px] sm:text-[14px] font-medium pointer-events-none select-none group-focus-within:text-slate-600 transition-colors">
+              @srmist.edu.in
+            </span>
           </div>
         </div>
 
         <div>
-          <label className="block text-[12px] font-bold text-slate-500 uppercase tracking-wider mb-2 ml-1">Password</label>
+          <label className="block text-[11px] sm:text-[12px] font-bold text-slate-500 uppercase tracking-wider mb-2 ml-1">
+            Password
+          </label>
           <div className="relative group">
-            <input type={showPwd ? "text" : "password"} value={password}
-              onChange={(e) => setPassword(e.target.value)} placeholder={passwordPlaceholders[placeholderIdx]}
-              className="w-full pl-6 pr-14 py-4 rounded-full text-[15px] font-medium outline-none transition-all border border-slate-200 bg-white shadow-[0_2px_10px_rgba(0,0,0,0.02)] text-slate-900 placeholder:text-slate-400 focus:border-slate-300 focus:ring-4 focus:ring-slate-100/50" />
-            <button type="button" onClick={() => setShowPwd(!showPwd)}
-              className="absolute right-5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 transition-colors focus:outline-none p-1 rounded-full cursor-pointer">
+            <input
+              type={showPwd ? "text" : "password"}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder={passwordPlaceholders[placeholderIdx]}
+              className="w-full pl-5 sm:pl-6 pr-14 py-3.5 sm:py-4 rounded-full text-[15px] font-medium outline-none transition-all border border-slate-200 bg-[#F8F6F0]/60 lg:bg-white shadow-[0_2px_10px_rgba(0,0,0,0.02)] text-slate-900 placeholder:text-slate-400 focus:border-slate-300 focus:ring-4 focus:ring-slate-100/50 focus:bg-white"
+            />
+            <button
+              type="button"
+              onClick={() => setShowPwd(!showPwd)}
+              className="absolute right-4 sm:right-5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 transition-colors focus:outline-none p-1 rounded-full cursor-pointer"
+            >
               {showPwd ? <EyeOff size={18} /> : <Eye size={18} />}
             </button>
           </div>
         </div>
 
-        <label className="flex items-start gap-3 mt-2 cursor-pointer select-none group">
+        <label className="flex items-start gap-3 mt-1 cursor-pointer select-none group">
           <input
             type="checkbox"
             checked={agreed}
@@ -227,11 +312,17 @@ function LoginForm() {
           />
           <span className="text-[13px] text-slate-500 font-medium leading-relaxed">
             I agree to the{" "}
-            <Link to="/terms" className="text-slate-700 hover:text-slate-900 underline underline-offset-2 font-semibold">
+            <Link
+              to="/terms"
+              className="text-slate-700 hover:text-slate-900 underline underline-offset-2 font-semibold"
+            >
               Terms of Service
             </Link>{" "}
             and{" "}
-            <Link to="/privacy" className="text-slate-700 hover:text-slate-900 underline underline-offset-2 font-semibold">
+            <Link
+              to="/privacy"
+              className="text-slate-700 hover:text-slate-900 underline underline-offset-2 font-semibold"
+            >
               Privacy Policy
             </Link>
             .
@@ -241,33 +332,47 @@ function LoginForm() {
         <motion.button
           whileHover={{ scale: 1.01 }}
           whileTap={{ scale: 0.98 }}
-          type="submit" disabled={loading || !agreed}
-          className="w-full flex items-center justify-center gap-2 py-4 mt-2 rounded-full font-bold text-white text-[15px] bg-[#1A1A1A] hover:bg-black transition-colors disabled:opacity-40 disabled:cursor-not-allowed shadow-[0_8px_20px_rgba(0,0,0,0.12)] cursor-pointer">
-          {loading ? <><Loader2 size={18} className="animate-spin" /> Signing in…</> : "Sign In to Portal"}
+          type="submit"
+          disabled={loading || !agreed}
+          className="w-full flex items-center justify-center gap-2 py-4 mt-1 rounded-full font-bold text-white text-[15px] bg-[#1A1A1A] hover:bg-black transition-colors disabled:opacity-40 disabled:cursor-not-allowed shadow-[0_8px_20px_rgba(0,0,0,0.12)] cursor-pointer"
+        >
+          {loading ? (
+            <>
+              <Loader2 size={18} className="animate-spin" /> Signing in…
+            </>
+          ) : (
+            "Sign In to Portal"
+          )}
         </motion.button>
       </form>
 
-      {/* Optional Placement Connect Section */}
-      <div className="mt-8 pt-6 border-t border-slate-100">
+      {/* Optional Placement Connect */}
+      <div className="mt-7 pt-5 border-t border-slate-100">
         <button
           type="button"
           onClick={() => setShowPlacement(!showPlacement)}
           className="w-full flex items-center justify-between text-left cursor-pointer group"
         >
           <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center">
-              <Briefcase size={15} className="text-slate-500" />
+            <div className="w-9 h-9 rounded-full bg-[#F4F0EB] flex items-center justify-center overflow-hidden p-1.5">
+              <img src="/assets/access-account_aydp.svg" alt="" className="w-full h-full object-contain" />
             </div>
             <div>
               <p className="text-[14px] font-bold text-slate-700">
                 {placementConnected ? "Placement Connected" : "Track Placements?"}
               </p>
               <p className="text-[12px] text-slate-400 font-medium">
-                {placementConnected ? "Auto-login enabled" : "Connect your Haveloc account (optional)"}
+                {placementConnected
+                  ? "Auto-login enabled"
+                  : "Connect your Haveloc account (optional)"}
               </p>
             </div>
           </div>
-          {showPlacement ? <ChevronUp size={18} className="text-slate-400 group-hover:text-slate-600" /> : <ChevronDown size={18} className="text-slate-400 group-hover:text-slate-600" />}
+          {showPlacement ? (
+            <ChevronUp size={18} className="text-slate-400 group-hover:text-slate-600" />
+          ) : (
+            <ChevronDown size={18} className="text-slate-400 group-hover:text-slate-600" />
+          )}
         </button>
 
         <AnimatePresence>
@@ -286,7 +391,9 @@ function LoginForm() {
                   </div>
                 )}
                 <div>
-                  <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1.5 ml-1">Roll Number</label>
+                  <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1.5 ml-1">
+                    Roll Number
+                  </label>
                   <input
                     type="text"
                     value={placementUsername}
@@ -297,7 +404,9 @@ function LoginForm() {
                   />
                 </div>
                 <div>
-                  <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1.5 ml-1">Placement Password</label>
+                  <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1.5 ml-1">
+                    Placement Password
+                  </label>
                   <input
                     type="password"
                     value={placementPassword}
@@ -307,14 +416,22 @@ function LoginForm() {
                   />
                 </div>
                 <p className="text-[11px] text-slate-400 font-medium leading-relaxed px-1">
-                  Your placement credentials are encrypted and stored securely. You'll be auto-logged in on future visits. You can disconnect anytime from the Placement portal.
+                  Credentials are encrypted and stored securely. You can disconnect anytime from Placement.
                 </p>
                 <button
                   type="submit"
                   disabled={placementLoading}
                   className="w-full flex items-center justify-center gap-2 py-3.5 rounded-full font-bold text-white text-[14px] bg-slate-700 hover:bg-slate-800 transition-colors disabled:opacity-40 cursor-pointer"
                 >
-                  {placementLoading ? <><Loader2 size={16} className="animate-spin" /> Connecting…</> : "Connect Placement"}
+                  {placementLoading ? (
+                    <>
+                      <Loader2 size={16} className="animate-spin" /> Connecting…
+                    </>
+                  ) : (
+                    <>
+                      <Briefcase size={15} /> Connect Placement
+                    </>
+                  )}
                 </button>
               </form>
             </motion.div>
@@ -332,7 +449,9 @@ function LoginForm() {
                 </div>
                 <div>
                   <p className="text-[13px] font-bold text-green-700">Placement account connected!</p>
-                  <p className="text-[12px] text-green-600 font-medium">You'll be auto-logged in when you sign in to the portal.</p>
+                  <p className="text-[12px] text-green-600 font-medium">
+                    You&apos;ll be auto-logged in when you sign in.
+                  </p>
                 </div>
               </div>
             </motion.div>
