@@ -9,6 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.111.0",
     "animejs": "^3.2.2",
     "framer-motion": "^11.3.28",
     "html2canvas": "^1.4.1",

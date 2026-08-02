@@ -50,4 +50,71 @@ export const api = {
   schedule: (email) => request(`/schedule?email=${encodeURIComponent(email)}`),
   studentPhoto: (email) => `${BASE}/student-photo?email=${encodeURIComponent(email)}`,
   facultyPhoto: (url) => `${BASE}/faculty-photo?url=${encodeURIComponent(url)}`,
+
+  // Profile caching
+  getCachedProfile: (email) => request(`/profile/cache?email=${encodeURIComponent(email)}`),
+  cacheProfile: (email, studentInfo) =>
+    request("/profile/cache", {
+      method: "POST",
+      body: JSON.stringify({ email, studentInfo }),
+    }),
+
+  // Attendance history
+  getAttendanceHistory: (email, days = 30) =>
+    request(`/attendance/history?email=${encodeURIComponent(email)}&days=${days}`),
+  saveAttendanceSnapshot: (email, subjects, overallPct) =>
+    request("/attendance/snapshot", {
+      method: "POST",
+      body: JSON.stringify({ email, subjects, overallPct }),
+    }),
+
+  // Settings sync
+  getSettings: (email) => request(`/settings?email=${encodeURIComponent(email)}`),
+  saveSettings: (email, settings) =>
+    request("/settings", {
+      method: "POST",
+      body: JSON.stringify({ email, settings }),
+    }),
+
+  // Notifications
+  getNotifications: (email, unreadOnly = false) =>
+    request(`/notifications?email=${encodeURIComponent(email)}&unreadOnly=${unreadOnly}`),
+  createNotification: (email, { type, title, body, data }) =>
+    request("/notifications", {
+      method: "POST",
+      body: JSON.stringify({ email, type, title, body, data }),
+    }),
+  markNotificationRead: (id) =>
+    request(`/notifications/${id}/read`, { method: "PATCH" }),
+  markAllNotificationsRead: (email) =>
+    request("/notifications/read-all", {
+      method: "POST",
+      body: JSON.stringify({ email }),
+    }),
+
+  // Notification settings
+  getNotificationSettings: (email) =>
+    request(`/notification-settings?email=${encodeURIComponent(email)}`),
+  saveNotificationSettings: (email, settings) =>
+    request("/notification-settings", {
+      method: "POST",
+      body: JSON.stringify({ email, settings }),
+    }),
+
+  // Job bookmarks
+  getBookmarks: (email) => request(`/bookmarks?email=${encodeURIComponent(email)}`),
+  addBookmark: (email, { jobUuid, jobTitle, companyName, jobData, notes }) =>
+    request("/bookmarks", {
+      method: "POST",
+      body: JSON.stringify({ email, jobUuid, jobTitle, companyName, jobData, notes }),
+    }),
+  updateBookmark: (email, jobUuid, updates) =>
+    request(`/bookmarks/${jobUuid}`, {
+      method: "PATCH",
+      body: JSON.stringify({ email, updates }),
+    }),
+  removeBookmark: (email, jobUuid) =>
+    request(`/bookmarks/${jobUuid}?email=${encodeURIComponent(email)}`, {
+      method: "DELETE",
+    }),
 };
