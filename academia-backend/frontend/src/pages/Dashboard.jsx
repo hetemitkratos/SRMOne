@@ -8,6 +8,7 @@ import { api } from "../api/client.js";
 import { placementApi } from "../api/placementClient.js";
 import ImagePreview from "../components/ImagePreview.jsx";
 import NotificationBell from "../components/NotificationBell.jsx";
+import PlacementConnectModal from "../components/PlacementConnectModal.jsx";
 
 import Overview from "./Overview.jsx";
 import Attendance from "./Attendance.jsx";
@@ -24,7 +25,7 @@ const NAV_ITEMS = [
 ];
 
 export default function Dashboard() {
-  const { user, logout, placementUser, loginPlacement, setPlacementConnected } = useAuth();
+  const { user, logout, placementUser, loginPlacement, logoutPlacement, setPlacementConnected, placementConnected } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -32,6 +33,7 @@ export default function Dashboard() {
   const [photoPreviewOpen, setPhotoPreviewOpen] = useState(false);
   const [studentInfo, setStudentInfo] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [showPlacementConnect, setShowPlacementConnect] = useState(false);
 
   const navRefs = useRef([]);
   const [indicatorStyle, setIndicatorStyle] = useState({ width: 0, left: 0, opacity: 0 });
@@ -90,10 +92,27 @@ export default function Dashboard() {
 
   // Lock body scroll when mobile menu or photo preview is open
   useEffect(() => {
-    const lock = mobileOpen || photoPreviewOpen;
+    const lock = mobileOpen || photoPreviewOpen || showPlacementConnect;
     document.body.style.overflow = lock ? "hidden" : "";
     return () => { document.body.style.overflow = ""; };
-  }, [mobileOpen, photoPreviewOpen]);
+  }, [mobileOpen, photoPreviewOpen, showPlacementConnect]);
+
+  // Handle placement button click — navigate if connected, open modal if not
+  const handlePlacementClick = () => {
+    setProfileMenuOpen(false);
+    setMobileOpen(false);
+    if (placementUser || placementConnected) {
+      navigate("/placement");
+    } else {
+      setShowPlacementConnect(true);
+    }
+  };
+
+  const handlePlacementConnectSuccess = () => {
+    setShowPlacementConnect(false);
+    // Small delay then navigate to placement
+    setTimeout(() => navigate("/placement"), 300);
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -181,12 +200,12 @@ export default function Dashboard() {
 
         <div className="flex items-center gap-3 flex-shrink-0">
           <button
-            onClick={() => navigate("/placement")}
+            onClick={handlePlacementClick}
             className="hidden md:inline-flex items-center gap-2 rounded-full bg-[#1A1A1A] text-white px-4 py-2.5 text-sm font-bold hover:bg-black transition-colors cursor-pointer shadow-sm"
-            title="Open Placement Portal"
+            title={placementUser || placementConnected ? "Open Placement Portal" : "Connect Placement Account"}
           >
             <Briefcase size={15} strokeWidth={2.5} />
-            Placement
+            {placementUser || placementConnected ? "Placement" : "Connect Placement"}
           </button>
 
           <button className="w-11 h-11 rounded-full bg-white flex items-center justify-center text-slate-500 hover:text-[#1A1A1A] hover:bg-slate-50 transition-colors shadow-sm hidden sm:flex cursor-pointer border border-slate-100">
@@ -292,10 +311,11 @@ export default function Dashboard() {
                   )}
                   <div className="p-2 space-y-1">
                     <button
-                      onClick={() => { setProfileMenuOpen(false); navigate("/placement"); }}
+                      onClick={handlePlacementClick}
                       className="w-full flex items-center gap-3 px-4 py-3 rounded-[16px] text-[#1A1A1A] hover:bg-slate-50 transition-colors cursor-pointer font-bold text-sm"
                     >
-                      <Briefcase size={16} strokeWidth={2.5} /> Placement Portal
+                      <Briefcase size={16} strokeWidth={2.5} />
+                      {placementUser || placementConnected ? "Placement Portal" : "Connect Placement"}
                     </button>
                     <button
                       onClick={() => { setProfileMenuOpen(false); handleLogout(); }}
@@ -364,13 +384,10 @@ export default function Dashboard() {
             transition={{ delay: mobileOpen ? 0.1 + NAV_ITEMS.length * 0.05 : 0, type: "tween", duration: 0.2, ease: "easeOut" }}
           >
             <button
-              onClick={() => {
-                setMobileOpen(false);
-                setTimeout(() => navigate("/placement"), 300);
-              }}
+              onClick={handlePlacementClick}
               className="text-3xl font-display font-bold text-[#1A1A1A] cursor-pointer hover:text-slate-600 transition-colors"
             >
-              Placement
+              {placementUser || placementConnected ? "Placement" : "Connect Placement"}
             </button>
           </motion.div>
         </nav>
@@ -401,6 +418,13 @@ export default function Dashboard() {
         caption={studentInfo?.Name || "Your profile photo"}
         onClose={() => setPhotoPreviewOpen(false)}
       />
+
+      {showPlacementConnect && (
+        <PlacementConnectModal
+          onClose={() => setShowPlacementConnect(false)}
+          onSuccess={handlePlacementConnectSuccess}
+        />
+      )}
     </div>
   );
 }
