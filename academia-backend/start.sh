@@ -6,7 +6,8 @@ export NODE_ENV=production
 cd academia-backend
 
 # Start faculty scraper in background on port 8080
-./faculty-scraper/faculty-scraper &
+# Render sets PORT=10000 for the main service; faculty scraper must use a different port
+PORT=8080 ./faculty-scraper/faculty-scraper &
 FACULTY_PID=$!
 echo "Faculty scraper started (PID: $FACULTY_PID) on port 8080"
 
