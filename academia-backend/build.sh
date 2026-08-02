@@ -1,5 +1,5 @@
 #!/bin/bash
-# Render build script — installs Go to user dir, builds Go binary, installs Node deps
+# Render build script — installs Go, builds Go binaries, installs Node deps
 # Render's Node runtime doesn't include Go and doesn't have sudo access
 
 set -e
@@ -23,12 +23,16 @@ echo "=== Installing Node dependencies ==="
 cd academia-backend
 npm install --omit=dev
 
-echo "=== Pre-downloading Go modules ==="
+echo "=== Building academia scraper binary ==="
 cd academia-scraper
 go mod download
-
-echo "=== Pre-building Go scraper binary ==="
 go build -o loginprobe ./cmd/loginprobe
-echo "Binary built: $(ls -la loginprobe)"
+echo "Acadia scraper binary built"
+
+echo "=== Building faculty scraper binary ==="
+cd ../faculty-scraper
+go mod download
+go build -o faculty-scraper .
+echo "Faculty scraper binary built"
 
 echo "=== Build complete ==="
