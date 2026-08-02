@@ -1,0 +1,6 @@
+User-agent: *
+Allow: /
+Disallow: /api/
+Disallow: /placement-api/
+
+Sitemap: https://srmone.in/sitemap.xml
