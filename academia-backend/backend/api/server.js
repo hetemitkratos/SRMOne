@@ -2046,6 +2046,26 @@ app.delete("/bookmarks/:jobUuid", async (req, res) => {
   }
 });
 
+// ─── Test Endpoints (for development) ────────────────────────────────────────
+
+// POST /test/notification — Create a test notification
+app.post("/test/notification", async (req, res) => {
+  const { email } = req.body;
+  if (!email) return res.status(400).json({ success: false, message: "Missing email" });
+  try {
+    const notification = await supabaseClient.createNotification(email, {
+      type: "test",
+      title: "Test Notification",
+      body: "This is a test notification to verify real-time delivery works!",
+      data: { timestamp: new Date().toISOString() }
+    });
+    return res.json({ success: true, data: notification });
+  } catch (err) {
+    log("TEST", `Test notification error: ${err.message}`);
+    return res.status(500).json({ success: false, message: "Failed to create test notification" });
+  }
+});
+
 // ─── Startup ──────────────────────────────────────────────────────────────────
 
 function start() {
