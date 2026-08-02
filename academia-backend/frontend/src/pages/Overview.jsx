@@ -55,7 +55,14 @@ export default function Overview() {
         });
         // Build calendar map for holiday/day-order detection
         if (init.calendar) {
-          setCalendarMap(buildCalendarMap(init.calendar));
+          const calMap = buildCalendarMap(init.calendar);
+          setCalendarMap(calMap);
+          
+          // Set active tab to today's real day order
+          const todayStatus = getDayStatus(calMap, new Date());
+          if (todayStatus?.dayOrder) {
+            setSelectedDay(`Day ${todayStatus.dayOrder}`);
+          }
         }
         setLoading(false);
 

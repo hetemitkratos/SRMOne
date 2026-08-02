@@ -130,34 +130,34 @@ function TrackerCard({ job, userEmail, logoMap = {} }) {
     <div className="bg-white rounded-[32px] border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.02)] overflow-hidden transition-shadow hover:shadow-md">
       <button
         onClick={() => setExpanded(!expanded)}
-        className="w-full p-6 md:p-8 flex items-center gap-4 md:gap-6 text-left hover:bg-slate-50/50 transition-colors cursor-pointer"
+        className="w-full p-4 sm:p-6 md:p-8 flex items-center gap-3 sm:gap-4 md:gap-6 text-left hover:bg-slate-50/50 transition-colors cursor-pointer"
       >
-        <div className="w-14 h-14 md:w-16 md:h-16 rounded-2xl bg-slate-50 flex items-center justify-center flex-shrink-0 overflow-hidden border border-slate-100">
+        <div className="w-12 h-12 sm:w-14 sm:h-14 md:w-16 md:h-16 rounded-2xl bg-slate-50 flex items-center justify-center flex-shrink-0 overflow-hidden border border-slate-100">
           {companyLogo ? (
             <img src={companyLogo} alt={first.companyName} className="w-full h-full object-cover" />
           ) : (
             <Building2 size={24} className="text-slate-400" />
           )}
         </div>
-        <div className="flex-1 min-w-0 pr-4">
-          <div className="flex items-center gap-2 mb-2">
-            <span className={`text-[11px] font-bold px-3 py-1 rounded-full whitespace-nowrap ${jobStatusColor}`}>{first.jobStatus}</span>
-            <span className="text-[11px] font-bold text-slate-500 bg-slate-100 px-3 py-1 rounded-full whitespace-nowrap">
+        <div className="flex-1 min-w-0 pr-2 sm:pr-4">
+          <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 mb-1.5 sm:mb-2">
+            <span className={`text-[10px] sm:text-[11px] font-bold px-2.5 py-1 rounded-full whitespace-nowrap ${jobStatusColor}`}>{first.jobStatus}</span>
+            <span className="text-[10px] sm:text-[11px] font-bold text-slate-500 bg-slate-100 px-2.5 py-1 rounded-full whitespace-nowrap">
               {rounds.length}/{totalRounds} rounds
             </span>
           </div>
-          <h3 className="font-display font-bold text-xl md:text-2xl text-[#1A1A1A] truncate leading-tight">{first.companyName || "Unknown"}</h3>
-          <p className="text-[14px] text-slate-500 font-medium truncate mt-1">
-            {first.jobTitle || "—"} <span className="mx-2 text-slate-300">•</span> Applied {formatDate(first.appliedOn)}
+          <h3 className="font-display font-bold text-lg sm:text-xl md:text-2xl text-[#1A1A1A] truncate leading-tight">{first.companyName || "Unknown"}</h3>
+          <p className="text-[12px] sm:text-[14px] text-slate-500 font-medium truncate mt-0.5 sm:mt-1">
+            {first.jobTitle || "—"} <span className="mx-1 sm:mx-2 text-slate-300">•</span> Applied {formatDate(first.appliedOn)}
           </p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 sm:gap-3">
             <div className={`hidden md:flex items-center gap-2 px-4 py-2 rounded-full border ${statusStyle.bg} ${statusStyle.border}`}>
               <StatusIcon size={16} className={statusStyle.color} />
               <span className={`text-sm font-bold ${statusStyle.color}`}>{statusStyle.label}</span>
             </div>
-            <div className={`w-10 h-10 rounded-full bg-slate-50 flex items-center justify-center transition-transform ${expanded ? "rotate-180" : ""}`}>
-              <ChevronDown size={20} className="text-slate-400" />
+            <div className={`w-8 h-8 sm:w-10 sm:h-10 rounded-full bg-slate-50 flex items-center justify-center flex-shrink-0 transition-transform ${expanded ? "rotate-180" : ""}`}>
+              <ChevronDown size={18} className="text-slate-400" />
             </div>
         </div>
       </button>
@@ -386,7 +386,7 @@ export default function Tracker() {
       </div>
 
       {/* Search & Filter */}
-      <div className="flex items-center gap-4">
+      <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 sm:gap-4">
         <div className="flex-1 relative group">
           <Search size={18} className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-[#1A1A1A] transition-colors" />
           <input
@@ -396,7 +396,7 @@ export default function Tracker() {
             className="w-full pl-12 pr-6 py-3.5 rounded-full bg-white border border-slate-100 shadow-[0_2px_10px_rgba(0,0,0,0.02)] text-sm font-medium text-slate-700 placeholder:text-slate-400 focus:outline-none focus:border-slate-300 focus:ring-4 focus:ring-slate-100/50 transition-all"
           />
         </div>
-        <div className="relative min-w-[180px]" ref={filterRef}>
+        <div className="relative sm:min-w-[180px]" ref={filterRef}>
           <button
             onClick={() => setIsFilterOpen(!isFilterOpen)}
             className="w-full flex items-center justify-between pl-6 pr-5 py-3.5 rounded-full bg-white border border-slate-100 shadow-[0_2px_10px_rgba(0,0,0,0.02)] text-sm font-bold text-slate-600 focus:outline-none focus:border-slate-300 focus:ring-4 focus:ring-slate-100/50 transition-all cursor-pointer"

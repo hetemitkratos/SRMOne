@@ -108,13 +108,13 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ email, jobUuid, jobTitle, companyName, jobData, notes }),
     }),
+  removeBookmark: (email, jobUuid) =>
+    request(`/bookmarks/${encodeURIComponent(jobUuid)}?email=${encodeURIComponent(email)}`, {
+      method: "DELETE",
+    }),
   updateBookmark: (email, jobUuid, updates) =>
-    request(`/bookmarks/${jobUuid}`, {
+    request(`/bookmarks/${encodeURIComponent(jobUuid)}`, {
       method: "PATCH",
       body: JSON.stringify({ email, updates }),
-    }),
-  removeBookmark: (email, jobUuid) =>
-    request(`/bookmarks/${jobUuid}?email=${encodeURIComponent(email)}`, {
-      method: "DELETE",
     }),
 };

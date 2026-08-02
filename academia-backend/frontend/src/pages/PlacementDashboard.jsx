@@ -10,6 +10,7 @@ import Companies from "./Companies.jsx";
 import Jobs from "./Jobs.jsx";
 import Tracker from "./Tracker.jsx";
 import Notices from "./Notices.jsx";
+import NoticeDetail from "./NoticeDetail.jsx";
 import Policies from "./Policies.jsx";
 import PlacementLoginModal from "../components/PlacementLoginModal.jsx";
 
@@ -384,6 +385,7 @@ export default function PlacementDashboard() {
             <Route path="jobs" element={<Jobs />} />
             <Route path="tracker" element={<Tracker />} />
             <Route path="notices" element={<Notices />} />
+            <Route path="notices/:id" element={<NoticeDetail />} />
             <Route path="policies" element={<Policies />} />
             <Route path="*" element={<Navigate to="/placement" replace />} />
           </Routes>

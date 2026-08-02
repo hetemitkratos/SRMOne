@@ -3,7 +3,7 @@ import {
   CheckCircle2, XCircle, AlertTriangle, Calendar, Users, FileText,
   ArrowLeft, GraduationCap, Layers, Globe, Sparkles, TrendingUp,
   Paperclip, Download, ExternalLink, HelpCircle, Milestone,
-  Briefcase as BriefcaseIcon, Code2, Bookmark, BookmarkCheck,
+  Briefcase as BriefcaseIcon, Code2, Bookmark, BookmarkCheck, StickyNote,
 } from "lucide-react";
 import { useState, useMemo, useEffect } from "react";
 import { usePlacementData } from "../hooks/usePlacementData.js";
@@ -21,7 +21,37 @@ export default function Jobs() {
   const [selectedJob, setSelectedJob] = useState(null);
   const [logoMap, setLogoMap] = useState({});
   const [bookmarks, setBookmarks] = useState([]);
-  const [bookmarkedIds, setBookmarkedIds] = useState(new Set());
+
+  /** Normalize job identifiers so uuid/id and string/number always compare equal. */
+  const jobIds = (job) => {
+    if (!job) return [];
+    const ids = [];
+    if (job.uuid != null && String(job.uuid).trim() !== "") ids.push(String(job.uuid));
+    if (job.id != null && String(job.id).trim() !== "") ids.push(String(job.id));
+    return [...new Set(ids)];
+  };
+
+  const primaryJobId = (job) => jobIds(job)[0] || "";
+
+  const isJobBookmarked = (job) => {
+    const ids = jobIds(job);
+    if (!ids.length) return false;
+    return bookmarks.some((b) => ids.includes(String(b.job_uuid)));
+  };
+
+  const bookmarksForJob = (job) => {
+    const ids = new Set(jobIds(job));
+    return bookmarks.filter((b) => {
+      if (ids.has(String(b.job_uuid))) return true;
+      // Fallback: match against snapshot stored at bookmark time
+      const snapIds = jobIds(b.job_data);
+      return snapIds.some((id) => ids.has(id));
+    });
+  };
+
+  const syncBookmarksFromApi = (list) => {
+    setBookmarks(Array.isArray(list) ? list : []);
+  };
 
   useEffect(() => {
     if (!placementUser) return;
@@ -40,40 +70,58 @@ export default function Jobs() {
   useEffect(() => {
     if (!user?.email) return;
     api.getBookmarks(user.email)
-      .then((res) => {
-        setBookmarks(res.data || []);
-        setBookmarkedIds(new Set((res.data || []).map(b => b.job_uuid)));
-      })
+      .then((res) => syncBookmarksFromApi(res.data))
       .catch(() => {});
   }, [user?.email]);
 
   const toggleBookmark = async (job) => {
     if (!user?.email) return;
-    const jobUuid = job.uuid || job.id;
-    const isBookmarked = bookmarkedIds.has(jobUuid);
-    
+    const jobUuid = primaryJobId(job);
+    if (!jobUuid) {
+      console.error("Job has no UUID:", job);
+      return;
+    }
+
+    const existing = bookmarksForJob(job);
+    const currentlyBookmarked = existing.length > 0;
+
     try {
-      if (isBookmarked) {
-        await api.removeBookmark(user.email, jobUuid);
-        setBookmarkedIds(prev => {
-          const next = new Set(prev);
-          next.delete(jobUuid);
-          return next;
-        });
-        setBookmarks(prev => prev.filter(b => b.job_uuid !== jobUuid));
+      if (currentlyBookmarked) {
+        for (const row of existing) {
+          await api.removeBookmark(user.email, String(row.job_uuid));
+        }
+        const removeKeys = new Set(existing.map((b) => String(b.job_uuid)));
+        setBookmarks((prev) => prev.filter((b) => !removeKeys.has(String(b.job_uuid))));
       } else {
         await api.addBookmark(user.email, {
           jobUuid,
           jobTitle: job.jobTitle,
           companyName: job.companyName,
           jobData: job,
-          notes: ""
+          notes: "",
         });
-        setBookmarkedIds(prev => new Set([...prev, jobUuid]));
-        setBookmarks(prev => [...prev, { job_uuid: jobUuid, job_data: job }]);
+        setBookmarks((prev) => [...prev, { job_uuid: jobUuid, job_data: job, notes: "" }]);
       }
     } catch (err) {
       console.error("Bookmark toggle failed:", err);
+      api.getBookmarks(user.email)
+        .then((res) => syncBookmarksFromApi(res.data))
+        .catch(() => {});
+    }
+  };
+
+  const saveBookmarkNotes = async (job, notes) => {
+    if (!user?.email) return;
+    const rows = bookmarksForJob(job);
+    const key = rows[0] ? String(rows[0].job_uuid) : primaryJobId(job);
+    try {
+      await api.updateBookmark(user.email, key, { notes });
+      setBookmarks((prev) =>
+        prev.map((b) => (String(b.job_uuid) === key ? { ...b, notes } : b))
+      );
+    } catch (err) {
+      console.error("Save notes failed:", err);
+      throw err;
     }
   };
 
@@ -85,21 +133,60 @@ export default function Jobs() {
     else if (filter === "offered") filtered = list.filter((j) => j.isOffered);
     else if (filter === "notEligible") filtered = list.filter((j) => j.isNotEligible);
     else if (filter === "bookmarked") {
-      filtered = bookmarks.map(b => b.job_data).filter(Boolean);
+      // Only jobs that actually have a bookmark row (by uuid/id or snapshot)
+      filtered = list.filter((j) => {
+        const ids = jobIds(j);
+        return bookmarks.some((b) => {
+          if (ids.includes(String(b.job_uuid))) return true;
+          return jobIds(b.job_data).some((id) => ids.includes(id));
+        });
+      });
     }
-    if (!search) return filtered;
-    return filtered.filter((j) =>
-      j.jobTitle?.toLowerCase().includes(search.toLowerCase()) ||
-      j.companyName?.toLowerCase().includes(search.toLowerCase()) ||
-      j.jobTag?.toLowerCase().includes(search.toLowerCase())
-    );
+
+    if (search) {
+      filtered = filtered.filter((j) =>
+        j.jobTitle?.toLowerCase().includes(search.toLowerCase()) ||
+        j.companyName?.toLowerCase().includes(search.toLowerCase()) ||
+        j.jobTag?.toLowerCase().includes(search.toLowerCase())
+      );
+    }
+
+    return filtered.sort((a, b) => {
+      const getDate = (job) => {
+        const candidates = [
+          job.jobPostedDate,
+          job.createdDate,
+          job.lastModifiedDate,
+          job.jobApplyBy,
+        ];
+        for (const d of candidates) {
+          if (d) {
+            const parsed = new Date(d);
+            if (!isNaN(parsed.getTime())) return parsed;
+          }
+        }
+        return new Date(0);
+      };
+
+      return getDate(b) - getDate(a);
+    });
   }, [data, search, filter, bookmarks]);
 
   if (loading) return <Loading label="Fetching jobs…" />;
   if (error) return <ErrorBox message={error} onRetry={refetch} />;
 
   if (selectedJob) {
-    return <JobDetailPage job={selectedJob} onBack={() => setSelectedJob(null)} logoMap={logoMap} />;
+    return (
+      <JobDetailPage
+        job={selectedJob}
+        onBack={() => setSelectedJob(null)}
+        logoMap={logoMap}
+        isBookmarked={isJobBookmarked(selectedJob)}
+        bookmarkNotes={bookmarksForJob(selectedJob)[0]?.notes || ""}
+        onSaveNotes={(notes) => saveBookmarkNotes(selectedJob, notes)}
+        onToggleBookmark={() => toggleBookmark(selectedJob)}
+      />
+    );
   }
 
   const allJobs = data?._embedded?.entityModels || [];
@@ -157,7 +244,7 @@ export default function Jobs() {
             index={i} 
             logoUrl={logoMap[job.companyId]} 
             onClick={() => setSelectedJob(job)}
-            isBookmarked={bookmarkedIds.has(job.uuid || job.id)}
+            isBookmarked={filter === "bookmarked" || isJobBookmarked(job)}
             onToggleBookmark={(e) => {
               e.stopPropagation();
               toggleBookmark(job);
@@ -395,9 +482,16 @@ function JobCard({ job, index = 0, logoUrl, onClick, isBookmarked, onToggleBookm
       : (job.jobType || "Opportunity").replace(/_/g, " ");
 
   return (
-    <button
-      type="button"
+    <div
+      role="button"
+      tabIndex={0}
       onClick={onClick}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onClick?.(e);
+        }
+      }}
       className="group relative text-left w-full min-h-[230px] rounded-[28px] bg-[#1A1A1A] text-white p-6 overflow-hidden cursor-pointer transition-transform duration-200 hover:scale-[1.015] active:scale-[0.99] shadow-[0_10px_30px_rgba(26,26,26,0.18)]"
     >
       <CardMotif motif={motif} color={theme.accent} />
@@ -415,9 +509,15 @@ function JobCard({ job, index = 0, logoUrl, onClick, isBookmarked, onToggleBookm
         </div>
         <div className="flex items-center gap-2">
           <button
-            onClick={onToggleBookmark}
+            type="button"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              onToggleBookmark?.(e);
+            }}
             className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center transition-colors"
             title={isBookmarked ? "Remove bookmark" : "Bookmark job"}
+            aria-label={isBookmarked ? "Remove bookmark" : "Bookmark job"}
           >
             {isBookmarked ? (
               <BookmarkCheck size={16} className="text-mint" />
@@ -457,7 +557,7 @@ function JobCard({ job, index = 0, logoUrl, onClick, isBookmarked, onToggleBookm
           {job.jobType ? job.jobType.replace(/_/g, " ") : "Job"}
         </span>
       </div>
-    </button>
+    </div>
   );
 }
 
@@ -471,7 +571,7 @@ function Pill({ text, icon }) {
 
 /* ─── Job Detail Page (full page) ─── */
 
-function JobDetailPage({ job, onBack, logoMap = {} }) {
+function JobDetailPage({ job, onBack, logoMap = {}, isBookmarked = false, bookmarkNotes = "", onSaveNotes, onToggleBookmark }) {
   const status = getStatusInfo(job);
   const ctc = formatCTC(job.minCtc, job.maxCtc);
   const internCtc = job.internshipMaxCtc ? formatCTC(job.internshipMinCtc, job.internshipMaxCtc) : null;
@@ -639,26 +739,49 @@ function JobDetailPage({ job, onBack, logoMap = {} }) {
           <Building2 size={400} className="object-contain" />
         </div>
         <div className="relative z-10">
-          <div className="flex items-start gap-4 mb-4 flex-wrap">
-            <div className="w-16 h-16 rounded-2xl bg-white/10 flex items-center justify-center flex-shrink-0 backdrop-blur-sm overflow-hidden">
-              {logoMap[job.companyId] ? (
-                <img src={logoMap[job.companyId]} alt={job.companyName || ""} className="w-full h-full object-cover" />
-              ) : (
-                <Building2 size={32} className="text-white/80" />
-              )}
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2 mb-1">
-                <h1 className="text-2xl md:text-3xl font-display font-bold leading-tight">{job.jobTitle || "Untitled"}</h1>
+          <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4 mb-4">
+            <div className="flex items-start gap-3 sm:gap-4">
+              <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-white/10 flex items-center justify-center flex-shrink-0 backdrop-blur-sm overflow-hidden">
+                {logoMap[job.companyId] ? (
+                  <img src={logoMap[job.companyId]} alt={job.companyName || ""} className="w-full h-full object-cover" />
+                ) : (
+                  <Building2 size={32} className="text-white/80" />
+                )}
               </div>
-              <button className="text-white/60 text-base hover:text-white transition-colors inline-flex items-center gap-1 cursor-pointer">
-                {job.companyName || "—"}
-                <ExternalLink size={14} className="opacity-60" />
-              </button>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 mb-1">
+                  <h1 className="text-xl sm:text-2xl md:text-3xl font-display font-bold leading-tight break-words">{job.jobTitle || "Untitled"}</h1>
+                </div>
+                <button className="text-white/60 text-sm sm:text-base hover:text-white transition-colors flex items-center gap-1 cursor-pointer text-left break-words">
+                  {job.companyName || "—"}
+                  <ExternalLink size={14} className="opacity-60 flex-shrink-0" />
+                </button>
+              </div>
             </div>
-            <span className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-full text-[13px] font-bold whitespace-nowrap ${status.cls}`}>
+            <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 sm:px-4 sm:py-2 rounded-full text-[12px] sm:text-[13px] font-bold whitespace-nowrap w-fit ${status.cls}`}>
               {status.icon}{job.jobStatus || status.text}
             </span>
+          </div>
+          <div className="flex flex-wrap items-center gap-2 mb-2">
+            {onToggleBookmark && (
+              <button
+                type="button"
+                onClick={onToggleBookmark}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[12px] font-bold bg-white/10 hover:bg-white/20 border border-white/10 transition-colors cursor-pointer"
+              >
+                {isBookmarked ? (
+                  <>
+                    <BookmarkCheck size={14} className="text-mint" />
+                    Bookmarked — tap to remove
+                  </>
+                ) : (
+                  <>
+                    <Bookmark size={14} className="text-white/70" />
+                    Bookmark
+                  </>
+                )}
+              </button>
+            )}
           </div>
 
           {/* Job type tags */}
@@ -759,7 +882,28 @@ function JobDetailPage({ job, onBack, logoMap = {} }) {
             </div>
             <h3 className="font-display font-bold text-lg text-[#1A1A1A]">About the Job</h3>
           </div>
-          <div className="prose prose-sm max-w-none text-[14px] text-slate-600 leading-relaxed [&_strong]:text-slate-800 [&_p]:mb-2" dangerouslySetInnerHTML={{ __html: jobDesc }} />
+          <div className="w-full overflow-x-auto">
+            <div
+              className="prose prose-sm md:prose-base max-w-none break-words text-[14px] md:text-[15px] text-slate-700 leading-relaxed
+                [&_a]:text-blue-600 [&_a]:underline [&_a]:decoration-blue-300 [&_a]:underline-offset-2 [&_a]:font-medium [&_a]:break-all hover:[&_a]:text-blue-800 hover:[&_a]:decoration-blue-600 transition-colors
+                [&_p]:mb-5 [&_p]:leading-[1.7]
+                [&_h1]:text-2xl [&_h1]:font-display [&_h1]:font-bold [&_h1]:text-slate-900 [&_h1]:mt-8 [&_h1]:mb-4 [&_h1]:tracking-tight
+                [&_h2]:text-xl [&_h2]:font-display [&_h2]:font-bold [&_h2]:text-slate-900 [&_h2]:mt-8 [&_h2]:mb-4 [&_h2]:tracking-tight
+                [&_h3]:text-lg [&_h3]:font-display [&_h3]:font-bold [&_h3]:text-slate-800 [&_h3]:mt-6 [&_h3]:mb-3
+                [&_h4]:text-base [&_h4]:font-bold [&_h4]:text-slate-800 [&_h4]:mt-5 [&_h4]:mb-2
+                [&_ul]:list-disc [&_ul]:pl-5 [&_ul]:mb-5 [&_ul]:space-y-2
+                [&_ol]:list-decimal [&_ol]:pl-5 [&_ol]:mb-5 [&_ol]:space-y-2
+                [&_li]:text-slate-700 [&_li]:leading-[1.7] [&_li]:pl-1
+                [&_strong]:text-slate-900 [&_strong]:font-semibold
+                [&_em]:italic [&_em]:text-slate-600
+                [&_blockquote]:border-l-[3px] [&_blockquote]:border-slate-300 [&_blockquote]:bg-slate-50 [&_blockquote]:px-5 [&_blockquote]:py-3 [&_blockquote]:rounded-r-xl [&_blockquote]:italic [&_blockquote]:text-slate-600 [&_blockquote]:my-6
+                [&_code]:bg-slate-100 [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded-md [&_code]:text-[13px] [&_code]:font-mono [&_code]:text-pink-600 [&_code]:border [&_code]:border-slate-200
+                [&_pre]:bg-[#1A1A1A] [&_pre]:text-slate-100 [&_pre]:p-5 [&_pre]:rounded-2xl [&_pre]:overflow-x-auto [&_pre]:my-6 [&_pre]:shadow-lg
+                [&_img]:rounded-2xl [&_img]:shadow-md [&_img]:max-w-full [&_img]:h-auto [&_img]:my-6 [&_img]:border [&_img]:border-slate-200/60
+                [&_hr]:border-slate-100 [&_hr]:my-8"
+              dangerouslySetInnerHTML={{ __html: jobDesc }}
+            />
+          </div>
         </div>
       )}
 
@@ -956,6 +1100,14 @@ function JobDetailPage({ job, onBack, logoMap = {} }) {
             </div>
           </Card>
 
+          {/* My Notes (only for bookmarked jobs) */}
+          {isBookmarked && (
+            <NotesCard
+              initialNotes={bookmarkNotes}
+              onSave={onSaveNotes}
+            />
+          )}
+
           {/* Eligibility Criteria */}
           <Card title="Eligibility Criteria" icon={<GraduationCap size={18} />}>
             <div className="space-y-3">
@@ -1006,14 +1158,123 @@ function JobDetailPage({ job, onBack, logoMap = {} }) {
 
 /* ─── UI Primitives ─── */
 
+function NotesCard({ initialNotes = "", onSave }) {
+  const [notes, setNotes] = useState(initialNotes);
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(false);
+  const [savedFlash, setSavedFlash] = useState(false);
+
+  // Sync if the prop changes externally (e.g. after refetch)
+  useEffect(() => {
+    if (!editing) setNotes(initialNotes);
+  }, [initialNotes, editing]);
+
+  const dirty = notes !== initialNotes;
+
+  const handleSave = async () => {
+    setSaving(true);
+    setError(false);
+    try {
+      await onSave(notes);
+      setEditing(false);
+      setSavedFlash(true);
+      setTimeout(() => setSavedFlash(false), 2000);
+    } catch {
+      setError(true);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleCancel = () => {
+    setNotes(initialNotes);
+    setEditing(false);
+    setError(false);
+  };
+
+  return (
+    <div className="bg-white rounded-[24px] p-5 border border-slate-200/60 shadow-sm">
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-2">
+          <div className="w-8 h-8 rounded-lg bg-amber-50 flex items-center justify-center text-amber-500">
+            <StickyNote size={18} />
+          </div>
+          <h3 className="font-display font-bold text-lg text-[#1A1A1A]">My Notes</h3>
+        </div>
+        {savedFlash && (
+          <span className="inline-flex items-center gap-1 text-[11px] font-bold text-green-600 animate-pulse">
+            <CheckCircle2 size={13} /> Saved
+          </span>
+        )}
+      </div>
+
+      {!editing ? (
+        <div>
+          {notes ? (
+            <p className="text-[14px] text-slate-600 leading-relaxed whitespace-pre-wrap min-h-[60px]">
+              {notes}
+            </p>
+          ) : (
+            <p className="text-[13px] text-slate-400 italic min-h-[60px] flex items-center">
+              No notes yet. Click "Add notes" to jot down reminders about this job.
+            </p>
+          )}
+          <button
+            onClick={() => setEditing(true)}
+            className="mt-3 inline-flex items-center gap-1.5 text-[12px] font-bold text-slate-600 hover:text-[#1A1A1A] cursor-pointer transition-colors"
+          >
+            {notes ? "Edit notes" : "Add notes"}
+          </button>
+        </div>
+      ) : (
+        <div>
+          <textarea
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            autoFocus
+            rows={5}
+            placeholder="e.g. Strong in DSA, prepare system design. Referral from senior. Apply before deadline…"
+            className="w-full px-4 py-3 rounded-xl text-[14px] text-slate-700 bg-slate-50 border border-slate-200 outline-none focus:border-[#1A1A1A] focus:ring-1 focus:ring-[#1A1A1A] transition-all resize-y min-h-[100px] placeholder:text-slate-400"
+          />
+          {error && (
+            <p className="text-[12px] text-red-500 font-semibold mt-2">
+              Failed to save. Please try again.
+            </p>
+          )}
+          <div className="flex items-center gap-2 mt-3">
+            <button
+              onClick={handleSave}
+              disabled={saving || !dirty}
+              className="px-4 py-2 rounded-full text-[12px] font-bold text-white bg-[#1A1A1A] hover:bg-black cursor-pointer transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              {saving ? "Saving…" : "Save"}
+            </button>
+            <button
+              onClick={handleCancel}
+              disabled={saving}
+              className="px-4 py-2 rounded-full text-[12px] font-bold text-slate-600 hover:text-[#1A1A1A] cursor-pointer transition-colors disabled:opacity-40"
+            >
+              Cancel
+            </button>
+            {dirty && !saving && (
+              <span className="text-[11px] text-slate-400 font-medium ml-1">Unsaved changes</span>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function HeroStat({ icon, label, value, sub, urgent }) {
   return (
     <div className="flex flex-col gap-1">
       <div className="flex items-center gap-1.5 text-white/50">
         {icon}
-        <span className="text-[11px] font-bold uppercase tracking-wide">{label}</span>
+        <span className="text-[10px] sm:text-[11px] font-bold uppercase tracking-wide">{label}</span>
       </div>
-      <span className={`text-[15px] font-bold ${urgent ? "text-red-400" : "text-white"}`}>{value}</span>
+      <span className={`text-[13px] sm:text-[15px] font-bold ${urgent ? "text-red-400" : "text-white"} break-words`}>{value}</span>
       {sub && <span className="text-[10px] text-white/40 font-medium capitalize">{sub}</span>}
     </div>
   );
