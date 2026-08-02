@@ -1,6 +1,9 @@
-#!/bin/sh
-# Start faculty scraper on fixed internal port 8080
-PORT=8080 ./faculty-scraper-bin &
+#!/bin/bash
+# Render start script — sets Go PATH, then starts the academia backend
+export PATH=$PATH:/usr/local/go/bin
+export GOPATH=$HOME/go
+export PATH=$PATH:$GOPATH/bin
+export NODE_ENV=production
 
-# Start Node.js server — uses $PORT injected by Render
+cd academia-backend
 exec node server.js
