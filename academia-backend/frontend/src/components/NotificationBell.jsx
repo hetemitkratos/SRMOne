@@ -9,8 +9,6 @@ export default function NotificationBell() {
   const { notifications, unreadCount, markAsRead, markAllAsRead } = useNotifications();
   const [isOpen, setIsOpen] = useState(false);
 
-  if (unreadCount === 0 && notifications.length === 0) return null;
-
   return (
     <div className="relative">
       <button

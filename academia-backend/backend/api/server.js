@@ -1839,105 +1839,105 @@ app.post("/ai/chat", express.json({ limit: "64kb" }), async (req, res) => {
 // GET /profile/cache?email= — Get cached student profile
 app.get("/profile/cache", async (req, res) => {
   const { email } = req.query;
-  if (!email) return res.status(400).json({ error: "Missing email" });
+  if (!email) return res.status(400).json({ success: false, message: "Missing email" });
   try {
     const profile = await supabaseClient.getCachedProfile(email);
-    if (!profile) return res.status(404).json({ error: "No cached profile" });
-    return res.json(profile);
+    if (!profile) return res.status(404).json({ success: false, message: "No cached profile" });
+    return res.json({ success: true, data: profile });
   } catch (err) {
     log("PROFILE", `Cache fetch error: ${err.message}`);
-    return res.status(500).json({ error: "Failed to fetch cached profile" });
+    return res.status(500).json({ success: false, message: "Failed to fetch cached profile" });
   }
 });
 
 // POST /profile/cache — Cache student profile
 app.post("/profile/cache", async (req, res) => {
   const { email, studentInfo } = req.body;
-  if (!email || !studentInfo) return res.status(400).json({ error: "Missing email or studentInfo" });
+  if (!email || !studentInfo) return res.status(400).json({ success: false, message: "Missing email or studentInfo" });
   try {
     const profile = await supabaseClient.cacheStudentProfile(email, studentInfo);
-    return res.json(profile);
+    return res.json({ success: true, data: profile });
   } catch (err) {
     log("PROFILE", `Cache save error: ${err.message}`);
-    return res.status(500).json({ error: "Failed to cache profile" });
+    return res.status(500).json({ success: false, message: "Failed to cache profile" });
   }
 });
 
 // GET /attendance/history?email=&days=30 — Get attendance history
 app.get("/attendance/history", async (req, res) => {
   const { email, days = 30 } = req.query;
-  if (!email) return res.status(400).json({ error: "Missing email" });
+  if (!email) return res.status(400).json({ success: false, message: "Missing email" });
   try {
     const history = await supabaseClient.getAttendanceHistory(email, parseInt(days));
-    return res.json(history);
+    return res.json({ success: true, data: history });
   } catch (err) {
     log("ATTENDANCE", `History fetch error: ${err.message}`);
-    return res.status(500).json({ error: "Failed to fetch attendance history" });
+    return res.status(500).json({ success: false, message: "Failed to fetch attendance history" });
   }
 });
 
 // POST /attendance/snapshot — Save attendance snapshot
 app.post("/attendance/snapshot", async (req, res) => {
   const { email, subjects, overallPct } = req.body;
-  if (!email || !subjects) return res.status(400).json({ error: "Missing email or subjects" });
+  if (!email || !subjects) return res.status(400).json({ success: false, message: "Missing email or subjects" });
   try {
     const snapshot = await supabaseClient.saveAttendanceSnapshot(email, subjects, overallPct);
-    return res.json(snapshot);
+    return res.json({ success: true, data: snapshot });
   } catch (err) {
     log("ATTENDANCE", `Snapshot save error: ${err.message}`);
-    return res.status(500).json({ error: "Failed to save snapshot" });
+    return res.status(500).json({ success: false, message: "Failed to save snapshot" });
   }
 });
 
 // GET /settings?email= — Get user settings
 app.get("/settings", async (req, res) => {
   const { email } = req.query;
-  if (!email) return res.status(400).json({ error: "Missing email" });
+  if (!email) return res.status(400).json({ success: false, message: "Missing email" });
   try {
     const settings = await supabaseClient.getUserSettings(email);
-    return res.json(settings || {});
+    return res.json({ success: true, data: settings || {} });
   } catch (err) {
     log("SETTINGS", `Fetch error: ${err.message}`);
-    return res.status(500).json({ error: "Failed to fetch settings" });
+    return res.status(500).json({ success: false, message: "Failed to fetch settings" });
   }
 });
 
 // POST /settings — Upsert user settings
 app.post("/settings", async (req, res) => {
   const { email, settings } = req.body;
-  if (!email || !settings) return res.status(400).json({ error: "Missing email or settings" });
+  if (!email || !settings) return res.status(400).json({ success: false, message: "Missing email or settings" });
   try {
     const updated = await supabaseClient.upsertUserSettings(email, settings);
-    return res.json(updated);
+    return res.json({ success: true, data: updated });
   } catch (err) {
     log("SETTINGS", `Upsert error: ${err.message}`);
-    return res.status(500).json({ error: "Failed to save settings" });
+    return res.status(500).json({ success: false, message: "Failed to save settings" });
   }
 });
 
 // GET /notifications?email=&unreadOnly=false — Get notifications
 app.get("/notifications", async (req, res) => {
   const { email, unreadOnly = "false" } = req.query;
-  if (!email) return res.status(400).json({ error: "Missing email" });
+  if (!email) return res.status(400).json({ success: false, message: "Missing email" });
   try {
     const notifications = await supabaseClient.getNotifications(email, unreadOnly === "true");
-    return res.json(notifications);
+    return res.json({ success: true, data: notifications });
   } catch (err) {
     log("NOTIFICATIONS", `Fetch error: ${err.message}`);
-    return res.status(500).json({ error: "Failed to fetch notifications" });
+    return res.status(500).json({ success: false, message: "Failed to fetch notifications" });
   }
 });
 
 // POST /notifications — Create notification
 app.post("/notifications", async (req, res) => {
   const { email, type, title, body, data } = req.body;
-  if (!email || !type || !title) return res.status(400).json({ error: "Missing required fields" });
+  if (!email || !type || !title) return res.status(400).json({ success: false, message: "Missing required fields" });
   try {
     const notification = await supabaseClient.createNotification(email, { type, title, body, data });
-    return res.json(notification);
+    return res.json({ success: true, data: notification });
   } catch (err) {
     log("NOTIFICATIONS", `Create error: ${err.message}`);
-    return res.status(500).json({ error: "Failed to create notification" });
+    return res.status(500).json({ success: false, message: "Failed to create notification" });
   }
 });
 
@@ -1949,72 +1949,72 @@ app.patch("/notifications/:id/read", async (req, res) => {
     return res.json({ success: true });
   } catch (err) {
     log("NOTIFICATIONS", `Mark read error: ${err.message}`);
-    return res.status(500).json({ error: "Failed to mark notification as read" });
+    return res.status(500).json({ success: false, message: "Failed to mark notification as read" });
   }
 });
 
 // POST /notifications/read-all — Mark all notifications as read
 app.post("/notifications/read-all", async (req, res) => {
   const { email } = req.body;
-  if (!email) return res.status(400).json({ error: "Missing email" });
+  if (!email) return res.status(400).json({ success: false, message: "Missing email" });
   try {
     await supabaseClient.markAllNotificationsRead(email);
     return res.json({ success: true });
   } catch (err) {
     log("NOTIFICATIONS", `Mark all read error: ${err.message}`);
-    return res.status(500).json({ error: "Failed to mark all notifications as read" });
+    return res.status(500).json({ success: false, message: "Failed to mark all notifications as read" });
   }
 });
 
 // GET /notification-settings?email= — Get notification settings
 app.get("/notification-settings", async (req, res) => {
   const { email } = req.query;
-  if (!email) return res.status(400).json({ error: "Missing email" });
+  if (!email) return res.status(400).json({ success: false, message: "Missing email" });
   try {
     const settings = await supabaseClient.getNotificationSettings(email);
-    return res.json(settings || {});
+    return res.json({ success: true, data: settings || {} });
   } catch (err) {
     log("NOTIFICATION_SETTINGS", `Fetch error: ${err.message}`);
-    return res.status(500).json({ error: "Failed to fetch notification settings" });
+    return res.status(500).json({ success: false, message: "Failed to fetch notification settings" });
   }
 });
 
 // POST /notification-settings — Upsert notification settings
 app.post("/notification-settings", async (req, res) => {
   const { email, settings } = req.body;
-  if (!email || !settings) return res.status(400).json({ error: "Missing email or settings" });
+  if (!email || !settings) return res.status(400).json({ success: false, message: "Missing email or settings" });
   try {
     const updated = await supabaseClient.upsertNotificationSettings(email, settings);
-    return res.json(updated);
+    return res.json({ success: true, data: updated });
   } catch (err) {
     log("NOTIFICATION_SETTINGS", `Upsert error: ${err.message}`);
-    return res.status(500).json({ error: "Failed to save notification settings" });
+    return res.status(500).json({ success: false, message: "Failed to save notification settings" });
   }
 });
 
 // GET /bookmarks?email= — Get job bookmarks
 app.get("/bookmarks", async (req, res) => {
   const { email } = req.query;
-  if (!email) return res.status(400).json({ error: "Missing email" });
+  if (!email) return res.status(400).json({ success: false, message: "Missing email" });
   try {
     const bookmarks = await supabaseClient.getJobBookmarks(email);
-    return res.json(bookmarks);
+    return res.json({ success: true, data: bookmarks });
   } catch (err) {
     log("BOOKMARKS", `Fetch error: ${err.message}`);
-    return res.status(500).json({ error: "Failed to fetch bookmarks" });
+    return res.status(500).json({ success: false, message: "Failed to fetch bookmarks" });
   }
 });
 
 // POST /bookmarks — Add/update job bookmark
 app.post("/bookmarks", async (req, res) => {
   const { email, jobUuid, jobTitle, companyName, jobData, notes } = req.body;
-  if (!email || !jobUuid) return res.status(400).json({ error: "Missing email or jobUuid" });
+  if (!email || !jobUuid) return res.status(400).json({ success: false, message: "Missing email or jobUuid" });
   try {
     const bookmark = await supabaseClient.addJobBookmark(email, { jobUuid, jobTitle, companyName, jobData, notes });
-    return res.json(bookmark);
+    return res.json({ success: true, data: bookmark });
   } catch (err) {
     log("BOOKMARKS", `Add error: ${err.message}`);
-    return res.status(500).json({ error: "Failed to add bookmark" });
+    return res.status(500).json({ success: false, message: "Failed to add bookmark" });
   }
 });
 
@@ -2022,13 +2022,13 @@ app.post("/bookmarks", async (req, res) => {
 app.patch("/bookmarks/:jobUuid", async (req, res) => {
   const { jobUuid } = req.params;
   const { email, updates } = req.body;
-  if (!email || !updates) return res.status(400).json({ error: "Missing email or updates" });
+  if (!email || !updates) return res.status(400).json({ success: false, message: "Missing email or updates" });
   try {
     const bookmark = await supabaseClient.updateJobBookmark(email, jobUuid, updates);
-    return res.json(bookmark);
+    return res.json({ success: true, data: bookmark });
   } catch (err) {
     log("BOOKMARKS", `Update error: ${err.message}`);
-    return res.status(500).json({ error: "Failed to update bookmark" });
+    return res.status(500).json({ success: false, message: "Failed to update bookmark" });
   }
 });
 
@@ -2036,13 +2036,13 @@ app.patch("/bookmarks/:jobUuid", async (req, res) => {
 app.delete("/bookmarks/:jobUuid", async (req, res) => {
   const { jobUuid } = req.params;
   const { email } = req.query;
-  if (!email) return res.status(400).json({ error: "Missing email" });
+  if (!email) return res.status(400).json({ success: false, message: "Missing email" });
   try {
     await supabaseClient.removeJobBookmark(email, jobUuid);
     return res.json({ success: true });
   } catch (err) {
     log("BOOKMARKS", `Delete error: ${err.message}`);
-    return res.status(500).json({ error: "Failed to delete bookmark" });
+    return res.status(500).json({ success: false, message: "Failed to delete bookmark" });
   }
 });
 

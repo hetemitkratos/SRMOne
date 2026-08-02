@@ -22,13 +22,13 @@ export default function Attendance() {
 
     const fetchData = async () => {
       try {
-        const [attendanceData, historyData] = await Promise.all([
+        const [attendanceData, historyResponse] = await Promise.all([
           api.attendance(user.email),
           api.getAttendanceHistory(user.email, 30).catch(() => ({ data: [] }))
         ]);
         if (cancelled) return;
         setRecords(attendanceData.attendance);
-        setHistory(historyData || []);
+        setHistory(historyResponse.data || []);
         setLoading(false);
 
         // If photos aren't ready yet, poll again in 3s (silently)
