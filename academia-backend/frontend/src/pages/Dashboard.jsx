@@ -7,6 +7,7 @@ import { useAuth } from "../hooks/useAuth.jsx";
 import { api } from "../api/client.js";
 import { placementApi } from "../api/placementClient.js";
 import ImagePreview from "../components/ImagePreview.jsx";
+import NotificationBell from "../components/NotificationBell.jsx";
 
 import Overview from "./Overview.jsx";
 import Attendance from "./Attendance.jsx";
@@ -191,10 +192,9 @@ export default function Dashboard() {
           <button className="w-11 h-11 rounded-full bg-white flex items-center justify-center text-slate-500 hover:text-[#1A1A1A] hover:bg-slate-50 transition-colors shadow-sm hidden sm:flex cursor-pointer border border-slate-100">
             <Mail size={19} strokeWidth={2.5} />
           </button>
-          <button className="w-11 h-11 rounded-full bg-white flex items-center justify-center text-slate-500 hover:text-[#1A1A1A] hover:bg-slate-50 transition-colors shadow-sm hidden sm:flex cursor-pointer relative border border-slate-100">
-            <Bell size={19} strokeWidth={2.5} />
-            <span className="absolute top-3 right-3 w-2 h-2 bg-terracotta rounded-full border border-white"></span>
-          </button>
+          <div className="hidden sm:block">
+            <NotificationBell />
+          </div>
 
           <div className="relative ml-1 flex items-center">
             <button
