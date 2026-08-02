@@ -129,7 +129,7 @@ export default function Overview() {
   const todayDayOrder = todayStatus?.dayOrder || (!isWeekend && !isTodayHoliday ? ({ Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5 }[["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][today.getDay()]] || null) : null);
   const todayDay = todayDayOrder ? `Day ${todayDayOrder}` : null;
   const todayHolidayEvent = todayStatus?.event || "";
-  const dayName = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][today.getDay()];
+  const dayName = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"][today.getDay()];
   const todayLabel = isTodayHoliday ? "Holiday" : isWeekend ? `${dayName} (Weekend)` : todayDay;
 
   const dayClasses = courses
@@ -305,7 +305,7 @@ export default function Overview() {
               ) : selectedDay === null && isWeekend ? (
                 /* Weekend today */
                 <div className="text-center py-16 bg-white/50 rounded-[24px] border border-white/50">
-                  <HolidayGif eventName={`${dayName} Weekend`} />
+                  <HolidayGif eventName={`happy ${dayName} weekend`} />
                   <p className="text-slate-800 font-bold text-xl">It's {dayName} — Weekend!</p>
                   <p className="text-slate-500 mt-2 font-medium">No classes today. Pick a day above to preview that day's schedule.</p>
                 </div>
