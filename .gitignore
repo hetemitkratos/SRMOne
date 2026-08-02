@@ -1,0 +1,65 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Build outputs
+dist/
+build/
+frontend/dist/
+
+# Go build artifacts
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+haveloc-scraper/haveloc-scraper.exe
+haveloc-scraper/scraper.exe
+academia-backend/academia-scraper/*.exe
+academia-backend/faculty-scraper/*.exe
+
+# Go cache
+.gocache/
+
+# Environment variables & secrets
+.env
+.env.local
+.env.*.local
+*.env
+
+# Debug / temp files
+debug_*.html
+*_err.txt
+*_stderr.txt
+*_stdout.txt
+*_test.txt
+faculty_*.txt
+jd_*.txt
+
+# Test output JSON (large scraped data)
+haveloc-scraper/*_raw.json
+haveloc-scraper/test_*.json
+haveloc-scraper/jd_result.json
+
+# Images (not part of source)
+*.png
+
+# IDE / OS
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+npm-debug.log*
+
+# Vite cache
+frontend/node_modules/.vite/
+
+# Supabase
+supabase/.branches
+supabase/.temp
