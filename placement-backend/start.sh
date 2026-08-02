@@ -1,8 +1,6 @@
 #!/bin/bash
-# Render start script — sets Go PATH, then starts the placement backend
-export PATH=$PATH:/usr/local/go/bin
-export GOPATH=$HOME/go
-export PATH=$PATH:$GOPATH/bin
+# Render start script — starts the placement backend
+# Go binary is pre-built during build phase, no need for Go at runtime
 export NODE_ENV=production
 
 cd placement-backend

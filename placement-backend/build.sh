@@ -1,19 +1,21 @@
 #!/bin/bash
-# Render build script — installs Go, then installs Node deps
-# Render's Node runtime doesn't include Go, so we install it during build
+# Render build script — installs Go to user dir, builds Go binary, installs Node deps
+# Render's Node runtime doesn't include Go and doesn't have sudo access
 
 set -e
 
 GO_VERSION="1.25.0"
 GO_TAR="go${GO_VERSION}.linux-amd64.tar.gz"
+GO_INSTALL_DIR="$HOME/.go"
 
-echo "=== Installing Go ${GO_VERSION} ==="
-wget -q "https://go.dev/dl/${GO_TAR}" -O "/tmp/${GO_TAR}"
-sudo tar -C /usr/local -xzf "/tmp/${GO_TAR}"
+echo "=== Installing Go ${GO_VERSION} to ${GO_INSTALL_DIR} ==="
+curl -fsSL "https://go.dev/dl/${GO_TAR}" -o "/tmp/${GO_TAR}"
+mkdir -p "$GO_INSTALL_DIR"
+tar -C "$GO_INSTALL_DIR" -xzf "/tmp/${GO_TAR}"
 rm "/tmp/${GO_TAR}"
-export PATH=$PATH:/usr/local/go/bin
-export GOPATH=$HOME/go
-export PATH=$PATH:$GOPATH/bin
+export GOROOT="$GO_INSTALL_DIR/go"
+export GOPATH="$HOME/go"
+export PATH="$GOROOT/bin:$GOPATH/bin:$PATH"
 
 echo "Go version: $(go version)"
 
