@@ -8,12 +8,6 @@
       "maxDuration": 15
     }
   },
-  "crons": [
-    {
-      "path": "/api/ping",
-      "schedule": "*/14 * * * *"
-    }
-  ],
   "rewrites": [
     {
       "source": "/api/ping",
@@ -21,11 +15,11 @@
     },
     {
       "source": "/api/:path*",
-      "destination": "${ACADEMIA_BACKEND_URL}/:path*"
+      "destination": "https://academia-backend-5h12.onrender.com/:path*"
     },
     {
       "source": "/placement-api/:path*",
-      "destination": "${PLACEMENT_BACKEND_URL}/:path*"
+      "destination": "https://placement-backend-xpub.onrender.com/:path*"
     }
   ],
   "headers": [

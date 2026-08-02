@@ -12,14 +12,7 @@
  */
 
 export default async function handler(req, res) {
-  const backendUrl = process.env.ACADEMIA_BACKEND_URL;
-
-  if (!backendUrl) {
-    return res.status(500).json({
-      success: false,
-      error: "ACADEMIA_BACKEND_URL not set",
-    });
-  }
+  const backendUrl = process.env.ACADEMIA_BACKEND_URL || "https://academia-backend-5h12.onrender.com";
 
   const healthUrl = `${backendUrl}/health`;
   const startTime = Date.now();
