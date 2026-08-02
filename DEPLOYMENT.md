@@ -182,49 +182,36 @@ https://srmone.in,https://www.srmone.in,https://hacktrackr-xxxx.vercel.app
 - **Two services running 24/7 = ~1,440 hours/month → exceeds free tier!**
 - Services spin down after 15 min of inactivity (cold start = 30-50s)
 
-### The 24/7 Keep-Alive Trick (cron-job.org)
+### The 24/7 Keep-Alive — AUTOMATIC (Vercel Cron Jobs)
 
-Use [cron-job.org](https://cron-job.org) (completely free) to ping your Render
-backends every 14 minutes. This prevents them from spinning down, giving you
-a fast 24/7 backend for free.
+**No manual setup needed!** This is built into the deployment.
 
-**IMPORTANT**: With 2 services, keeping both awake 24/7 uses ~1,440 hours/month
-which exceeds the 750 free hour limit. You have two options:
+A Vercel serverless function (`api/ping.js`) automatically pings the academia
+backend's `/health` endpoint every 14 minutes via Vercel Cron Jobs. This
+prevents the Render service from spinning down, keeping it fast 24/7.
 
-#### Option A: Keep only the academia backend awake (recommended)
-The academia backend handles login + attendance + timetable — the core features.
-Let the placement backend sleep (it only cold-starts when users check placements).
+**How it works:**
+1. `vercel.json` defines a cron job: `*/14 * * * *` → `/api/ping`
+2. Vercel triggers the `api/ping.js` serverless function every 14 minutes
+3. The function fetches `${ACADEMIA_BACKEND_URL}/health`
+4. Render sees activity and keeps the service warm
+5. Total: ~720 hours/month → stays within the 750 free hour limit
 
-1. Go to https://cron-job.org → Create a free account
-2. Add a job:
-   - **URL**: `https://academia-backend-xxxx.onrender.com/health`
-   - **Schedule**: Every 14 minutes (`*/14 * * * *`)
-   - **Method**: GET
-3. This uses ~720 hours/month → stays within the 750 free hour limit
+**What stays awake:** Academia backend (login, attendance, timetable, marks)
+**What sleeps:** Placement backend (cold-starts ~30s when someone checks placements)
 
-#### Option B: Merge both backends into one Render service
-Combine both into a single Express app to use only 750 hours/month.
-This requires code changes (mount placement routes under `/placement` prefix).
+### Why not keep both awake?
+Two services × 24/7 = ~1,440 hours/month → exceeds the 750 free hour limit.
+Render would start billing you. By keeping only the core backend awake, we
+stay free. The placement backend cold-start is acceptable since users check
+placements less frequently than attendance/timetable.
 
-#### Option C: Let both sleep (no ping)
-- First request after 15 min idle takes 30-50 seconds (cold start)
-- Acceptable if usage is infrequent
-- Stays well within free tier without any ping setup
-
-### Setting up cron-job.org (for Option A)
-
-1. **Sign up** at https://cron-job.org (free, no credit card)
-2. Click **Create Cron Job**
-3. Configure:
-   - **Title**: `HackTrackr Academia Keep-Alive`
-   - **URL**: `https://academia-backend-xxxx.onrender.com/health`
-   - **Execution**: Every 14 minutes
-   - **Request Method**: GET
-   - **Timeout**: 30 seconds
-4. Save and enable the job
-
-The ping keeps the service warm. Each ping is a lightweight `/health` response
-(just `{ status: "ok" }`) so it won't consume meaningful resources.
+### Alternative: cron-job.org (if Vercel Cron is unavailable)
+If Vercel Cron Jobs aren't available on your plan, use cron-job.org instead:
+1. Sign up at https://cron-job.org (free, no credit card)
+2. Create a job: URL = `https://academia-backend-xxxx.onrender.com/health`
+3. Schedule: Every 14 minutes
+4. Method: GET
 
 ### Vercel Free Tier
 - 100GB bandwidth/month
@@ -232,6 +219,7 @@ The ping keeps the service warm. Each ping is a lightweight `/health` response
 - Automatic HTTPS
 - Custom domains included
 - No cold starts (static files served instantly)
+- Cron Jobs included (triggers serverless functions on schedule)
 
 ---
 

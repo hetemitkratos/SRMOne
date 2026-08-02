@@ -4,9 +4,10 @@
 # ⚠️ FREE TIER LIMIT: 750 hours/month total (not per service).
 # Two services running 24/7 = ~1,440 hours → exceeds free tier.
 #
-# Recommended: Set up cron-job.org to ping ONLY the academia-backend
-# every 14 minutes to keep it warm (uses ~720 hours/month).
-# Let the placement-backend sleep (cold-starts when accessed).
+# ✅ KEEP-ALIVE: A Vercel Cron Job (api/ping.js) automatically pings the
+# academia-backend /health endpoint every 14 minutes to keep it warm.
+# The placement-backend sleeps (cold-starts ~30s when accessed).
+# Total: ~720 hours/month → stays within free tier.
 #
 # After connecting your GitHub repo, Render will read this file and create
 # both services automatically. Set the environment variables in the Render

@@ -3,7 +3,22 @@
   "buildCommand": "npm install && npm run build",
   "outputDirectory": "dist",
   "framework": "vite",
+  "functions": {
+    "api/ping.js": {
+      "maxDuration": 15
+    }
+  },
+  "crons": [
+    {
+      "path": "/api/ping",
+      "schedule": "*/14 * * * *"
+    }
+  ],
   "rewrites": [
+    {
+      "source": "/api/ping",
+      "destination": "/api/ping"
+    },
     {
       "source": "/api/:path*",
       "destination": "${ACADEMIA_BACKEND_URL}/:path*"
