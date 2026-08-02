@@ -56,6 +56,19 @@
 
   .bg-charcoal { background-color: #1C1C1C; }
 
+  /* Dark date picker — for dark hero banners */
+  .date-picker-dark::-webkit-calendar-picker-indicator {
+    filter: invert(1);
+    opacity: 0.6;
+    cursor: pointer;
+  }
+  .date-picker-dark::-webkit-calendar-picker-indicator:hover {
+    opacity: 1;
+  }
+  .date-picker-dark {
+    color-scheme: dark;
+  }
+
   /* Input fields */
   .input-field {
     @apply w-full px-4 py-3 rounded-[16px] bg-white border border-slate-200 text-slate-900 placeholder:text-slate-400 outline-none transition-all duration-300;

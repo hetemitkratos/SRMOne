@@ -2,39 +2,105 @@
  * AttendancePlanner - Interactive attendance prediction tool.
  *
  * Two modes:
- * 1. Margin Calculator — Set a target %, see how many classes you must attend per subject
- * 2. Holiday Planner   — Pick a date range, see how your attendance drops if you skip
+ * 1. Reach Target — Set a target %, see how many classes you must attend per subject
+ * 2. Plan Holiday — Pick a date range, see impact based on actual timetable + calendar
+ *
+ * UI follows the app's design system: dark hero banners, rounded-[32px] cards,
+ * mint/terracotta/lavender accent colors, unDraw SVG illustrations.
  */
 import { useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  Target, CalendarDays, TrendingUp, TrendingDown, Sparkles,
-  CheckCircle2, AlertTriangle, Plane, Calculator, Info
+  Target, TrendingUp, TrendingDown, Sparkles,
+  AlertTriangle, Plane, Info, Calendar, CheckCircle2,
+  ChevronDown, ChevronUp
 } from "lucide-react";
+import { dateKey, getDayStatus } from "../utils/calendarTimetableSync.js";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function countWeekdays(startDate, endDate) {
-  if (!startDate || !endDate) return 0;
-  const start = new Date(startDate);
-  const end = new Date(endDate);
-  if (start > end) return 0;
-  let count = 0;
-  const cur = new Date(start);
-  while (cur <= end) {
-    const day = cur.getDay();
-    if (day !== 0 && day !== 6) count++;
-    cur.setDate(cur.getDate() + 1);
-  }
-  return count;
-}
 
 function formatDateShort(dateStr) {
   if (!dateStr) return "";
   return new Date(dateStr).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
-// ─── Margin Calculator ────────────────────────────────────────────────────────
+function calculateMissedClasses(fromDate, toDate, calendarMap, timetable) {
+  if (!fromDate || !toDate) return { perSubject: {}, totalMissed: 0, dayBreakdown: [] };
+
+  const start = new Date(fromDate);
+  const end = new Date(toDate);
+  if (start > end) return { perSubject: {}, totalMissed: 0, dayBreakdown: [] };
+
+  const courses = timetable?.courses || [];
+  const perSubject = {};
+  const dayBreakdown = [];
+
+  const dayOrderClasses = {};
+  for (const course of courses) {
+    for (const slot of (course.schedule || [])) {
+      if (!dayOrderClasses[slot.day]) dayOrderClasses[slot.day] = [];
+      dayOrderClasses[slot.day].push({
+        courseCode: course.courseCode,
+        courseTitle: course.courseTitle,
+        hourIndex: slot.hourIndex,
+        timing: slot.timing,
+      });
+    }
+  }
+
+  const cur = new Date(start);
+  while (cur <= end) {
+    const key = dateKey(cur);
+    let dayOrder = null;
+    let dayLabel = "";
+    let isWorkingDay = false;
+
+    if (calendarMap) {
+      const status = getDayStatus(calendarMap, cur);
+      if (status.status === "working") {
+        dayOrder = status.dayOrder;
+        dayLabel = `Day ${dayOrder}`;
+        isWorkingDay = true;
+      } else {
+        dayLabel = status.label;
+      }
+    } else {
+      const dow = cur.getDay();
+      if (dow >= 1 && dow <= 5) {
+        dayOrder = dow;
+        dayLabel = `Day ${dayOrder}`;
+        isWorkingDay = true;
+      } else {
+        dayLabel = dow === 0 ? "Sunday" : "Saturday";
+      }
+    }
+
+    let classesToday = [];
+    if (isWorkingDay && dayOrderClasses[dayLabel]) {
+      classesToday = dayOrderClasses[dayLabel];
+      for (const cls of classesToday) {
+        perSubject[cls.courseCode] = (perSubject[cls.courseCode] || 0) + 1;
+      }
+    }
+
+    dayBreakdown.push({
+      date: new Date(cur),
+      key,
+      dayOrder,
+      dayLabel,
+      isWorkingDay,
+      classesCount: classesToday.length,
+      classes: classesToday,
+    });
+
+    cur.setDate(cur.getDate() + 1);
+  }
+
+  const totalMissed = Object.values(perSubject).reduce((s, v) => s + v, 0);
+  return { perSubject, totalMissed, dayBreakdown };
+}
+
+// ─── Reach Target Mode ────────────────────────────────────────────────────────
 
 function MarginCalculator({ records }) {
   const [target, setTarget] = useState(75);
@@ -47,36 +113,26 @@ function MarginCalculator({ records }) {
       const pct = conducted > 0 ? (present / conducted) * 100 : 0;
       const T = target;
 
-      // Classes needed: (P + Y) / (C + Y) >= T/100
-      // Y >= (T*C - 100*P) / (100 - T)
       let needed = 0;
       if (conducted > 0 && pct < T) {
         needed = Math.ceil((T * conducted - 100 * present) / (100 - T));
         if (needed < 0) needed = 0;
       }
 
-      // Classes you can bunk while staying above T%
-      // P / (C + X) >= T/100 → X <= (100*P/T) - C
       let bunkable = 0;
       if (conducted > 0 && pct >= T) {
         bunkable = Math.floor((100 * present) / T - conducted);
         if (bunkable < 0) bunkable = 0;
       }
 
-      // New percentage if you attend exactly `needed` classes
-      const newPct = (needed > 0)
-        ? ((present + needed) / (conducted + needed)) * 100
-        : pct;
+      const newPct = (needed > 0) ? ((present + needed) / (conducted + needed)) * 100 : pct;
 
       return {
         courseCode: rec.courseCode,
         courseTitle: rec.courseTitle,
-        conducted,
-        present,
-        absent,
+        conducted, present, absent,
         pct: pct.toFixed(1),
-        needed,
-        bunkable,
+        needed, bunkable,
         newPct: newPct.toFixed(1),
         alreadyAbove: pct >= T,
       };
@@ -88,302 +144,399 @@ function MarginCalculator({ records }) {
   const belowTarget = results.filter((r) => !r.alreadyAbove).length;
 
   return (
-    <div>
-      {/* Target selector */}
-      <div className="flex flex-col sm:flex-row sm:items-center gap-4 mb-6 p-5 rounded-2xl bg-slate-50 border border-slate-100">
-        <div className="flex items-center gap-2 flex-shrink-0">
-          <Target size={18} className="text-violet-600" />
-          <span className="font-bold text-sm text-slate-700">Target Attendance</span>
+    <div className="space-y-6">
+      {/* Target selector — dark hero card matching app style */}
+      <div className="bg-[#1A1A1A] rounded-[32px] p-6 md:p-8 relative overflow-hidden">
+        <div className="absolute inset-y-0 right-0 h-full w-[35%] opacity-80 mix-blend-screen pointer-events-none p-4 flex items-center justify-end">
+          <img src="/assets/target_d6hf.svg" alt="Target" className="h-full w-full object-contain object-right" />
         </div>
-        <div className="flex items-center gap-3 flex-1">
-          <input
-            type="range"
-            min="50"
-            max="100"
-            step="1"
-            value={target}
-            onChange={(e) => setTarget(parseInt(e.target.value))}
-            className="flex-1 accent-violet-600 cursor-pointer"
-          />
-          <div className="flex items-center gap-1 bg-white rounded-full px-4 py-2 border border-slate-200 shadow-sm">
-            <span className="text-2xl font-display font-bold text-violet-600">{target}</span>
-            <span className="text-sm font-bold text-slate-400">%</span>
+        <div className="relative z-10">
+          <div className="flex items-center gap-2 mb-4">
+            <Target size={18} className="text-mint" />
+            <span className="font-bold text-sm text-white/80 uppercase tracking-wide">Target Attendance</span>
+          </div>
+          <div className="flex items-center gap-4 mb-2">
+            <input
+              type="range"
+              min="50"
+              max="100"
+              step="1"
+              value={target}
+              onChange={(e) => setTarget(parseInt(e.target.value))}
+              className="flex-1 max-w-xs accent-[#BDE3D5] cursor-pointer"
+            />
+            <div className="flex items-baseline gap-1">
+              <span className="text-5xl font-display font-bold text-white">{target}</span>
+              <span className="text-xl font-bold text-white/40">%</span>
+            </div>
+          </div>
+          <p className="text-white/50 text-xs font-medium">Slide to set your desired attendance goal</p>
+        </div>
+      </div>
+
+      {/* Summary cards — matching the 3-card grid style */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div className="rounded-[24px] p-6 bg-terracotta text-white flex flex-col justify-between min-h-[140px]">
+          <div className="flex justify-between items-start mb-4">
+            <span className="font-semibold text-lg">Classes to Attend</span>
+            <div className="w-10 h-10 rounded-full bg-black/10 flex items-center justify-center">
+              <Target className="w-5 h-5 text-white" />
+            </div>
+          </div>
+          <div>
+            <p className="text-5xl font-display font-bold">{totalNeeded}</p>
+            <p className="text-sm mt-1 text-white/80">to reach {target}%</p>
+          </div>
+        </div>
+
+        <div className="rounded-[24px] p-6 bg-mint text-[#1A1A1A] flex flex-col justify-between min-h-[140px]">
+          <div className="flex justify-between items-start mb-4">
+            <span className="font-semibold text-lg">Can Bunk</span>
+            <div className="w-10 h-10 rounded-full bg-black/10 flex items-center justify-center">
+              <CheckCircle2 className="w-5 h-5 text-[#1A1A1A]" />
+            </div>
+          </div>
+          <div>
+            <p className="text-5xl font-display font-bold">{totalBunkable}</p>
+            <p className="text-sm mt-1 text-[#1A1A1A]/70">classes to skip</p>
+          </div>
+        </div>
+
+        <div className="rounded-[24px] p-6 bg-lavender text-[#1A1A1A] flex flex-col justify-between min-h-[140px]">
+          <div className="flex justify-between items-start mb-4">
+            <span className="font-semibold text-lg">Below Target</span>
+            <div className="w-10 h-10 rounded-full bg-black/10 flex items-center justify-center">
+              <TrendingDown className="w-5 h-5 text-[#1A1A1A]" />
+            </div>
+          </div>
+          <div>
+            <p className="text-5xl font-display font-bold">{belowTarget}</p>
+            <p className="text-sm mt-1 text-[#1A1A1A]/70">subjects need work</p>
           </div>
         </div>
       </div>
 
-      {/* Summary */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-6">
-        <div className="rounded-2xl bg-red-50 border border-red-100 p-4 text-center">
-          <p className="text-3xl font-display font-bold text-red-600">{totalNeeded}</p>
-          <p className="text-xs text-red-500/70 font-medium mt-1">total classes to attend</p>
-        </div>
-        <div className="rounded-2xl bg-emerald-50 border border-emerald-100 p-4 text-center">
-          <p className="text-3xl font-display font-bold text-emerald-600">{totalBunkable}</p>
-          <p className="text-xs text-emerald-500/70 font-medium mt-1">total classes you can bunk</p>
-        </div>
-        <div className="rounded-2xl bg-amber-50 border border-amber-100 p-4 text-center">
-          <p className="text-3xl font-display font-bold text-amber-600">{belowTarget}</p>
-          <p className="text-xs text-amber-500/70 font-medium mt-1">subjects below {target}%</p>
-        </div>
-      </div>
-
-      {/* Per-subject breakdown */}
-      <div className="space-y-2">
-        {results.map((r) => (
-          <div
-            key={r.courseCode}
-            className="flex items-center gap-3 p-3 rounded-2xl border border-slate-100 hover:bg-slate-50/50 transition-colors"
-          >
-            <span className="font-mono text-[10px] font-bold text-slate-500 uppercase flex-shrink-0 w-20 truncate">
-              {r.courseCode}
-            </span>
-            <div className="flex-1 min-w-0">
-              <p className="text-xs text-slate-400 truncate">{r.courseTitle}</p>
-              <div className="flex items-center gap-2 mt-0.5">
-                <span className="text-sm font-bold text-slate-700">{r.pct}%</span>
+      {/* Per-subject breakdown — white card */}
+      <div className="bg-white rounded-[32px] p-6 md:p-8 border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.02)]">
+        <h3 className="font-display font-bold text-xl text-[#1A1A1A] mb-4">Subject Breakdown</h3>
+        <div className="space-y-2">
+          {results.map((r) => (
+            <div
+              key={r.courseCode}
+              className="flex items-center gap-3 p-3 rounded-2xl border border-slate-100 hover:bg-slate-50/50 transition-colors"
+            >
+              <span className="inline-block px-3 py-1 bg-[#1A1A1A] text-white text-[10px] font-bold rounded-full font-mono uppercase tracking-wider flex-shrink-0">
+                {r.courseCode}
+              </span>
+              <div className="flex-1 min-w-0">
+                <p className="text-xs text-slate-400 truncate">{r.courseTitle}</p>
+                <div className="flex items-center gap-2 mt-0.5">
+                  <span className="text-sm font-bold text-slate-700">{r.pct}%</span>
+                  {r.needed > 0 && (
+                    <>
+                      <span className="text-slate-300 text-xs">→</span>
+                      <span className="text-sm font-bold text-mint">{r.newPct}%</span>
+                    </>
+                  )}
+                </div>
+              </div>
+              <div className="text-right flex-shrink-0">
                 {r.needed > 0 ? (
-                  <>
-                    <span className="text-slate-300 text-xs">→</span>
-                    <span className="text-sm font-bold text-emerald-600">{r.newPct}%</span>
-                  </>
-                ) : null}
+                  <span className="text-xs font-bold px-2.5 py-1.5 rounded-md text-red-700 bg-red-100">
+                    Attend {r.needed} {r.needed > 1 ? "classes" : "class"}
+                  </span>
+                ) : r.bunkable > 0 ? (
+                  <span className="text-xs font-bold px-2.5 py-1.5 rounded-md text-emerald-700 bg-emerald-100">
+                    Can bunk {r.bunkable}
+                  </span>
+                ) : (
+                  <span className="text-xs font-bold px-2.5 py-1.5 rounded-md text-amber-700 bg-amber-100">
+                    On track
+                  </span>
+                )}
               </div>
             </div>
-            <div className="text-right flex-shrink-0">
-              {r.needed > 0 ? (
-                <p className="text-xs font-bold text-red-600">
-                  Attend {r.needed} {r.needed > 1 ? "classes" : "class"}
-                </p>
-              ) : r.bunkable > 0 ? (
-                <p className="text-xs font-bold text-emerald-600">
-                  Can bunk {r.bunkable}
-                </p>
-              ) : (
-                <p className="text-xs font-bold text-amber-600">On track</p>
-              )}
-            </div>
-          </div>
-        ))}
+          ))}
+        </div>
       </div>
     </div>
   );
 }
 
-// ─── Holiday Planner ──────────────────────────────────────────────────────────
+// ─── Holiday Planner Mode ────────────────────────────────────────────────────
 
-function HolidayPlanner({ records }) {
+function HolidayPlanner({ records, calendarMap, timetable }) {
   const today = new Date().toISOString().slice(0, 10);
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
-  const [classesPerDay, setClassesPerDay] = useState(4);
 
-  const weekdays = useMemo(() => countWeekdays(fromDate, toDate), [fromDate, toDate]);
-  const totalMissed = weekdays * classesPerDay;
+  const { perSubject, totalMissed, dayBreakdown } = useMemo(
+    () => calculateMissedClasses(fromDate, toDate, calendarMap, timetable),
+    [fromDate, toDate, calendarMap, timetable]
+  );
 
-  // Distribute missed classes across subjects
-  // Simple approach: distribute proportionally based on each subject's share of total classes
   const projections = useMemo(() => {
-    if (!fromDate || !toDate || weekdays === 0) return [];
-
-    const totalConducted = records.reduce((s, r) => s + parseInt(r.hoursConducted || 0), 0);
-    if (totalConducted === 0) return [];
-
+    if (totalMissed === 0) return [];
     return records.map((rec) => {
       const conducted = parseInt(rec.hoursConducted || 0);
       const absent = parseInt(rec.hoursAbsent || 0);
       const present = conducted - absent;
       const pct = conducted > 0 ? (present / conducted) * 100 : 0;
-
-      // Distribute missed classes proportionally
-      const share = conducted / totalConducted;
-      const missedForThis = Math.round(totalMissed * share);
-
-      // New attendance after missing these classes
+      const missedForThis = perSubject[rec.courseCode] || 0;
       const newConducted = conducted + missedForThis;
-      const newPresent = present; // they didn't attend these
-      const newPct = newConducted > 0 ? (newPresent / newConducted) * 100 : 0;
-
-      // How many classes they'd need to attend after the holiday to get back to 75%
+      const newPct = newConducted > 0 ? (present / newConducted) * 100 : 0;
       let recoveryNeeded = 0;
-      if (newPct < 75) {
-        recoveryNeeded = Math.ceil((75 * newConducted - 100 * newPresent) / 25);
+      if (newPct < 75 && newConducted > 0) {
+        recoveryNeeded = Math.ceil((75 * newConducted - 100 * present) / 25);
         if (recoveryNeeded < 0) recoveryNeeded = 0;
       }
-
       return {
-        courseCode: rec.courseCode,
-        courseTitle: rec.courseTitle,
-        conducted,
-        present,
-        pct: pct.toFixed(1),
-        missedForThis,
-        newConducted,
-        newPct: newPct.toFixed(1),
-        drop: (pct - newPct).toFixed(1),
-        recoveryNeeded,
-        willDropBelow: newPct < 75 && pct >= 75,
+        courseCode: rec.courseCode, courseTitle: rec.courseTitle,
+        conducted, present, pct: pct.toFixed(1), missedForThis,
+        newConducted, newPct: newPct.toFixed(1), drop: (pct - newPct).toFixed(1),
+        recoveryNeeded, willDropBelow: newPct < 75 && pct >= 75, alreadyBelow: pct < 75,
       };
-    }).sort((a, b) => parseFloat(b.drop) - parseFloat(a.drop));
-  }, [records, fromDate, toDate, weekdays, classesPerDay, totalMissed]);
+    }).filter((p) => p.missedForThis > 0).sort((a, b) => parseFloat(b.drop) - parseFloat(a.drop));
+  }, [records, perSubject, totalMissed]);
 
   const overallPct = records.length > 0
-    ? (records.reduce((s, r) => s + parseFloat(r.attendancePct || 0), 0) / records.length).toFixed(1)
-    : 0;
-
-  const projectedOverall = projections.length > 0
-    ? (projections.reduce((s, p) => s + parseFloat(p.newPct), 0) / projections.length).toFixed(1)
-    : 0;
-
+    ? (records.reduce((s, r) => s + parseFloat(r.attendancePct || 0), 0) / records.length).toFixed(1) : 0;
+  const totalConductedAll = records.reduce((s, r) => s + parseInt(r.hoursConducted || 0), 0);
+  const totalPresentAll = totalConductedAll - records.reduce((s, r) => s + parseInt(r.hoursAbsent || 0), 0);
+  const projectedOverall = (totalConductedAll + totalMissed) > 0
+    ? ((totalPresentAll / (totalConductedAll + totalMissed)) * 100).toFixed(1) : 0;
+  const workingDaysMissed = dayBreakdown.filter((d) => d.isWorkingDay).length;
   const subjectsDropping = projections.filter((p) => p.willDropBelow).length;
-  const hasValidRange = fromDate && toDate && weekdays > 0;
+  const hasValidRange = fromDate && toDate && totalMissed > 0;
+  const hasTimetable = timetable?.courses?.length > 0;
+  const [showDayBreakdown, setShowDayBreakdown] = useState(false);
 
   return (
-    <div>
-      {/* Date range selector */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4 p-5 rounded-2xl bg-slate-50 border border-slate-100">
-        <div>
-          <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-2">
-            <Plane size={12} className="inline mr-1" /> Holiday From
-          </label>
-          <input
-            type="date"
-            value={fromDate}
-            min={today}
-            onChange={(e) => setFromDate(e.target.value)}
-            className="w-full px-4 py-3 rounded-xl text-sm font-medium border border-slate-200 bg-white text-slate-900 focus:border-violet-400 focus:ring-2 focus:ring-violet-100 outline-none cursor-pointer"
-          />
+    <div className="space-y-6">
+      {/* Date range — dark hero card with illustration */}
+      <div className="bg-[#1A1A1A] rounded-[32px] p-6 md:p-8 relative overflow-hidden">
+        <div className="absolute inset-y-0 right-0 h-full w-[35%] opacity-80 mix-blend-screen pointer-events-none p-4 flex items-center justify-end">
+          <img src="/assets/travel-plans_l0fo.svg" alt="Travel plans" className="h-full w-full object-contain object-right" />
         </div>
-        <div>
-          <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-2">
-            <CalendarDays size={12} className="inline mr-1" /> Holiday To
-          </label>
-          <input
-            type="date"
-            value={toDate}
-            min={fromDate || today}
-            onChange={(e) => setToDate(e.target.value)}
-            className="w-full px-4 py-3 rounded-xl text-sm font-medium border border-slate-200 bg-white text-slate-900 focus:border-violet-400 focus:ring-2 focus:ring-violet-100 outline-none cursor-pointer"
-          />
+        <div className="relative z-10">
+          <div className="flex items-center gap-2 mb-5">
+            <Plane size={18} className="text-mint" />
+            <span className="font-bold text-sm text-white/80 uppercase tracking-wide">Plan Your Holiday</span>
+          </div>
+          <div className="grid grid-cols-2 gap-4 max-w-md">
+            <div>
+              <label className="block text-[11px] font-bold text-white/50 uppercase tracking-wide mb-2">From</label>
+              <input
+                type="date" value={fromDate} min={today}
+                onChange={(e) => setFromDate(e.target.value)}
+                className="w-full px-4 py-3 rounded-full text-sm font-medium bg-white/10 border border-white/20 text-white date-picker-dark focus:border-mint focus:ring-2 focus:ring-mint/20 outline-none cursor-pointer"
+              />
+            </div>
+            <div>
+              <label className="block text-[11px] font-bold text-white/50 uppercase tracking-wide mb-2">To</label>
+              <input
+                type="date" value={toDate} min={fromDate || today}
+                onChange={(e) => setToDate(e.target.value)}
+                className="w-full px-4 py-3 rounded-full text-sm font-medium bg-white/10 border border-white/20 text-white date-picker-dark focus:border-mint focus:ring-2 focus:ring-mint/20 outline-none cursor-pointer"
+              />
+            </div>
+          </div>
+          {!hasTimetable && (
+            <div className="flex items-start gap-2 mt-4 max-w-md">
+              <Info size={14} className="text-amber-400 mt-0.5 flex-shrink-0" />
+              <p className="text-[11px] text-amber-400/80 font-medium leading-relaxed">
+                Timetable not loaded — using default day-order mapping (Mon=Day 1, etc.)
+              </p>
+            </div>
+          )}
         </div>
       </div>
 
-      {/* Classes per day slider */}
-      <div className="flex items-center gap-4 mb-6 p-5 rounded-2xl bg-slate-50 border border-slate-100">
-        <div className="flex items-center gap-2 flex-shrink-0">
-          <Calculator size={18} className="text-violet-600" />
-          <span className="font-bold text-sm text-slate-700">Classes per day</span>
-        </div>
-        <div className="flex items-center gap-3 flex-1">
-          <input
-            type="range"
-            min="1"
-            max="8"
-            step="1"
-            value={classesPerDay}
-            onChange={(e) => setClassesPerDay(parseInt(e.target.value))}
-            className="flex-1 accent-violet-600 cursor-pointer"
-          />
-          <div className="flex items-center gap-1 bg-white rounded-full px-4 py-2 border border-slate-200 shadow-sm">
-            <span className="text-2xl font-display font-bold text-violet-600">{classesPerDay}</span>
+      {/* Empty states */}
+      {!fromDate || !toDate ? (
+        <div className="bg-white rounded-[32px] p-8 md:p-12 border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.02)] flex flex-col items-center justify-center text-center min-h-[280px]">
+          <div className="w-32 h-32 mb-4 opacity-90">
+            <img src="/assets/a-day-off_uk4x.svg" alt="Day off" className="w-full h-full object-contain mix-blend-multiply" />
           </div>
-        </div>
-      </div>
-
-      {!hasValidRange ? (
-        <div className="flex flex-col items-center justify-center py-12 text-center">
-          <div className="w-16 h-16 rounded-full bg-slate-100 flex items-center justify-center mb-4">
-            <Plane size={28} className="text-slate-300" />
-          </div>
-          <p className="text-slate-500 font-medium text-sm mb-1">Plan your holiday</p>
+          <p className="font-display font-bold text-lg text-[#1A1A1A] mb-1">Plan your holiday</p>
           <p className="text-slate-400 text-xs max-w-xs">
-            Select a date range above to see how your attendance would be affected if you skip classes during that period.
+            Select a date range above. We'll check your actual timetable and calendar day orders to calculate missed classes per subject.
+          </p>
+        </div>
+      ) : new Date(fromDate) > new Date(toDate) ? (
+        <div className="bg-white rounded-[32px] p-8 md:p-12 border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.02)] flex flex-col items-center justify-center text-center min-h-[280px]">
+          <div className="w-16 h-16 rounded-full bg-red-50 flex items-center justify-center mb-4">
+            <AlertTriangle size={28} className="text-red-400" />
+          </div>
+          <p className="font-display font-bold text-lg text-red-600 mb-1">Invalid date range</p>
+          <p className="text-slate-400 text-xs">The "from" date must be before the "to" date.</p>
+        </div>
+      ) : !hasValidRange ? (
+        <div className="bg-white rounded-[32px] p-8 md:p-12 border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.02)] flex flex-col items-center justify-center text-center min-h-[280px]">
+          <div className="w-32 h-32 mb-4 opacity-90">
+            <img src="/assets/vacation-selfie_q5bs.svg" alt="Vacation" className="w-full h-full object-contain mix-blend-multiply" />
+          </div>
+          <p className="font-display font-bold text-lg text-mint mb-1">No classes missed!</p>
+          <p className="text-slate-400 text-xs max-w-xs">
+            The selected range ({formatDateShort(fromDate)} – {formatDateShort(toDate)}) doesn't include any working days with classes. You're clear to take this time off!
           </p>
         </div>
       ) : (
         <>
-          {/* Summary */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
-            <div className="rounded-2xl bg-blue-50 border border-blue-100 p-4 text-center">
-              <p className="text-2xl font-display font-bold text-blue-600">{weekdays}</p>
-              <p className="text-[11px] text-blue-500/70 font-medium mt-1">weekdays off</p>
+          {/* Summary cards */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="rounded-[24px] p-5 bg-mint text-[#1A1A1A] flex flex-col justify-between min-h-[120px]">
+              <div className="flex justify-between items-start mb-3">
+                <span className="font-semibold text-sm">Days Off</span>
+                <div className="w-8 h-8 rounded-full bg-black/10 flex items-center justify-center">
+                  <Calendar className="w-4 h-4 text-[#1A1A1A]" />
+                </div>
+              </div>
+              <p className="text-4xl font-display font-bold">{workingDaysMissed}</p>
             </div>
-            <div className="rounded-2xl bg-violet-50 border border-violet-100 p-4 text-center">
-              <p className="text-2xl font-display font-bold text-violet-600">{totalMissed}</p>
-              <p className="text-[11px] text-violet-500/70 font-medium mt-1">total classes missed</p>
+            <div className="rounded-[24px] p-5 bg-lavender text-[#1A1A1A] flex flex-col justify-between min-h-[120px]">
+              <div className="flex justify-between items-start mb-3">
+                <span className="font-semibold text-sm">Classes Missed</span>
+                <div className="w-8 h-8 rounded-full bg-black/10 flex items-center justify-center">
+                  <TrendingDown className="w-4 h-4 text-[#1A1A1A]" />
+                </div>
+              </div>
+              <p className="text-4xl font-display font-bold">{totalMissed}</p>
             </div>
-            <div className="rounded-2xl bg-amber-50 border border-amber-100 p-4 text-center">
-              <p className="text-2xl font-display font-bold text-amber-600">
-                {overallPct}% <span className="text-sm text-slate-400">→</span> {projectedOverall}%
-              </p>
-              <p className="text-[11px] text-amber-500/70 font-medium mt-1">overall attendance</p>
+            <div className="rounded-[24px] p-5 bg-beige text-[#1A1A1A] flex flex-col justify-between min-h-[120px]">
+              <div className="flex justify-between items-start mb-3">
+                <span className="font-semibold text-sm">Overall</span>
+                <div className="w-8 h-8 rounded-full bg-black/10 flex items-center justify-center">
+                  <TrendingUp className="w-4 h-4 text-[#1A1A1A]" />
+                </div>
+              </div>
+              <div>
+                <p className="text-2xl font-display font-bold">{overallPct}%</p>
+                <p className="text-xs text-[#1A1A1A]/60 font-medium">→ {projectedOverall}%</p>
+              </div>
             </div>
-            <div className="rounded-2xl bg-red-50 border border-red-100 p-4 text-center">
-              <p className="text-2xl font-display font-bold text-red-600">{subjectsDropping}</p>
-              <p className="text-[11px] text-red-500/70 font-medium mt-1">subjects dropping below 75%</p>
+            <div className="rounded-[24px] p-5 bg-terracotta text-white flex flex-col justify-between min-h-[120px]">
+              <div className="flex justify-between items-start mb-3">
+                <span className="font-semibold text-sm">At Risk</span>
+                <div className="w-8 h-8 rounded-full bg-black/10 flex items-center justify-center">
+                  <AlertTriangle className="w-4 h-4 text-white" />
+                </div>
+              </div>
+              <p className="text-4xl font-display font-bold">{subjectsDropping}</p>
             </div>
           </div>
 
-          {/* Warning if subjects drop below 75% */}
+          {/* Warning */}
           {subjectsDropping > 0 && (
-            <div className="rounded-2xl bg-red-50 border border-red-200 p-4 mb-6 flex items-start gap-3">
-              <AlertTriangle size={18} className="text-red-600 mt-0.5 flex-shrink-0" />
-              <p className="text-xs text-red-700 font-medium leading-relaxed">
-                <span className="font-bold">{subjectsDropping} subject{subjectsDropping > 1 ? "s" : ""}</span> will drop below 75% if you take this holiday.
-                Check the recovery column to see how many classes you'd need to attend afterward to get back on track.
+            <div className="rounded-[24px] bg-terracotta/10 border border-terracotta/30 p-5 flex items-start gap-3">
+              <AlertTriangle size={20} className="text-terracotta mt-0.5 flex-shrink-0" />
+              <p className="text-sm text-terracotta font-medium leading-relaxed">
+                <span className="font-bold">{subjectsDropping} subject{subjectsDropping > 1 ? "s" : ""}</span> will drop below 75% if you take this holiday. Check the recovery column below.
               </p>
             </div>
           )}
 
-          {/* Per-subject projection */}
-          <div className="space-y-2">
-            <div className="grid grid-cols-12 gap-2 px-3 pb-2 border-b border-slate-100">
-              <span className="col-span-3 text-[10px] font-bold text-slate-400 uppercase">Subject</span>
-              <span className="col-span-2 text-[10px] font-bold text-slate-400 uppercase text-right">Now</span>
-              <span className="col-span-2 text-[10px] font-bold text-slate-400 uppercase text-right">After</span>
-              <span className="col-span-2 text-[10px] font-bold text-slate-400 uppercase text-right">Drop</span>
-              <span className="col-span-3 text-[10px] font-bold text-slate-400 uppercase text-right">Recovery</span>
-            </div>
-            {projections.map((p) => (
-              <div
-                key={p.courseCode}
-                className="grid grid-cols-12 gap-2 items-center p-3 rounded-2xl border border-slate-100 hover:bg-slate-50/50 transition-colors"
-              >
-                <div className="col-span-3 min-w-0">
-                  <p className="font-mono text-[10px] font-bold text-slate-500 uppercase truncate">{p.courseCode}</p>
-                  <p className="text-xs text-slate-400 truncate">{p.courseTitle}</p>
-                </div>
-                <div className="col-span-2 text-right">
-                  <span className="text-sm font-bold text-slate-700">{p.pct}%</span>
-                </div>
-                <div className="col-span-2 text-right">
-                  <span className={`text-sm font-bold ${parseFloat(p.newPct) < 75 ? "text-red-600" : "text-slate-700"}`}>
-                    {p.newPct}%
-                  </span>
-                </div>
-                <div className="col-span-2 text-right">
-                  <span className="text-sm font-bold text-red-500">-{p.drop}%</span>
-                </div>
-                <div className="col-span-3 text-right">
-                  {p.recoveryNeeded > 0 ? (
-                    <span className="text-xs font-bold text-red-600">
-                      Need {p.recoveryNeeded} classes
-                    </span>
-                  ) : (
-                    <span className="text-xs font-bold text-emerald-600">
-                      Still safe
-                    </span>
-                  )}
-                </div>
+          {/* Day-by-day breakdown — collapsible */}
+          <div className="bg-white rounded-[32px] p-6 md:p-8 border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.02)]">
+            <button
+              onClick={() => setShowDayBreakdown(!showDayBreakdown)}
+              className="w-full flex items-center justify-between cursor-pointer"
+            >
+              <div className="flex items-center gap-2">
+                <Calendar size={18} className="text-slate-400" />
+                <h3 className="font-display font-bold text-lg text-[#1A1A1A]">Day-by-day Breakdown</h3>
               </div>
-            ))}
+              {showDayBreakdown ? <ChevronUp size={18} className="text-slate-400" /> : <ChevronDown size={18} className="text-slate-400" />}
+            </button>
+            <AnimatePresence>
+              {showDayBreakdown && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: "auto" }}
+                  exit={{ opacity: 0, height: 0 }}
+                  className="overflow-hidden mt-4"
+                >
+                  <div className="flex flex-wrap gap-2">
+                    {dayBreakdown.map((d) => (
+                      <div
+                        key={d.key}
+                        className={`px-3 py-2.5 rounded-2xl text-center border min-w-[85px] ${
+                          d.isWorkingDay ? "bg-terracotta/10 border-terracotta/20" : "bg-slate-50 border-slate-100"
+                        }`}
+                        title={d.classes.map((c) => `${c.courseCode} (${c.timing})`).join(", ") || "No classes"}
+                      >
+                        <p className="text-[10px] font-bold text-slate-400">
+                          {d.date.toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                        </p>
+                        <p className={`text-xs font-bold mt-0.5 ${d.isWorkingDay ? "text-terracotta" : "text-slate-400"}`}>
+                          {d.dayLabel}
+                        </p>
+                        {d.isWorkingDay && (
+                          <p className="text-[10px] text-terracotta/80 font-medium mt-0.5">
+                            {d.classesCount} {d.classesCount === 1 ? "class" : "classes"}
+                          </p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
 
-          <div className="flex items-start gap-2 mt-4 px-1">
-            <Info size={12} className="text-slate-300 mt-0.5 flex-shrink-0" />
-            <p className="text-[10px] text-slate-400 font-medium leading-relaxed">
-              Missed classes are distributed proportionally based on each subject's current class count. Actual impact may vary depending on your timetable and which subjects have classes during the holiday period.
-            </p>
+          {/* Per-subject projection — white card */}
+          <div className="bg-white rounded-[32px] p-6 md:p-8 border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.02)]">
+            <h3 className="font-display font-bold text-xl text-[#1A1A1A] mb-4">Subject Impact</h3>
+            <div className="space-y-2">
+              <div className="grid grid-cols-12 gap-2 px-3 pb-2 border-b border-slate-100">
+                <span className="col-span-3 text-[10px] font-bold text-slate-400 uppercase">Subject</span>
+                <span className="col-span-1 text-[10px] font-bold text-slate-400 uppercase text-right">Miss</span>
+                <span className="col-span-2 text-[10px] font-bold text-slate-400 uppercase text-right">Now</span>
+                <span className="col-span-2 text-[10px] font-bold text-slate-400 uppercase text-right">After</span>
+                <span className="col-span-2 text-[10px] font-bold text-slate-400 uppercase text-right">Drop</span>
+                <span className="col-span-2 text-[10px] font-bold text-slate-400 uppercase text-right">Recovery</span>
+              </div>
+              {projections.map((p) => (
+                <div
+                  key={p.courseCode}
+                  className="grid grid-cols-12 gap-2 items-center p-3 rounded-2xl border border-slate-100 hover:bg-slate-50/50 transition-colors"
+                >
+                  <div className="col-span-3 min-w-0">
+                    <p className="font-mono text-[10px] font-bold text-slate-500 uppercase truncate">{p.courseCode}</p>
+                    <p className="text-xs text-slate-400 truncate">{p.courseTitle}</p>
+                  </div>
+                  <div className="col-span-1 text-right">
+                    <span className="text-sm font-bold text-violet-600">{p.missedForThis}</span>
+                  </div>
+                  <div className="col-span-2 text-right">
+                    <span className={`text-sm font-bold ${p.alreadyBelow ? "text-red-600" : "text-slate-700"}`}>{p.pct}%</span>
+                  </div>
+                  <div className="col-span-2 text-right">
+                    <span className={`text-sm font-bold ${parseFloat(p.newPct) < 75 ? "text-red-600" : "text-slate-700"}`}>{p.newPct}%</span>
+                  </div>
+                  <div className="col-span-2 text-right">
+                    <span className="text-sm font-bold text-terracotta">-{p.drop}%</span>
+                  </div>
+                  <div className="col-span-2 text-right">
+                    {p.recoveryNeeded > 0 ? (
+                      <span className="text-xs font-bold px-2.5 py-1.5 rounded-md text-red-700 bg-red-100">
+                        Need {p.recoveryNeeded}
+                      </span>
+                    ) : (
+                      <span className="text-xs font-bold px-2.5 py-1.5 rounded-md text-emerald-700 bg-emerald-100">
+                        Still safe
+                      </span>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="flex items-start gap-2 mt-4 px-1">
+              <Info size={12} className="text-slate-300 mt-0.5 flex-shrink-0" />
+              <p className="text-[10px] text-slate-400 font-medium leading-relaxed">
+                Missed classes are calculated from your actual timetable and academic calendar day orders. Holidays and weekends in the range are automatically excluded.
+              </p>
+            </div>
           </div>
         </>
       )}
@@ -393,32 +546,32 @@ function HolidayPlanner({ records }) {
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
-export default function AttendancePlanner({ records }) {
-  const [mode, setMode] = useState("margin"); // "margin" | "holiday"
+export default function AttendancePlanner({ records, timetable, calendarMap }) {
+  const [mode, setMode] = useState("margin");
 
   return (
-    <div className="attendance-row bg-white rounded-[32px] p-6 md:p-8 border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.02)]" style={{ opacity: 0 }}>
-      {/* Header */}
-      <div className="flex items-center justify-between mb-6">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-full bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center">
-            <Sparkles className="w-5 h-5 text-white" />
+    <div className="space-y-6">
+      {/* Section header — dark hero banner matching app style */}
+      <div className="bg-[#1A1A1A] rounded-[32px] p-8 md:p-10 flex flex-col md:flex-row items-start md:items-center justify-between overflow-hidden relative min-h-[200px]">
+        <div className="absolute inset-y-0 right-0 h-full w-[40%] sm:w-48 md:w-72 opacity-90 mix-blend-screen pointer-events-none py-4 pr-6">
+          <img src="/assets/time-management_4ss6.svg" alt="Time management" className="w-full h-full object-contain object-right" />
+        </div>
+        <div className="relative z-10 text-white w-[60%] sm:w-[65%] md:w-auto md:max-w-sm mb-4 md:mb-0">
+          <div className="flex items-center gap-2 mb-2">
+            <Sparkles size={18} className="text-mint" />
+            <span className="text-mint text-xs font-bold uppercase tracking-wide">Planner</span>
           </div>
-          <div>
-            <h3 className="font-display font-bold text-2xl text-[#1A1A1A]">Attendance Planner</h3>
-            <p className="text-xs text-slate-400 font-medium">Plan your attendance — reach your target or plan a holiday</p>
-          </div>
+          <h1 className="font-display text-3xl sm:text-4xl font-bold mb-2 tracking-tight">Attendance Planner</h1>
+          <p className="text-white/70 text-sm font-medium">Set a target or plan a holiday — see exactly what it takes to stay above 75%.</p>
         </div>
       </div>
 
       {/* Mode toggle */}
-      <div className="flex gap-2 mb-6 p-1.5 bg-slate-100 rounded-2xl">
+      <div className="flex gap-2 p-1.5 bg-[#1A1A1A] rounded-full max-w-md mx-auto">
         <button
           onClick={() => setMode("margin")}
-          className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-bold transition-all cursor-pointer ${
-            mode === "margin"
-              ? "bg-white text-violet-600 shadow-sm"
-              : "text-slate-500 hover:text-slate-700"
+          className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-full text-sm font-bold transition-all cursor-pointer ${
+            mode === "margin" ? "bg-mint text-[#1A1A1A]" : "text-white/50 hover:text-white/80"
           }`}
         >
           <Target size={16} />
@@ -426,10 +579,8 @@ export default function AttendancePlanner({ records }) {
         </button>
         <button
           onClick={() => setMode("holiday")}
-          className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-bold transition-all cursor-pointer ${
-            mode === "holiday"
-              ? "bg-white text-violet-600 shadow-sm"
-              : "text-slate-500 hover:text-slate-700"
+          className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-full text-sm font-bold transition-all cursor-pointer ${
+            mode === "holiday" ? "bg-mint text-[#1A1A1A]" : "text-white/50 hover:text-white/80"
           }`}
         >
           <Plane size={16} />
@@ -449,7 +600,7 @@ export default function AttendancePlanner({ records }) {
           {mode === "margin" ? (
             <MarginCalculator records={records} />
           ) : (
-            <HolidayPlanner records={records} />
+            <HolidayPlanner records={records} calendarMap={calendarMap} timetable={timetable} />
           )}
         </motion.div>
       </AnimatePresence>

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { CalendarCheck, TrendingUp, TrendingDown, LineChart as LineChartIcon } from "lucide-react";
 import anime from "animejs";
 import { useNavigate } from "react-router-dom";
@@ -7,6 +7,7 @@ import { api } from "../api/client.js";
 import Loading from "../components/Loading.jsx";
 import FacultyAvatar from "../components/FacultyAvatar.jsx";
 import AttendancePlanner from "../components/AttendancePlanner.jsx";
+import { buildCalendarMap } from "../utils/calendarTimetableSync.js";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from "recharts";
 
 export default function Attendance() {
@@ -16,6 +17,8 @@ export default function Attendance() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [history, setHistory] = useState([]);
+  const [timetable, setTimetable] = useState(null);
+  const [calendarMap, setCalendarMap] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -23,13 +26,20 @@ export default function Attendance() {
 
     const fetchData = async () => {
       try {
-        const [attendanceData, historyResponse] = await Promise.all([
+        const [attendanceData, historyResponse, initData] = await Promise.all([
           api.attendance(user.email),
-          api.getAttendanceHistory(user.email, 30).catch(() => ({ data: [] }))
+          api.getAttendanceHistory(user.email, 30).catch(() => ({ data: [] })),
+          api.init(user.email).catch(() => null),
         ]);
         if (cancelled) return;
         setRecords(attendanceData.attendance);
         setHistory(historyResponse.data || []);
+        if (initData) {
+          setTimetable(initData.timetable || null);
+          if (initData.calendar) {
+            setCalendarMap(buildCalendarMap(initData.calendar));
+          }
+        }
         setLoading(false);
 
         // If photos aren't ready yet, poll again in 3s (silently)
@@ -181,7 +191,7 @@ export default function Attendance() {
       </div>
 
       {/* Attendance Planner */}
-      <AttendancePlanner records={records} />
+      <AttendancePlanner records={records} timetable={timetable} calendarMap={calendarMap} />
 
       {/* Attendance list */}
       <div className="bg-white rounded-[32px] p-6 md:p-8 border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.02)]">
