@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
-import { CalendarCheck, TrendingUp, TrendingDown } from "lucide-react";
+import { CalendarCheck, TrendingUp, TrendingDown, LineChart as LineChartIcon } from "lucide-react";
 import anime from "animejs";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth.jsx";
 import { api } from "../api/client.js";
 import Loading from "../components/Loading.jsx";
 import FacultyAvatar from "../components/FacultyAvatar.jsx";
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from "recharts";
 
 export default function Attendance() {
   const { user, logout } = useAuth();
@@ -13,6 +14,7 @@ export default function Attendance() {
   const [records, setRecords] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [history, setHistory] = useState([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -20,13 +22,17 @@ export default function Attendance() {
 
     const fetchData = async () => {
       try {
-        const data = await api.attendance(user.email);
+        const [attendanceData, historyData] = await Promise.all([
+          api.attendance(user.email),
+          api.getAttendanceHistory(user.email, 30).catch(() => ({ data: [] }))
+        ]);
         if (cancelled) return;
-        setRecords(data.attendance);
+        setRecords(attendanceData.attendance);
+        setHistory(historyData || []);
         setLoading(false);
 
         // If photos aren't ready yet, poll again in 3s (silently)
-        if (!data.photosReady) {
+        if (!attendanceData.photosReady) {
           pollTimer = setTimeout(fetchData, 3000);
         }
       } catch (err) {
@@ -122,6 +128,42 @@ export default function Attendance() {
           subColor="text-white/80"
         />
       </div>
+
+      {/* Attendance History Chart */}
+      {history.length > 0 && (
+        <div className="attendance-row bg-white rounded-[32px] p-6 md:p-8 border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.02)]" style={{ opacity: 0 }}>
+          <div className="flex items-center justify-between mb-6">
+            <h3 className="font-display font-bold text-2xl text-[#1A1A1A]">Attendance Trend</h3>
+            <div className="w-10 h-10 rounded-full bg-mint/20 flex items-center justify-center">
+              <LineChartIcon className="w-5 h-5 text-mint" />
+            </div>
+          </div>
+          <ResponsiveContainer width="100%" height={300}>
+            <LineChart data={history.map(h => ({
+              date: new Date(h.snapshot_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+              percentage: parseFloat(h.overall_percentage || 0)
+            }))}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
+              <XAxis dataKey="date" stroke="#6B7280" style={{ fontSize: '12px' }} />
+              <YAxis domain={[0, 100]} stroke="#6B7280" style={{ fontSize: '12px' }} />
+              <Tooltip 
+                contentStyle={{ 
+                  backgroundColor: '#1A1A1A', 
+                  border: 'none', 
+                  borderRadius: '12px',
+                  color: '#fff',
+                  fontSize: '14px',
+                  padding: '12px'
+                }}
+                formatter={(value) => [`${value.toFixed(1)}%`, 'Attendance']}
+              />
+              <ReferenceLine y={75} stroke="#F97316" strokeDasharray="5 5" label={{ value: '75% Threshold', position: 'insideTopRight', fill: '#F97316', fontSize: 12 }} />
+              <Line type="monotone" dataKey="percentage" stroke="#00D9A3" strokeWidth={3} dot={{ fill: '#00D9A3', r: 4 }} activeDot={{ r: 6 }} />
+            </LineChart>
+          </ResponsiveContainer>
+          <p className="text-sm text-slate-600 mt-4 text-center">Last 30 days attendance trend</p>
+        </div>
+      )}
 
       {/* Attendance list */}
       <div className="bg-white rounded-[32px] p-6 md:p-8 border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.02)]">

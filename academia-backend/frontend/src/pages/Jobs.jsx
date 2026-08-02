@@ -3,22 +3,25 @@ import {
   CheckCircle2, XCircle, AlertTriangle, Calendar, Users, FileText,
   ArrowLeft, GraduationCap, Layers, Globe, Sparkles, TrendingUp,
   Paperclip, Download, ExternalLink, HelpCircle, Milestone,
-  Briefcase as BriefcaseIcon, Code2,
+  Briefcase as BriefcaseIcon, Code2, Bookmark, BookmarkCheck,
 } from "lucide-react";
 import { useState, useMemo, useEffect } from "react";
 import { usePlacementData } from "../hooks/usePlacementData.js";
 import { placementApi } from "../api/placementClient.js";
 import { useAuth } from "../hooks/useAuth.jsx";
+import { api } from "../api/client.js";
 import Loading from "../components/Loading.jsx";
 import ErrorBox from "../components/ErrorBox.jsx";
 
 export default function Jobs() {
   const { data, loading, error, refetch } = usePlacementData("jobs");
-  const { placementUser } = useAuth();
+  const { placementUser, user } = useAuth();
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("all");
   const [selectedJob, setSelectedJob] = useState(null);
   const [logoMap, setLogoMap] = useState({});
+  const [bookmarks, setBookmarks] = useState([]);
+  const [bookmarkedIds, setBookmarkedIds] = useState(new Set());
 
   useEffect(() => {
     if (!placementUser) return;
@@ -34,6 +37,46 @@ export default function Jobs() {
       .catch(() => {});
   }, [placementUser]);
 
+  useEffect(() => {
+    if (!user?.email) return;
+    api.getBookmarks(user.email)
+      .then((res) => {
+        setBookmarks(res.data || []);
+        setBookmarkedIds(new Set((res.data || []).map(b => b.job_uuid)));
+      })
+      .catch(() => {});
+  }, [user?.email]);
+
+  const toggleBookmark = async (job) => {
+    if (!user?.email) return;
+    const jobUuid = job.uuid || job.id;
+    const isBookmarked = bookmarkedIds.has(jobUuid);
+    
+    try {
+      if (isBookmarked) {
+        await api.removeBookmark(user.email, jobUuid);
+        setBookmarkedIds(prev => {
+          const next = new Set(prev);
+          next.delete(jobUuid);
+          return next;
+        });
+        setBookmarks(prev => prev.filter(b => b.job_uuid !== jobUuid));
+      } else {
+        await api.addBookmark(user.email, {
+          jobUuid,
+          jobTitle: job.jobTitle,
+          companyName: job.companyName,
+          jobData: job,
+          notes: ""
+        });
+        setBookmarkedIds(prev => new Set([...prev, jobUuid]));
+        setBookmarks(prev => [...prev, { job_uuid: jobUuid, job_data: job }]);
+      }
+    } catch (err) {
+      console.error("Bookmark toggle failed:", err);
+    }
+  };
+
   const jobs = useMemo(() => {
     const list = data?._embedded?.entityModels || [];
     let filtered = list;
@@ -41,13 +84,16 @@ export default function Jobs() {
     else if (filter === "applied") filtered = list.filter((j) => j.isApplied);
     else if (filter === "offered") filtered = list.filter((j) => j.isOffered);
     else if (filter === "notEligible") filtered = list.filter((j) => j.isNotEligible);
+    else if (filter === "bookmarked") {
+      filtered = bookmarks.map(b => b.job_data).filter(Boolean);
+    }
     if (!search) return filtered;
     return filtered.filter((j) =>
       j.jobTitle?.toLowerCase().includes(search.toLowerCase()) ||
       j.companyName?.toLowerCase().includes(search.toLowerCase()) ||
       j.jobTag?.toLowerCase().includes(search.toLowerCase())
     );
-  }, [data, search, filter]);
+  }, [data, search, filter, bookmarks]);
 
   if (loading) return <Loading label="Fetching jobs…" />;
   if (error) return <ErrorBox message={error} onRetry={refetch} />;
@@ -63,6 +109,7 @@ export default function Jobs() {
     applied: allJobs.filter((j) => j.isApplied).length,
     offered: allJobs.filter((j) => j.isOffered).length,
     notEligible: allJobs.filter((j) => j.isNotEligible).length,
+    bookmarked: bookmarks.length,
   };
 
   return (
@@ -88,6 +135,7 @@ export default function Jobs() {
           { key: "eligible", label: "Eligible", count: counts.eligible },
           { key: "applied", label: "Applied", count: counts.applied },
           { key: "offered", label: "Offered", count: counts.offered },
+          { key: "bookmarked", label: "Bookmarked", count: counts.bookmarked },
           { key: "notEligible", label: "Not Eligible", count: counts.notEligible },
         ].map((tab) => (
           <button key={tab.key} onClick={() => setFilter(tab.key)}
@@ -103,7 +151,18 @@ export default function Jobs() {
 
       <div className="grid sm:grid-cols-2 xl:grid-cols-3 gap-5">
         {jobs.map((job, i) => (
-          <JobCard key={job.id || i} job={job} index={i} logoUrl={logoMap[job.companyId]} onClick={() => setSelectedJob(job)} />
+          <JobCard 
+            key={job.id || i} 
+            job={job} 
+            index={i} 
+            logoUrl={logoMap[job.companyId]} 
+            onClick={() => setSelectedJob(job)}
+            isBookmarked={bookmarkedIds.has(job.uuid || job.id)}
+            onToggleBookmark={(e) => {
+              e.stopPropagation();
+              toggleBookmark(job);
+            }}
+          />
         ))}
       </div>
 
@@ -323,7 +382,7 @@ function CardMotif({ motif, color }) {
   }
 }
 
-function JobCard({ job, index = 0, logoUrl, onClick }) {
+function JobCard({ job, index = 0, logoUrl, onClick, isBookmarked, onToggleBookmark }) {
   const status = getStatusInfo(job);
   const ctc = formatCTC(job.minCtc, job.maxCtc);
   const applyBy = formatDate(job.jobApplyBy);
@@ -354,9 +413,22 @@ function JobCard({ job, index = 0, logoUrl, onClick }) {
             <img src={avatar} alt="" className="w-10 h-10 object-contain" />
           )}
         </div>
-        <span className={`text-[12px] font-semibold ${isUrgent ? "text-[#D97757]" : "text-white/45"}`}>
-          {isUrgent ? `${days}d left` : applyBy}
-        </span>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={onToggleBookmark}
+            className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center transition-colors"
+            title={isBookmarked ? "Remove bookmark" : "Bookmark job"}
+          >
+            {isBookmarked ? (
+              <BookmarkCheck size={16} className="text-mint" />
+            ) : (
+              <Bookmark size={16} className="text-white/60" />
+            )}
+          </button>
+          <span className={`text-[12px] font-semibold ${isUrgent ? "text-[#D97757]" : "text-white/45"}`}>
+            {isUrgent ? `${days}d left` : applyBy}
+          </span>
+        </div>
       </div>
 
       <div className="relative z-10 mt-8 pr-16">
