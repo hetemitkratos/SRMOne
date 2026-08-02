@@ -21,8 +21,12 @@ echo "=== Installing Node dependencies ==="
 cd academia-backend
 npm install --omit=dev
 
-echo "=== Pre-downloading Go modules (for faster first request) ==="
+echo "=== Pre-downloading Go modules ==="
 cd academia-scraper
 go mod download
+
+echo "=== Pre-building Go scraper binary ==="
+go build -o loginprobe ./cmd/loginprobe
+echo "Binary built: $(ls -la loginprobe)"
 
 echo "=== Build complete ==="
