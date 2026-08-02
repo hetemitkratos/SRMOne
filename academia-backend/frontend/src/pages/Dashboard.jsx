@@ -215,14 +215,12 @@ export default function Dashboard() {
 
           <button
             onClick={() => navigate("/placement/notices")}
-            className="relative w-11 h-11 rounded-full bg-white flex items-center justify-center text-slate-500 hover:text-[#1A1A1A] hover:bg-slate-50 transition-colors shadow-sm hidden sm:flex cursor-pointer border border-slate-100"
+            className="relative w-10 h-10 sm:w-11 sm:h-11 rounded-full bg-white flex items-center justify-center text-slate-500 hover:text-[#1A1A1A] hover:bg-slate-50 transition-colors shadow-sm flex cursor-pointer border border-slate-100"
             title="Notices"
           >
-            <Mail size={19} strokeWidth={2.5} />
+            <Mail size={18} strokeWidth={2.5} />
           </button>
-          <div className="hidden sm:block">
-            <NotificationBell />
-          </div>
+          <NotificationBell />
 
           <div className="relative ml-1 flex items-center">
             <button

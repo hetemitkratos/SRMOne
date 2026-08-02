@@ -26,8 +26,11 @@ export default function Overview() {
   const [selectedDay, setSelectedDay] = useState(() => {
     const dayMap = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
     const dayOrderMap = { Mon: "Day 1", Tue: "Day 2", Wed: "Day 3", Thu: "Day 4", Fri: "Day 5" };
-    // Default to today's day order on weekdays; null on weekends (show today's condition only)
-    return dayOrderMap[dayMap[new Date().getDay()]] || null;
+    // Default to today's day order; on weekends default to Day 1 (Monday)
+    const today = new Date().getDay();
+    if (today === 0) return "Day 1"; // Sunday → show Monday's schedule
+    if (today === 6) return "Day 5"; // Saturday → show Friday's schedule
+    return dayOrderMap[dayMap[today]] || "Day 1";
   });
 
   // Build calendar map from init data (must be before conditional returns)
@@ -295,28 +298,23 @@ export default function Overview() {
             </div>
 
             <div className="">
-              {/* Holiday today */}
-              {selectedDay === null && isTodayHoliday ? (
-                <div className="text-center py-16 bg-white/50 rounded-[24px] border border-white/50">
+              {/* Holiday/Weekend banner (shown above schedule if today is a holiday or weekend) */}
+              {isTodayHoliday ? (
+                <div className="text-center py-8 mb-4 bg-white/50 rounded-[24px] border border-white/50">
                   <HolidayGif eventName={todayHolidayEvent} />
                   <p className="text-slate-800 font-bold text-xl">{todayHolidayEvent || "It's a Holiday!"}</p>
-                  <p className="text-slate-500 mt-2 font-medium">No classes today. Enjoy your day off!</p>
+                  <p className="text-slate-500 mt-2 font-medium">No classes today. Here's a preview of {selectedDay}.</p>
                 </div>
-              ) : selectedDay === null && isWeekend ? (
-                /* Weekend today */
-                <div className="text-center py-16 bg-white/50 rounded-[24px] border border-white/50">
+              ) : isWeekend ? (
+                <div className="text-center py-8 mb-4 bg-white/50 rounded-[24px] border border-white/50">
                   <HolidayGif eventName={`happy ${dayName} weekend`} />
                   <p className="text-slate-800 font-bold text-xl">It's {dayName} — Weekend!</p>
-                  <p className="text-slate-500 mt-2 font-medium">No classes today. Pick a day above to preview that day's schedule.</p>
+                  <p className="text-slate-500 mt-2 font-medium">Here's a preview of {selectedDay}.</p>
                 </div>
-              ) : selectedDay === null ? (
-                /* No day selected */
-                <div className="text-center py-16 bg-white/50 rounded-[24px] border border-white/50">
-                  <img src="/assets/the-search_cjxa.svg" alt="Pick a day" className="w-40 h-40 mx-auto mb-6 opacity-90 drop-shadow-sm" />
-                  <p className="text-slate-800 font-bold text-xl">No day selected</p>
-                  <p className="text-slate-500 mt-2 font-medium">Pick a day above to view its schedule.</p>
-                </div>
-              ) : dayClasses.length === 0 ? (
+              ) : null}
+
+              {/* Schedule for selected day */}
+              {dayClasses.length === 0 ? (
                 <div className="text-center py-16 bg-white/50 rounded-[24px] border border-white/50">
                   <img src="/assets/coffee-time_98vi.svg" alt="Free time" className="w-40 h-40 mx-auto mb-6 opacity-90 drop-shadow-sm" />
                   <p className="text-slate-800 font-bold text-xl">No classes scheduled for {selectedDay} 🎉</p>

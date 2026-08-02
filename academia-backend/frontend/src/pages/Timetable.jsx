@@ -245,49 +245,6 @@ export default function Timetable() {
         calendarAvailable={!!calendarMap}
       />
 
-      {/* Today's Schedule (if working day with classes) */}
-      {!isTodayHoliday && !isTodayWeekend && todayClasses.length > 0 && (
-        <div className="bg-white rounded-[24px] md:rounded-[32px] p-4 md:p-6 border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.02)]">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="font-display font-bold text-lg md:text-xl text-[#1A1A1A] flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
-              Today's Schedule
-            </h3>
-            <span className="text-xs font-bold text-slate-400 bg-slate-100 px-3 py-1 rounded-full">
-              Day {todayDayOrder} · {todayClasses.length} class{todayClasses.length > 1 ? "es" : ""}
-            </span>
-          </div>
-          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {todayClasses.map((cls, idx) => {
-              const colorClass = colorMap[cls.course.courseCode] || SLOT_COLORS[0];
-              return (
-                <div
-                  key={`today-${idx}`}
-                  className={`tt-cell rounded-[16px] md:rounded-[20px] ${colorClass} p-3 md:p-4 shadow-sm border border-black/5`}
-                >
-                  <p className="text-[10px] font-bold opacity-70 mb-1.5 uppercase tracking-wider flex items-center gap-1">
-                    <Clock size={10} /> {cls.timing}
-                  </p>
-                  <p className="text-[13px] font-bold leading-snug mb-2">{cls.course.courseTitle}</p>
-                  <div className="flex items-center gap-2 mb-2 min-w-0">
-                    <FacultyAvatar name={cls.course.facultyName} photoUrl={cls.course.facultyPhotoUrl} size={20} />
-                    <p className="text-[11px] opacity-80 font-medium truncate">{cleanName(cls.course.facultyName)}</p>
-                  </div>
-                  <div className="flex items-center justify-between pt-2 border-t border-black/5">
-                    <span className="text-[9px] px-2 py-0.5 bg-black/5 rounded-full font-bold uppercase tracking-wider">
-                      {cls.course.courseCode}
-                    </span>
-                    <p className="text-[10px] opacity-80 font-bold flex items-center gap-1">
-                      <MapPin size={10} /> {cls.course.roomNo}
-                    </p>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
       {advisors.length > 0 && (
         <div className="grid sm:grid-cols-2 gap-4">
           {advisors.map((advisor) => (
