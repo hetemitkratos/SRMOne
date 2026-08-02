@@ -46,6 +46,8 @@ export default function Timetable() {
   useEffect(() => {
     let cancelled = false;
     let pollTimer = null;
+    let pollCount = 0;
+    const MAX_POLLS = 5; // Stop after 5 attempts (~15s)
 
     const fetchData = async () => {
       try {
@@ -76,9 +78,12 @@ export default function Timetable() {
           })
           .catch(() => {});
 
-        // If photos aren't ready yet, poll again in 3s (silently)
+        // If photos aren't ready yet, poll again in 3s (silently) — but stop after MAX_POLLS
         if (!data.photosReady) {
-          pollTimer = setTimeout(fetchData, 3000);
+          pollCount++;
+          if (pollCount < MAX_POLLS) {
+            pollTimer = setTimeout(fetchData, 3000);
+          }
         }
       } catch (err) {
         if (cancelled) return;
@@ -372,8 +377,8 @@ export default function Timetable() {
                         className={`tt-cell rounded-[20px] md:rounded-[24px] ${colorClass} p-3 md:p-4 shadow-sm border border-black/5 relative overflow-hidden group`}
                         style={{ opacity: 0 }}
                       >
-                        <p className="text-[10px] font-bold opacity-70 mb-2 uppercase tracking-wider flex items-center gap-1">
-                          <Clock size={10} /> {cls.timing}
+                        <p className="text-[10px] font-bold opacity-70 mb-2 uppercase tracking-wider">
+                          {cls.course.courseCode}
                         </p>
                         <p className="text-[13px] font-bold leading-snug mb-2">
                           {cls.course.courseTitle}
@@ -389,8 +394,8 @@ export default function Timetable() {
                           </p>
                         </div>
                         <div className="flex items-center justify-between mt-auto pt-3 border-t border-black/5">
-                          <span className="text-[9px] px-2 py-1 bg-black/5 rounded-full font-bold uppercase tracking-wider">
-                            {cls.course.courseCode}
+                          <span className="text-[9px] px-2 py-1 bg-black/5 rounded-full font-bold flex items-center gap-1">
+                            <Clock size={9} /> {cls.timing}
                           </span>
                           <p className="text-[10px] opacity-80 font-bold flex items-center gap-1">
                             <MapPin size={10} /> {cls.course.roomNo}

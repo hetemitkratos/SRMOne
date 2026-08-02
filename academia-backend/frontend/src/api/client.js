@@ -50,6 +50,7 @@ export const api = {
   schedule: (email) => request(`/schedule?email=${encodeURIComponent(email)}`),
   studentPhoto: (email) => `${BASE}/student-photo?email=${encodeURIComponent(email)}`,
   facultyPhoto: (url) => `${BASE}/faculty-photo?url=${encodeURIComponent(url)}`,
+  faculty: (name) => request(`/faculty?name=${encodeURIComponent(name)}`),
 
   // Profile caching
   getCachedProfile: (email) => request(`/profile/cache?email=${encodeURIComponent(email)}`),

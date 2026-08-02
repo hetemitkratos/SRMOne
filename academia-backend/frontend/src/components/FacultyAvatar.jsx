@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { User } from "lucide-react";
 import { api } from "../api/client.js";
-import ImagePreview from "./ImagePreview.jsx";
+import FacultyProfileModal from "./FacultyProfileModal.jsx";
 
 function cleanFacultyName(name = "") {
   return String(name)
@@ -39,7 +39,8 @@ export default function FacultyAvatar({
   const showImage = Boolean(proxied) && !failed;
   const px = typeof size === "number" ? `${size}px` : size;
   const label = cleanFacultyName(name) || name || "Faculty";
-  const canPreview = previewable && showImage;
+  // Allow preview if we have a photo OR a name (so faculty info is accessible even without a photo)
+  const canPreview = previewable && (showImage || Boolean(name));
 
   return (
     <>
@@ -72,11 +73,10 @@ export default function FacultyAvatar({
         )}
       </button>
 
-      <ImagePreview
+      <FacultyProfileModal
         open={previewOpen}
-        src={proxied}
-        alt={label}
-        caption={label}
+        name={name}
+        photoUrl={photoUrl}
         onClose={() => setPreviewOpen(false)}
       />
     </>

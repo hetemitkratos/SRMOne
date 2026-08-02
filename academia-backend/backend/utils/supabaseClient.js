@@ -296,3 +296,33 @@ export async function removeJobBookmark(email, jobUuid) {
     .eq("job_uuid", jobUuid);
   if (error) console.error("[supabase] removeJobBookmark:", error.message);
 }
+
+// ─── Faculty Profile Cache ───────────────────────────────────────────────────
+// Persists scraped faculty profiles so we don't re-scrape SRM on every request.
+
+export async function getCachedFacultyProfile(cacheKey) {
+  if (!supabase) return null;
+  const { data, error } = await supabase
+    .from("faculty_cache")
+    .select("profile_data, fetched_at")
+    .eq("cache_key", cacheKey)
+    .maybeSingle();
+  if (error) {
+    console.error("[supabase] getCachedFacultyProfile:", error.message);
+    return null;
+  }
+  return data;
+}
+
+export async function saveCachedFacultyProfile(cacheKey, profileData) {
+  if (!supabase) return null;
+  const { error } = await supabase
+    .from("faculty_cache")
+    .upsert({
+      cache_key: cacheKey,
+      profile_data: profileData,
+      fetched_at: new Date().toISOString(),
+    }, { onConflict: "cache_key" });
+  if (error) console.error("[supabase] saveCachedFacultyProfile:", error.message);
+  return null;
+}

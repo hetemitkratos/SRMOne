@@ -1701,6 +1701,23 @@ app.get("/faculty", async (req, res) => {
     return res.ok({ faculty: cached.data });
   }
 
+  // Check Supabase DB cache (persists across server restarts)
+  try {
+    const dbCached = await supabaseClient.getCachedFacultyProfile(cacheKey);
+    if (dbCached?.profile_data) {
+      const age = Date.now() - new Date(dbCached.fetched_at).getTime();
+      if (age < FACULTY_CACHE_TTL) {
+        // Refresh in-memory cache too
+        const entry = { data: dbCached.profile_data, fetchedAt: new Date(dbCached.fetched_at).getTime() };
+        facultyCache.set(cacheKey, entry);
+        facultyCache.set(naiveSlug, entry);
+        return res.ok({ faculty: dbCached.profile_data });
+      }
+    }
+  } catch (e) {
+    // Non-fatal — fall through to scraping
+  }
+
   // Deduplicate concurrent requests for the same teacher
   if (!global.facultyInFlight) global.facultyInFlight = new Map();
   if (global.facultyInFlight.has(cacheKey)) {
@@ -1854,6 +1871,11 @@ app.get("/faculty", async (req, res) => {
     const cacheEntry = { data: selectedProfile, fetchedAt: Date.now() };
     facultyCache.set(cacheKey, cacheEntry);
     facultyCache.set(naiveSlug, cacheEntry);
+
+    // Save to Supabase DB cache (persists across restarts)
+    supabaseClient.saveCachedFacultyProfile(cacheKey, selectedProfile).catch((e) => {
+      log("FACULTY", `DB cache save failed for "${cleanName}": ${e.message}`);
+    });
 
     return res.ok({ faculty: selectedProfile });
   } catch (err) {
