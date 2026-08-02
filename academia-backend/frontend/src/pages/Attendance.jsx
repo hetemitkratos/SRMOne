@@ -6,7 +6,7 @@ import { useAuth } from "../hooks/useAuth.jsx";
 import { api } from "../api/client.js";
 import Loading from "../components/Loading.jsx";
 import FacultyAvatar from "../components/FacultyAvatar.jsx";
-import AttendancePrediction from "../components/AttendancePrediction.jsx";
+import AttendancePlanner from "../components/AttendancePlanner.jsx";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from "recharts";
 
 export default function Attendance() {
@@ -180,8 +180,8 @@ export default function Attendance() {
         )}
       </div>
 
-      {/* Attendance Prediction */}
-      <AttendancePrediction records={records} />
+      {/* Attendance Planner */}
+      <AttendancePlanner records={records} />
 
       {/* Attendance list */}
       <div className="bg-white rounded-[32px] p-6 md:p-8 border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.02)]">
