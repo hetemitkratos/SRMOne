@@ -503,6 +503,9 @@ app.post("/connect", loginLimiter, async (req, res) => {
       fetchErrors: {},
     };
 
+    // Set cooldown so subsequent auto-login calls don't hit Haveloc again
+    autoLoginCooldown.set(academiaEmail, Date.now());
+
     return res.ok({
       message: "Placement account connected successfully",
       username: sessionKey,

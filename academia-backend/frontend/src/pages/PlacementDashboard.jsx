@@ -23,7 +23,7 @@ const PLACEMENT_NAV = [
 ];
 
 export default function PlacementDashboard() {
-  const { user, placementUser, logoutPlacement, setPlacementConnected } = useAuth();
+  const { user, placementUser, loginPlacement, logoutPlacement, setPlacementConnected, placementConnected } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -90,10 +90,14 @@ export default function PlacementDashboard() {
           if (result.connected && result.username) {
             loginPlacement(result.username);
             setPlacementConnected(true);
+          } else if (result.cooldown) {
+            // Auto-login is on cooldown — show reconnect option
+            setConnectionStatus(status);
           }
         }
-      } catch {
+      } catch (err) {
         // Not connected or auto-login failed
+        console.error("[PlacementDashboard] Auto-login error:", err.message);
       } finally {
         if (!cancelled) setAutoLoggingIn(false);
       }
