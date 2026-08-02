@@ -35,7 +35,7 @@ export function useNotifications() {
 
   // Subscribe to real-time notifications
   useEffect(() => {
-    if (!user?.email) return;
+    if (!user?.email || !supabase) return;
 
     const channel = supabase
       .channel(`notifications:${user.email}`)
@@ -76,7 +76,7 @@ export function useNotifications() {
       .subscribe();
 
     return () => {
-      supabase.removeChannel(channel);
+      if (supabase) supabase.removeChannel(channel);
     };
   }, [user?.email]);
 

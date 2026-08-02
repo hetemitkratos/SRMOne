@@ -516,7 +516,11 @@ app.post("/connect", loginLimiter, async (req, res) => {
  * POST /auto-login
  * Body: { academiaEmail }
  * Looks up stored credentials and silently logs in.
+ * Cooldown: 5 minutes per email to avoid Haveloc rate limits.
  */
+const autoLoginCooldown = new Map(); // email → timestamp
+const AUTO_LOGIN_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes
+
 app.post("/auto-login", loginLimiter, async (req, res) => {
   const { academiaEmail } = req.body;
   if (!academiaEmail) {
@@ -526,10 +530,35 @@ app.post("/auto-login", loginLimiter, async (req, res) => {
     return res.ok({ connected: false, notConfigured: true });
   }
 
+  // Check cooldown — if we recently attempted auto-login, skip
+  const lastAttempt = autoLoginCooldown.get(academiaEmail);
+  const now = Date.now();
+  if (lastAttempt && (now - lastAttempt) < AUTO_LOGIN_COOLDOWN_MS) {
+    // Check if we already have a valid session
+    const creds = await getCredentials(academiaEmail);
+    if (creds && creds.auto_login_enabled) {
+      const sessionKey = creds.placement_username;
+      if (sessions[sessionKey]) {
+        return res.ok({ connected: true, username: sessionKey, cached: true });
+      }
+    }
+    return res.ok({ connected: false, cooldown: true });
+  }
+
+  // Record this attempt
+  autoLoginCooldown.set(academiaEmail, now);
+
   try {
     const creds = await getCredentials(academiaEmail);
     if (!creds || !creds.auto_login_enabled) {
       return res.ok({ connected: false });
+    }
+
+    // If we already have a valid session, don't hit Haveloc again
+    const existingSessionKey = creds.placement_username;
+    if (sessions[existingSessionKey]) {
+      sessions[existingSessionKey].lastActive = Date.now();
+      return res.ok({ connected: true, username: existingSessionKey, cached: true });
     }
 
     // Decrypt password and attempt login
