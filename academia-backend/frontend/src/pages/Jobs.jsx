@@ -768,7 +768,7 @@ function JobDetailPage({ job, onBack, logoMap = {} }) {
         <div className="lg:col-span-2 space-y-6">
           {/* Compensation */}
           <Card title="Compensation" icon={<IndianRupee size={18} />}>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               <StatBox label="Full-time CTC" value={ctc} highlight={ctc !== "—"} sub={job.payType?.replace(/_/g, " ")} />
               <StatBox label="CTC Type" value={job.ctcType?.replace(/_/g, " ") || "—"} />
               {internCtc && <StatBox label="Internship Stipend" value={internCtc} highlight sub={job.stipendType?.replace(/_/g, " ")} />}
@@ -780,7 +780,7 @@ function JobDetailPage({ job, onBack, logoMap = {} }) {
 
           {/* Job & Internship Details */}
           <Card title="Job & Internship Details" icon={<Briefcase size={18} />}>
-            <div className="grid grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
               <div>
                 <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wide mb-3">Job</p>
                 <div className="space-y-2">
@@ -809,8 +809,8 @@ function JobDetailPage({ job, onBack, logoMap = {} }) {
                 {questions.map((q, i) => (
                   <div key={q.id || i} className="rounded-2xl bg-slate-50 p-4">
                     <div className="flex items-start gap-2 mb-2">
-                      <span className="text-[11px] font-bold text-slate-400 mt-0.5">Q{q.orderNum || i + 1}</span>
-                      <p className="text-[14px] font-semibold text-slate-800 flex-1">{q.title}</p>
+                      <span className="text-[11px] font-bold text-slate-400 mt-0.5 flex-shrink-0">Q{q.orderNum || i + 1}</span>
+                      <p className="text-[14px] font-semibold text-slate-800 flex-1 min-w-0 break-words">{q.title}</p>
                       {q.isMandatory && <span className="text-[10px] font-bold text-red-500">Required</span>}
                     </div>
                     {q.options?.length > 0 && (
@@ -877,11 +877,11 @@ function JobDetailPage({ job, onBack, logoMap = {} }) {
                     key={att.id || idx}
                     onClick={() => downloadAttachment(att, idx)}
                     disabled={attDownloading[idx]}
-                    className="flex items-center gap-3 px-4 py-3 rounded-2xl bg-slate-50 hover:bg-slate-100 transition-colors group w-full text-left cursor-pointer disabled:opacity-50"
+                    className="flex items-center gap-3 px-4 py-3 rounded-2xl bg-slate-50 hover:bg-slate-100 transition-colors group w-full text-left cursor-pointer disabled:opacity-50 min-w-0"
                   >
                     <Paperclip size={18} className="text-slate-400 flex-shrink-0" />
-                    <span className="flex-1 text-sm font-semibold text-slate-700 truncate">{att.name || `Attachment ${idx + 1}`}</span>
-                    <span className="inline-flex items-center gap-1 text-xs font-bold text-slate-500 group-hover:text-slate-700">
+                    <span className="flex-1 min-w-0 text-sm font-semibold text-slate-700 break-words">{att.name || `Attachment ${idx + 1}`}</span>
+                    <span className="inline-flex items-center gap-1 text-xs font-bold text-slate-500 group-hover:text-slate-700 flex-shrink-0">
                       {attDownloading[idx] ? "Downloading…" : "Download"} {!attDownloading[idx] && <Download size={14} />}
                     </span>
                   </button>
@@ -897,11 +897,11 @@ function JobDetailPage({ job, onBack, logoMap = {} }) {
                       <button
                         onClick={downloadFile}
                         disabled={jdDownloading}
-                        className="flex items-center gap-3 px-4 py-3 rounded-2xl bg-slate-50 hover:bg-slate-100 transition-colors group w-full text-left cursor-pointer disabled:opacity-50"
+                        className="flex items-center gap-3 px-4 py-3 rounded-2xl bg-slate-50 hover:bg-slate-100 transition-colors group w-full text-left cursor-pointer disabled:opacity-50 min-w-0"
                       >
                         <Paperclip size={18} className="text-slate-400 flex-shrink-0" />
-                        <span className="flex-1 text-sm font-semibold text-slate-700 truncate">Job Description</span>
-                        <span className="inline-flex items-center gap-1 text-xs font-bold text-slate-500 group-hover:text-slate-700">
+                        <span className="flex-1 min-w-0 text-sm font-semibold text-slate-700 break-words">Job Description</span>
+                        <span className="inline-flex items-center gap-1 text-xs font-bold text-slate-500 group-hover:text-slate-700 flex-shrink-0">
                           {jdDownloading ? "Downloading…" : "Download"} {!jdDownloading && <Download size={14} />}
                         </span>
                       </button>
@@ -1075,9 +1075,9 @@ function TimelineItem({ label, value, urgent }) {
 
 function KVRow({ label, value }) {
   return (
-    <div className="flex items-center justify-between py-1">
+    <div className="flex flex-col sm:flex-row sm:items-center justify-between py-1.5 sm:py-1 gap-0.5 sm:gap-2">
       <span className="text-[12px] text-slate-500 font-medium">{label}</span>
-      <span className="text-[13px] font-semibold text-slate-700 text-right">{value}</span>
+      <span className="text-[13px] font-semibold text-slate-700 sm:text-right break-words">{value}</span>
     </div>
   );
 }
