@@ -384,8 +384,33 @@ async function ensureUsableStudentPhoto(email) {
   return session.photoRecoveryPromise;
 }
 
+function goErrorLooksAuthFailure(text) {
+  const t = String(text || "").toLowerCase();
+  if (!t) return false;
+  // Go scraper surfaces portal auth death as "attendance request returned 403", etc.
+  return (
+    /\b(401|403)\b/.test(t) ||
+    t.includes("unauthorized") ||
+    t.includes("forbidden") ||
+    t.includes("not authenticated") ||
+    t.includes("session expired") ||
+    t.includes("jsessionid not established")
+  );
+}
+
 function goResultLooksExpired(result) {
-  if (!result || result.classification === GO_CLASS_AUTHENTICATED) return false;
+  if (!result) return false;
+
+  // HTTP 401/403 (and similar) mean Zoho cookies are dead — detect before any
+  // classification short-circuit, otherwise stale in-memory sessions stick forever.
+  if (goErrorLooksAuthFailure(result.error)) return true;
+  const sectionErrors = result.data?.errors || {};
+  for (const msg of Object.values(sectionErrors)) {
+    if (goErrorLooksAuthFailure(msg)) return true;
+  }
+
+  if (result.classification === GO_CLASS_AUTHENTICATED && result.success) return false;
+
   const urls = [
     result.finalUrl,
     ...(result.redirectSummary || []).flatMap((step) => [step.url, step.location]),
@@ -588,7 +613,13 @@ async function hydrateGoSession(email, { sections = [], calendarSems = [] } = {}
           );
           return currentSession.cache;
         }
-        throw new Error(parsed.error || `Missing data after Go fetch: ${missingAfter.join(", ")}`);
+        const errMsg = parsed.error || `Missing data after Go fetch: ${missingAfter.join(", ")}`;
+        // Belt-and-suspenders: auth failures that slipped past classification checks
+        if (goErrorLooksAuthFailure(errMsg) || goResultLooksExpired(parsed)) {
+          await destroySession(email, "expired (auth failure during fetch)");
+          throw Object.assign(new Error("Session expired. Please login again."), { expired: true });
+        }
+        throw new Error(errMsg);
       }
 
       return currentSession.cache;
@@ -756,10 +787,36 @@ app.post("/login", loginLimiter, async (req, res) => {
     return res.fail(503, "Max users reached. Try again later.");
   }
 
+  // Blind reuse traps users when Zoho cookies died but the Node process still
+  // holds the session (common on Render). Validate live; re-auth if stale.
   if (sessions[email]) {
     touch(email);
-    log("LOGIN", `Reused existing session for ${email}`);
-    return res.ok({ message: "Session already active" });
+    try {
+      const { parsed } = await runGoPayload(email, {
+        mode: "fetch",
+        email,
+        cookies: sessions[email].cookies || [],
+        sections: ["studentInfo"],
+      }, "session-check");
+
+      if (parsed.success && !goResultLooksExpired(parsed)) {
+        if (Array.isArray(parsed.cookies) && parsed.cookies.length) {
+          sessions[email].cookies = parsed.cookies;
+        }
+        mergeGoDataIntoCache(sessions[email], parsed.data);
+        log("LOGIN", `Reused existing session for ${email}`);
+        warmAcademiaSession(email);
+        return res.ok({ message: "Session already active" });
+      }
+
+      log(
+        "LOGIN",
+        `Existing session invalid for ${email}: ${parsed.error || parsed.classification || "check failed"}`
+      );
+    } catch (err) {
+      log("LOGIN", `Existing session check failed for ${email}: ${err.message}`);
+    }
+    await destroySession(email, "stale session on login — re-authenticating");
   }
 
   try {
