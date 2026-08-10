@@ -392,6 +392,32 @@ func (s *LoginSession) completeDailySigninWarning(current RequestSnapshot) (Requ
 // Authentication checks
 // ---------------------------------------------------------------------------
 
+// PrimePortalSession loads the academia home page with seeded cookies so Zoho
+// can refresh CSRF / path cookies before XHR fragment fetches. Fetch-only mode
+// used to hit My_Attendance immediately in a cold process and often got 403.
+func (s *LoginSession) PrimePortalSession() (RequestSnapshot, error) {
+	if !s.IsAuthenticated() {
+		return RequestSnapshot{}, fmt.Errorf("session expired: JSESSIONID missing")
+	}
+
+	snap, err := s.Client.DoRequest("portal_prime", methodGet, s.ServiceURL+"/", nil, "", map[string]string{
+		"Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+	}, true)
+	if err != nil {
+		return snap, fmt.Errorf("portal prime failed: %w", err)
+	}
+	if looksLikeUnauthenticatedPage(snap.URL, string(snap.Body)) {
+		return snap, fmt.Errorf("session expired: portal redirected to sign-in")
+	}
+	if snap.StatusCode == 401 || snap.StatusCode == 403 {
+		return snap, fmt.Errorf("session expired: portal returned %d", snap.StatusCode)
+	}
+	if snap.StatusCode < 200 || snap.StatusCode > 299 {
+		return snap, fmt.Errorf("portal prime returned %d", snap.StatusCode)
+	}
+	return snap, nil
+}
+
 func (s *LoginSession) IsAuthenticated() bool {
 	return s.Client.jar.HasCookie(s.Host, "JSESSIONID")
 }

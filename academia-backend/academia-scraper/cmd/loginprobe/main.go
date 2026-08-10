@@ -89,6 +89,17 @@ func runProbe(req ProbeRequest) ProbeResponse {
 
 	if mode == modeFetch {
 		resp.FinalURL = session.ServiceURL
+		prime, primeErr := session.PrimePortalSession()
+		if prime.URL != "" {
+			resp.FinalURL = prime.URL
+		}
+		if primeErr != nil {
+			resp.Error = primeErr.Error()
+			if strings.Contains(strings.ToLower(primeErr.Error()), "session expired") {
+				resp.Classification = classUnknown
+			}
+			return finalizeResponse(session, resp)
+		}
 		if err := fetchRequestedSections(session, &resp, requestedSections, requestedCalendarSems); err != nil && resp.Error == "" {
 			resp.Error = err.Error()
 		}
@@ -162,13 +173,20 @@ func runProbe(req ProbeRequest) ProbeResponse {
 			return finalizeResponse(session, resp)
 		}
 
-		// login_and_fetch
+		// login_and_fetch — mark auth before section fetch so a single fragment
+		// failure (e.g. attendance 403) does not wipe a valid login.
+		if session.looksAuthenticated(finalSnap) {
+			resp.Classification = classAuthenticated
+		}
 		if err := fetchRequestedSections(session, &resp, requestedSections, requestedCalendarSems); err != nil {
-			if resp.Classification == "" {
-				resp.Classification = classUnknown
-			}
 			if resp.Error == "" {
 				resp.Error = err.Error()
+			}
+			if resp.Classification == classAuthenticated && session.IsAuthenticated() {
+				// Soft failure: cookies are good; missing sections hydrate later.
+				resp.Success = true
+			} else if resp.Classification == "" || resp.Classification == classUnknown {
+				resp.Classification = classUnknown
 			}
 		}
 	}

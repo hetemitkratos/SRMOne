@@ -387,29 +387,26 @@ async function ensureUsableStudentPhoto(email) {
 function goErrorLooksAuthFailure(text) {
   const t = String(text || "").toLowerCase();
   if (!t) return false;
-  // Go scraper surfaces portal auth death as "attendance request returned 403", etc.
   return (
-    /\b(401|403)\b/.test(t) ||
-    t.includes("unauthorized") ||
-    t.includes("forbidden") ||
-    t.includes("not authenticated") ||
     t.includes("session expired") ||
-    t.includes("jsessionid not established")
+    t.includes("jsessionid missing") ||
+    t.includes("jsessionid not established") ||
+    t.includes("redirected to sign-in") ||
+    t.includes("unauthorized") ||
+    t.includes("not authenticated")
   );
 }
 
 function goResultLooksExpired(result) {
   if (!result) return false;
+  if (result.classification === GO_CLASS_AUTHENTICATED && result.success) return false;
 
-  // HTTP 401/403 (and similar) mean Zoho cookies are dead — detect before any
-  // classification short-circuit, otherwise stale in-memory sessions stick forever.
+  // Explicit expiry from portal prime / auth checks (preferred signal).
   if (goErrorLooksAuthFailure(result.error)) return true;
   const sectionErrors = result.data?.errors || {};
   for (const msg of Object.values(sectionErrors)) {
     if (goErrorLooksAuthFailure(msg)) return true;
   }
-
-  if (result.classification === GO_CLASS_AUTHENTICATED && result.success) return false;
 
   const urls = [
     result.finalUrl,
@@ -418,7 +415,27 @@ function goResultLooksExpired(result) {
     .filter(Boolean)
     .map((value) => String(value).toLowerCase());
 
-  return urls.some((value) => value.includes("/accounts/") || value.includes("signin"));
+  // Hard bounce to Zoho accounts / sign-in (ignore bare "signin" in query noise).
+  if (urls.some((value) =>
+    value.includes("/accounts/") ||
+    value.includes("sessions-reminder") ||
+    /\/signin(?:\?|\/|$)/.test(value)
+  )) {
+    return true;
+  }
+
+  // Fragment 401/403 alone is NOT expiry — cold fetch-without-prime used to 403
+  // right after a valid login and wrongly killed the session. Only expire if the
+  // cookie jar no longer has JSESSIONID.
+  const err = String(result.error || "").toLowerCase();
+  if (/\b(401|403)\b/.test(err) || err.includes("forbidden")) {
+    const names = Array.isArray(result.cookieNames)
+      ? result.cookieNames.map(String)
+      : [];
+    if (!names.includes("JSESSIONID")) return true;
+  }
+
+  return false;
 }
 
 function requestedGoDataMissing(session, sections = [], calendarSems = []) {
@@ -520,7 +537,9 @@ async function runGoPayload(email, payload, tag) {
 
   log(
     "GO",
-    `${tag} ${email} runtime=${runtime} exit=${exitCode} success=${parsed.success} classification=${parsed.classification || "unknown"} duration=${elapsedMs}ms`
+    `${tag} ${email} runtime=${runtime} exit=${exitCode} success=${parsed.success} classification=${parsed.classification || "unknown"} duration=${elapsedMs}ms${
+      parsed.error ? ` error=${parsed.error}` : ""
+    }`
   );
 
   return { parsed, runtime, exitCode };
@@ -685,6 +704,9 @@ setInterval(async () => {
 
 const app = express();
 
+// Render (and Cloudflare) sit in front — required for express-rate-limit IP keys.
+app.set("trust proxy", 1);
+
 // Security headers
 app.use(helmet());
 
@@ -709,6 +731,8 @@ const apiLimiter = rateLimit({
   max: 120,
   standardHeaders: true,
   legacyHeaders: false,
+  // Express does not consume the RFC7239 Forwarded header; Render may send it.
+  validate: { forwardedHeader: false },
   message: { success: false, error: "Too many requests. Please slow down." },
 });
 app.use(apiLimiter);
@@ -719,6 +743,7 @@ const loginLimiter = rateLimit({
   max: 5,
   standardHeaders: true,
   legacyHeaders: false,
+  validate: { forwardedHeader: false },
   message: { success: false, error: "Too many login attempts. Try again in 15 minutes." },
   skipSuccessfulRequests: true,
 });
@@ -822,10 +847,14 @@ app.post("/login", loginLimiter, async (req, res) => {
   try {
     log("LOGIN", `Authenticating ${email} via Go scraper`);
 
+    // login_and_fetch keeps cookies in-process for the first data pull (avoids
+    // cold fetch-only 403 right after login). Soft section failures still succeed.
     const { parsed } = await runGoPayload(email, {
-      mode: "login",
+      mode: "login_and_fetch",
       email,
       password,
+      sections: ["studentInfo", "attendance", "marks", "timetable"],
+      calendarSems: ["odd", "even"],
     }, "login");
 
     const cookieCount = Array.isArray(parsed.cookies)
@@ -858,6 +887,10 @@ app.post("/login", loginLimiter, async (req, res) => {
         finalUrl: parsed.finalUrl || "",
       },
     };
+    mergeGoDataIntoCache(sessions[email], parsed.data);
+    if (parsed.error) {
+      log("LOGIN", `Login ok with partial fetch for ${email}: ${parsed.error}`);
+    }
 
     log("LOGIN", `Login success for ${email}`);
     warmAcademiaSession(email);
