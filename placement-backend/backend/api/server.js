@@ -565,6 +565,56 @@ app.get("/captcha-info", (req, res) => {
   });
 });
 
+// ─── Job Application ─────────────────────────────────────────────────────────
+
+app.get("/resumes", requireAuth, apiLimiter, async (req, res) => {
+  try {
+    const { parsed } = await runScraper({
+      mode: "fetch",
+      token: req.session.token,
+      phaveloc: req.session.phaveloc,
+      sections: ["studentDocuments"],
+      uuid: req.session.uuid,
+    });
+    if (!parsed.success) return res.fail(500, parsed.error || "Fetch failed");
+    const data = parsed.sections?.studentDocuments;
+    if (data && data.error) return res.fail(500, data.error);
+    return res.ok({ data });
+  } catch (err) {
+    return res.fail(500, err.message);
+  }
+});
+
+app.post("/apply", requireAuth, apiLimiter, async (req, res) => {
+  const { jobUuid, jobId, answers, resumeName } = req.body;
+  if (!jobUuid) return res.fail(400, "jobUuid is required");
+  if (!resumeName) return res.fail(400, "resumeName is required");
+
+  try {
+    const { parsed } = await runScraper({
+      mode: "apply",
+      token: req.session.token,
+      phaveloc: req.session.phaveloc,
+      jobUuid,
+      jobId: jobId || 0,
+      applyAnswers: answers || [],
+      resumeName,
+    });
+
+    if (!parsed.success) {
+      return res.fail(500, parsed.error || "Application failed");
+    }
+
+    // Invalidate tracker cache so next fetch shows updated status
+    delete req.session.cache.tracker;
+    delete req.session.fetchErrors?.tracker;
+
+    return res.ok({ data: parsed.data });
+  } catch (err) {
+    return res.fail(500, err.message);
+  }
+});
+
 // ─── Placement Credential Storage (Supabase) ─────────────────────────────────
 // These endpoints allow one-time connect + auto-login for placement accounts.
 

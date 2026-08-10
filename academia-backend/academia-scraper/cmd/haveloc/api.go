@@ -332,6 +332,34 @@ func fetchJobAttachments(client *FHClient, jobUUID string) (*json.RawMessage, er
 	return raw, err
 }
 
+func fetchStudentDocuments(client *FHClient, studentUUID string) (*json.RawMessage, error) {
+	url := fmt.Sprintf("%s/studentDocumentService/studentUuid/%s", baseAPIURL, studentUUID)
+	raw, _, err := client.doRequest("POST", url, map[string]interface{}{})
+	return raw, err
+}
+
+func applyForJob(client *FHClient, jobUUID string, jobID int, answers []ApplyAnswer, resumeName string) (*json.RawMessage, int, error) {
+	url := baseAPIURL + "/jobTrackerApply"
+
+	answerBeans := make([]map[string]interface{}, len(answers))
+	for i, a := range answers {
+		answerBeans[i] = map[string]interface{}{
+			"questionId":      a.QuestionID,
+			"responseOptions": a.ResponseOptions,
+		}
+	}
+
+	body := map[string]interface{}{
+		"jobUuid":               jobUUID,
+		"jobId":                 jobID,
+		"jobAppliedAnswerBeans": answerBeans,
+		"resumeName":            resumeName,
+	}
+
+	raw, status, err := client.doRequest("PUT", url, body)
+	return raw, status, err
+}
+
 // ---------------------------------------------------------------------------
 // JD (job description) download
 // ---------------------------------------------------------------------------
@@ -420,6 +448,8 @@ func fetchSection(client *FHClient, section string, req ScraperRequest) (*json.R
 		return fetchJobView(client, req.JobUUID)
 	case "jobAttachments":
 		return fetchJobAttachments(client, req.JobUUID)
+	case "studentDocuments":
+		return fetchStudentDocuments(client, req.UUID)
 	case "probeAttendance":
 		return probeAttendance(client, req.UUID, req.JobUUID)
 	default:

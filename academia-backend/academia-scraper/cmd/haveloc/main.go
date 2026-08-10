@@ -18,6 +18,7 @@ const (
 	modeSendMFA   = "send_mfa"
 	modeLogout    = "logout"
 	modeJD        = "jd"
+	modeApply     = "apply"
 )
 
 func main() {
@@ -49,6 +50,8 @@ func main() {
 		resp = handleLogout(req)
 	case modeJD:
 		resp = handleJD(req)
+	case modeApply:
+		resp = handleApply(req)
 	default:
 		resp = ScraperResponse{Error: fmt.Sprintf("unknown mode: %s", mode)}
 	}
@@ -270,6 +273,46 @@ func handleJD(req ScraperRequest) ScraperResponse {
 		FileData:    base64.StdEncoding.EncodeToString(body),
 		FileName:    fileName,
 		ContentType: contentType,
+	}
+}
+
+func handleApply(req ScraperRequest) ScraperResponse {
+	if req.Token == "" {
+		return ScraperResponse{Error: "token is required"}
+	}
+	if req.JobUUID == "" {
+		return ScraperResponse{Error: "jobUuid is required"}
+	}
+	if req.ResumeName == "" {
+		return ScraperResponse{Error: "resumeName is required"}
+	}
+
+	client := newFHClient()
+	if err := client.setAuth(req.Token, req.Phaveloc); err != nil {
+		return ScraperResponse{Error: fmt.Sprintf("set auth: %v", err)}
+	}
+
+	raw, status, err := applyForJob(client, req.JobUUID, req.JobID, req.ApplyAnswers, req.ResumeName)
+	if err != nil {
+		errMsg := fmt.Sprintf("apply failed: %v", err)
+		if status == 400 || status == 409 {
+			if raw != nil {
+				var errBody struct {
+					Message string `json:"message"`
+					Error   string `json:"error"`
+				}
+				if jsonErr := json.Unmarshal(*raw, &errBody); jsonErr == nil && (errBody.Message != "" || errBody.Error != "") {
+					errMsg = errBody.Message + " " + errBody.Error
+					errMsg = strings.TrimSpace(errMsg)
+				}
+			}
+		}
+		return ScraperResponse{Error: errMsg}
+	}
+
+	return ScraperResponse{
+		Success: true,
+		Data:    raw,
 	}
 }
 

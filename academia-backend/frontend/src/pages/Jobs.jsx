@@ -4,6 +4,7 @@ import {
   ArrowLeft, GraduationCap, Layers, Globe, Sparkles, TrendingUp,
   Paperclip, Download, ExternalLink, HelpCircle, Milestone,
   Briefcase as BriefcaseIcon, Code2, Bookmark, BookmarkCheck, StickyNote,
+  Send, Loader2, X,
 } from "lucide-react";
 import { useState, useMemo, useEffect } from "react";
 import { usePlacementData } from "../hooks/usePlacementData.js";
@@ -586,11 +587,15 @@ function JobDetailPage({ job, onBack, logoMap = {}, isBookmarked = false, bookma
   const [jobViewLoading, setJobViewLoading] = useState(true);
   const [attachments, setAttachments] = useState([]);
   const [attDownloading, setAttDownloading] = useState({});
+  const [showApplyModal, setShowApplyModal] = useState(false);
 
   const detail = jobView || {};
   const hiringRounds = detail.hiringWorkflowSet || [];
   const questions = detail.questionBeanSet || [];
   const jobDesc = detail.jobDesc || "";
+  const displayApplyButton = detail.displayApplyButton || false;
+  const externalLink = detail.externalLink || "";
+  const isStudentResumeUpload = detail.isStudentResumeUpload || false;
   const appliedCount = detail.appliedCount ?? job.appliedCount;
   const webSiteLink = detail.webSiteLink || "";
   const genders = typeof detail.genders === "string" ? detail.genders : "";
@@ -781,6 +786,34 @@ function JobDetailPage({ job, onBack, logoMap = {}, isBookmarked = false, bookma
                   </>
                 )}
               </button>
+            )}
+            {displayApplyButton && !job.isApplied && !jobViewLoading && (
+              externalLink ? (
+                <a
+                  href={externalLink}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full text-[12px] font-bold bg-green-500 hover:bg-green-600 text-white transition-colors cursor-pointer"
+                >
+                  <ExternalLink size={14} />
+                  Apply on External Portal
+                </a>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setShowApplyModal(true)}
+                  className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full text-[12px] font-bold bg-green-500 hover:bg-green-600 text-white transition-colors cursor-pointer"
+                >
+                  <Send size={14} />
+                  Apply Now
+                </button>
+              )
+            )}
+            {job.isApplied && (
+              <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[12px] font-bold bg-blue-500/20 text-blue-300 border border-blue-500/30">
+                <CheckCircle2 size={14} />
+                Applied
+              </span>
             )}
           </div>
 
@@ -1152,11 +1185,256 @@ function JobDetailPage({ job, onBack, logoMap = {}, isBookmarked = false, bookma
           )}
         </div>
       </div>
+
+      {showApplyModal && (
+        <ApplyModal
+          job={job}
+          questions={questions}
+          isStudentResumeUpload={isStudentResumeUpload}
+          onClose={() => setShowApplyModal(false)}
+          onApplied={() => {
+            setShowApplyModal(false);
+            setJobView(prev => prev ? { ...prev, displayApplyButton: false } : prev);
+          }}
+        />
+      )}
     </div>
   );
 }
 
 /* ─── UI Primitives ─── */
+
+function ApplyModal({ job, questions, isStudentResumeUpload, onClose, onApplied }) {
+  const [resumes, setResumes] = useState([]);
+  const [resumesLoading, setResumesLoading] = useState(true);
+  const [resumesError, setResumesError] = useState(null);
+  const [selectedResume, setSelectedResume] = useState("");
+  const [answers, setAnswers] = useState({});
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState(null);
+  const [success, setSuccess] = useState(false);
+
+  const placementUser = JSON.parse(localStorage.getItem("placement_user") || "{}");
+  const username = placementUser.username || "";
+
+  useEffect(() => {
+    if (!isStudentResumeUpload) {
+      setResumesLoading(false);
+      return;
+    }
+    placementApi.getResumes(username)
+      .then((res) => {
+        const list = Array.isArray(res.data) ? res.data : res.data?._embedded?.entityModels || [];
+        setResumes(list);
+        if (list.length > 0) setSelectedResume(list[0].documentLink || list[0].uuid || "");
+      })
+      .catch((err) => setResumesError(err.message))
+      .finally(() => setResumesLoading(false));
+  }, [username, isStudentResumeUpload]);
+
+  const mandatoryQuestions = questions.filter(q => q.isMandatory);
+  const allMandatoryAnswered = mandatoryQuestions.every(q => answers[q.id]);
+
+  function handleAnswer(qId, option) {
+    setAnswers(prev => ({ ...prev, [qId]: option }));
+  }
+
+  async function handleSubmit() {
+    if (!allMandatoryAnswered) return;
+    if (isStudentResumeUpload && !selectedResume) return;
+
+    setSubmitting(true);
+    setSubmitError(null);
+
+    try {
+      const answerBeans = questions.map(q => ({
+        questionId: q.id,
+        responseOptions: answers[q.id] ? [answers[q.id]] : [],
+      }));
+
+      await placementApi.applyForJob(
+        username,
+        job.uuid,
+        job.id,
+        answerBeans,
+        isStudentResumeUpload ? selectedResume : "",
+      );
+
+      setSuccess(true);
+      setTimeout(() => onApplied(), 1500);
+    } catch (err) {
+      setSubmitError(err.message || "Application failed. Please try again.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  if (success) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+        <div className="bg-white rounded-[28px] p-8 max-w-md w-full text-center shadow-2xl">
+          <div className="w-16 h-16 rounded-full bg-green-100 flex items-center justify-center mx-auto mb-4">
+            <CheckCircle2 size={32} className="text-green-600" />
+          </div>
+          <h3 className="font-display font-bold text-xl text-[#1A1A1A] mb-2">Application Submitted!</h3>
+          <p className="text-sm text-slate-500">Your application for {job.jobTitle} at {job.companyName} has been submitted successfully.</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={onClose}>
+      <div
+        className="bg-white rounded-[28px] max-w-lg w-full max-h-[85vh] overflow-y-auto shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="sticky top-0 bg-white border-b border-slate-100 px-6 py-4 flex items-center justify-between rounded-t-[28px]">
+          <div>
+            <h3 className="font-display font-bold text-lg text-[#1A1A1A]">Apply for Job</h3>
+            <p className="text-[13px] text-slate-500 mt-0.5">{job.jobTitle} — {job.companyName}</p>
+          </div>
+          <button onClick={onClose} className="w-9 h-9 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-500 cursor-pointer transition-colors">
+            <X size={18} />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="px-6 py-5 space-y-5">
+          {/* Resume Selection */}
+          {isStudentResumeUpload && (
+            <div>
+              <label className="text-[13px] font-bold text-slate-700 mb-2 block">Select Resume</label>
+              {resumesLoading ? (
+                <div className="flex items-center gap-2 text-sm text-slate-400">
+                  <Loader2 size={16} className="animate-spin" /> Loading resumes…
+                </div>
+              ) : resumesError ? (
+                <p className="text-sm text-red-500">{resumesError}</p>
+              ) : resumes.length === 0 ? (
+                <p className="text-sm text-slate-400">No resumes found. Please upload a resume on the Haveloc portal first.</p>
+              ) : (
+                <div className="space-y-2">
+                  {resumes.map((r, i) => {
+                    const value = r.documentLink || r.uuid || "";
+                    const label = r.title || r.documentName || `Resume ${i + 1}`;
+                    return (
+                      <label
+                        key={r.uuid || i}
+                        className={`flex items-center gap-3 px-4 py-3 rounded-2xl border-2 cursor-pointer transition-colors ${
+                          selectedResume === value
+                            ? "border-green-500 bg-green-50"
+                            : "border-slate-200 hover:border-slate-300"
+                        }`}
+                      >
+                        <input
+                          type="radio"
+                          name="resume"
+                          value={value}
+                          checked={selectedResume === value}
+                          onChange={(e) => setSelectedResume(e.target.value)}
+                          className="accent-green-600"
+                        />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-semibold text-slate-700 truncate">{label}</p>
+                          {r.lastModifiedDate && (
+                            <p className="text-[11px] text-slate-400">Updated {formatDate(r.lastModifiedDate)}</p>
+                          )}
+                        </div>
+                      </label>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Questions */}
+          {questions.length > 0 && (
+            <div>
+              <label className="text-[13px] font-bold text-slate-700 mb-2 block">Application Questions</label>
+              <div className="space-y-4">
+                {questions.map((q, i) => (
+                  <div key={q.id || i} className="rounded-2xl bg-slate-50 p-4">
+                    <div className="flex items-start gap-2 mb-3">
+                      <span className="text-[11px] font-bold text-slate-400 mt-0.5 flex-shrink-0">Q{i + 1}</span>
+                      <p className="text-[14px] font-semibold text-slate-800 flex-1 min-w-0 break-words">{q.title}</p>
+                      {q.isMandatory && <span className="text-[10px] font-bold text-red-500 flex-shrink-0">Required</span>}
+                    </div>
+                    {q.options?.length > 0 && (
+                      <div className="flex flex-wrap gap-2">
+                        {q.options.map((opt, j) => (
+                          <button
+                            key={j}
+                            type="button"
+                            onClick={() => handleAnswer(q.id, opt)}
+                            className={`px-3 py-1.5 rounded-full text-[12px] font-semibold border-2 cursor-pointer transition-colors ${
+                              answers[q.id] === opt
+                                ? "border-green-500 bg-green-500 text-white"
+                                : "border-slate-200 bg-white text-slate-600 hover:border-slate-300"
+                            }`}
+                          >
+                            {opt}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {(!q.options || q.options.length === 0) && (
+                      <input
+                        type="text"
+                        value={answers[q.id] || ""}
+                        onChange={(e) => handleAnswer(q.id, e.target.value)}
+                        placeholder="Enter your answer…"
+                        className="w-full px-3 py-2 rounded-xl text-sm border border-slate-200 bg-white outline-none focus:border-[#1A1A1A] focus:ring-1 focus:ring-[#1A1A1A] transition-all"
+                      />
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Error */}
+          {submitError && (
+            <div className="flex items-start gap-2 px-4 py-3 rounded-2xl bg-red-50 border border-red-100">
+              <AlertTriangle size={18} className="text-red-500 flex-shrink-0 mt-0.5" />
+              <p className="text-sm text-red-600 font-medium">{submitError}</p>
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="sticky bottom-0 bg-white border-t border-slate-100 px-6 py-4 flex items-center justify-between rounded-b-[28px]">
+          <button
+            onClick={onClose}
+            disabled={submitting}
+            className="px-4 py-2 rounded-full text-[13px] font-bold text-slate-600 hover:text-[#1A1A1A] cursor-pointer transition-colors disabled:opacity-40"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleSubmit}
+            disabled={submitting || !allMandatoryAnswered || (isStudentResumeUpload && !selectedResume)}
+            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full text-[13px] font-bold text-white bg-green-600 hover:bg-green-700 cursor-pointer transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {submitting ? (
+              <>
+                <Loader2 size={15} className="animate-spin" />
+                Submitting…
+              </>
+            ) : (
+              <>
+                <Send size={15} />
+                Submit Application
+              </>
+            )}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function NotesCard({ initialNotes = "", onSave }) {
   const [notes, setNotes] = useState(initialNotes);

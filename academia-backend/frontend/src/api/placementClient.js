@@ -140,4 +140,14 @@ export const placementApi = {
     }),
 
   captchaInfo: () => request("/captcha-info"),
+
+  getResumes: (username) =>
+    request("/resumes", { headers: getAuthHeaders(username) }),
+
+  applyForJob: (username, jobUuid, jobId, answers, resumeName) =>
+    request("/apply", {
+      method: "POST",
+      headers: getAuthHeaders(username),
+      body: JSON.stringify({ jobUuid, jobId, answers, resumeName }),
+    }),
 };
