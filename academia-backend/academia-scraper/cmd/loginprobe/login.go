@@ -467,11 +467,16 @@ func (s *LoginSession) FullLogin(email, password string) (string, error) {
 
 func (s *LoginSession) fetchDecodedFragment(name, rawURL, referer string) (string, decodedFragmentDebug, error) {
 	debug := decodedFragmentDebug{}
-	snap, err := s.Client.DoRequest(name, methodGet, rawURL, nil, "", map[string]string{
-		"Accept":           "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-		"X-Requested-With": "XMLHttpRequest",
-		"Referer":          referer,
-	}, false)
+	headers := map[string]string{
+		"Accept":  "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+		"Referer": referer,
+	}
+	// Only send X-Requested-With for non-attendance fragments — the SRM WAF
+	// blocks AJAX-flagged requests to the attendance page with 403.
+	if !strings.Contains(name, "attendance") {
+		headers["X-Requested-With"] = "XMLHttpRequest"
+	}
+	snap, err := s.Client.DoRequest(name, methodGet, rawURL, nil, "", headers, false)
 	if err != nil {
 		return "", debug, fmt.Errorf("%s request failed: %w", name, err)
 	}
@@ -553,6 +558,18 @@ func (s *LoginSession) fetchAttendanceBundle(required map[string]bool, data *Fet
 		defaultAttendanceURL,
 		s.ServiceURL+"/#Page:My_Attendance",
 	)
+
+	// Retry on 403 with the portal home page as referer (hash-based referer
+	// can cause the portal WAF to reject the XHR fragment request).
+	if err != nil && debug.statusCode == 403 {
+		time.Sleep(500 * time.Millisecond)
+		decoded, debug, err = s.fetchDecodedFragment(
+			"attendance_retry",
+			defaultAttendanceURL,
+			s.ServiceURL+"/",
+		)
+	}
+
 	summary.StatusCode = debug.statusCode
 	summary.Debug.ResponseContentType = debug.contentType
 	summary.Debug.PayloadFound = debug.payloadFound
@@ -563,6 +580,15 @@ func (s *LoginSession) fetchAttendanceBundle(required map[string]bool, data *Fet
 	summary.Debug.DecodedHasHours = strings.Contains(decoded, "Hours Conducted")
 	if err != nil {
 		summary.Error = err.Error()
+		// If only studentInfo was requested (not attendance/marks), a 403 on
+		// the attendance page should not be a hard failure. Record section
+		// errors and return nil so the response can still succeed.
+		if !required["attendance"] && !required["marks"] {
+			recordSectionError(data, mu, "attendance", fmt.Errorf("%s", summary.Error))
+			recordSectionError(data, mu, "studentInfo", fmt.Errorf("student info unavailable: %s", summary.Error))
+			recordSectionError(data, mu, "marks", fmt.Errorf("marks unavailable: %s", summary.Error))
+			return summary, nil
+		}
 		return summary, fmt.Errorf("%s", summary.Error)
 	}
 

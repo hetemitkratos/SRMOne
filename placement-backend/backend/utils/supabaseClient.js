@@ -97,6 +97,17 @@ module.exports = {
   // Notification helpers (shared notifications table)
   createNotification,
   hasUnreadNotificationOfType,
+  // Placement caching
+  getCachedPlacementProfile,
+  cachePlacementProfile,
+  getCachedJobs,
+  cacheJobs,
+  getCachedApplications,
+  cacheApplications,
+  getCachedNotices,
+  cacheNotices,
+  getCachedCompanies,
+  cacheCompanies,
 };
 
 // ─── Notifications (shared with academia backend) ────────────────────────────
@@ -122,4 +133,141 @@ async function hasUnreadNotificationOfType(email, type) {
     .eq("read", false);
   if (error) { console.error("[supabase] hasUnreadNotificationOfType:", error.message); return false; }
   return (count || 0) > 0;
+}
+
+// ─── Placement Profile Cache ─────────────────────────────────────────────────
+
+async function getCachedPlacementProfile(academiaEmail) {
+  if (!supabase) return null;
+  const { data, error } = await supabase
+    .from("placement_profiles")
+    .select("profile_data, cached_at")
+    .eq("academia_email", academiaEmail)
+    .maybeSingle();
+  if (error) { console.error("[supabase] getCachedPlacementProfile:", error.message); return null; }
+  return data;
+}
+
+async function cachePlacementProfile(academiaEmail, placementUsername, profileData) {
+  if (!supabase) return null;
+  const { error } = await supabase
+    .from("placement_profiles")
+    .upsert({
+      academia_email: academiaEmail,
+      placement_username: placementUsername,
+      profile_data: profileData,
+      cached_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }, { onConflict: "academia_email" });
+  if (error) console.error("[supabase] cachePlacementProfile:", error.message);
+  return null;
+}
+
+// ─── Placement Jobs Cache ────────────────────────────────────────────────────
+
+async function getCachedJobs(academiaEmail) {
+  if (!supabase) return null;
+  const { data, error } = await supabase
+    .from("placement_jobs_cache")
+    .select("jobs, total_count, cached_at")
+    .eq("academia_email", academiaEmail)
+    .maybeSingle();
+  if (error) { console.error("[supabase] getCachedJobs:", error.message); return null; }
+  return data;
+}
+
+async function cacheJobs(academiaEmail, jobs, totalCount) {
+  if (!supabase) return null;
+  const { error } = await supabase
+    .from("placement_jobs_cache")
+    .upsert({
+      academia_email: academiaEmail,
+      jobs,
+      total_count: totalCount,
+      cached_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }, { onConflict: "academia_email" });
+  if (error) console.error("[supabase] cacheJobs:", error.message);
+  return null;
+}
+
+// ─── Placement Applications Cache ────────────────────────────────────────────
+
+async function getCachedApplications(academiaEmail) {
+  if (!supabase) return null;
+  const { data, error } = await supabase
+    .from("placement_applications")
+    .select("applications, cached_at")
+    .eq("academia_email", academiaEmail)
+    .maybeSingle();
+  if (error) { console.error("[supabase] getCachedApplications:", error.message); return null; }
+  return data;
+}
+
+async function cacheApplications(academiaEmail, applications) {
+  if (!supabase) return null;
+  const { error } = await supabase
+    .from("placement_applications")
+    .upsert({
+      academia_email: academiaEmail,
+      applications,
+      cached_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }, { onConflict: "academia_email" });
+  if (error) console.error("[supabase] cacheApplications:", error.message);
+  return null;
+}
+
+// ─── Placement Notices Cache ─────────────────────────────────────────────────
+
+async function getCachedNotices(academiaEmail) {
+  if (!supabase) return null;
+  const { data, error } = await supabase
+    .from("placement_notices_cache")
+    .select("notices, cached_at")
+    .eq("academia_email", academiaEmail)
+    .maybeSingle();
+  if (error) { console.error("[supabase] getCachedNotices:", error.message); return null; }
+  return data;
+}
+
+async function cacheNotices(academiaEmail, notices) {
+  if (!supabase) return null;
+  const { error } = await supabase
+    .from("placement_notices_cache")
+    .upsert({
+      academia_email: academiaEmail,
+      notices,
+      cached_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }, { onConflict: "academia_email" });
+  if (error) console.error("[supabase] cacheNotices:", error.message);
+  return null;
+}
+
+// ─── Placement Companies Cache ───────────────────────────────────────────────
+
+async function getCachedCompanies(academiaEmail) {
+  if (!supabase) return null;
+  const { data, error } = await supabase
+    .from("placement_companies_cache")
+    .select("companies, cached_at")
+    .eq("academia_email", academiaEmail)
+    .maybeSingle();
+  if (error) { console.error("[supabase] getCachedCompanies:", error.message); return null; }
+  return data;
+}
+
+async function cacheCompanies(academiaEmail, companies) {
+  if (!supabase) return null;
+  const { error } = await supabase
+    .from("placement_companies_cache")
+    .upsert({
+      academia_email: academiaEmail,
+      companies,
+      cached_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }, { onConflict: "academia_email" });
+  if (error) console.error("[supabase] cacheCompanies:", error.message);
+  return null;
 }

@@ -115,6 +115,8 @@ function normalizeCalendarSems(sems = []) {
 
 function hasCachedSection(session, section) {
   if (!session?.cache) return false;
+  // Sections marked as unavailable (e.g. attendance 403) should not be re-fetched
+  if (session.meta?.sectionsUnavailable?.[section]) return true;
   switch (section) {
     case "studentInfo": return hasOwn(session.cache, "studentInfo");
     case "attendance": return hasOwn(session.cache, "attendance");
@@ -122,6 +124,17 @@ function hasCachedSection(session, section) {
     case "timetable": return hasOwn(session.cache, "timetable");
     default: return false;
   }
+}
+
+function markSectionUnavailable(session, section, reason = "") {
+  if (!session?.cache) return;
+  session.meta = {
+    ...(session.meta || {}),
+    sectionsUnavailable: {
+      ...(session.meta?.sectionsUnavailable || {}),
+      [section]: reason || true,
+    },
+  };
 }
 
 function hasCachedCalendar(session, sem) {
@@ -163,16 +176,22 @@ function mergeGoDataIntoCache(session, data = {}) {
 
   if (Array.isArray(data.marks) && data.marks.length) {
     session.cache.marks = normalizeMarksRecords(data.marks);
+    // Persist to Supabase
+    supabaseClient.cacheMarks(session.meta?.email, session.cache.marks).catch(() => {});
   }
 
   if (data.timetable && Array.isArray(data.timetable.courses)) {
     session.cache.timetable = data.timetable;
+    // Persist to Supabase
+    supabaseClient.cacheTimetable(session.meta?.email, data.timetable).catch(() => {});
   }
 
   if (data.calendars && typeof data.calendars === "object") {
     for (const [sem, calendar] of Object.entries(data.calendars)) {
       if (calendar && Array.isArray(calendar.months)) {
         session.cache[`calendar_${sem}`] = calendar;
+        // Persist to Supabase
+        supabaseClient.cacheCalendar(session.meta?.email, sem, calendar).catch(() => {});
       }
     }
   }
@@ -632,6 +651,24 @@ async function hydrateGoSession(email, { sections = [], calendarSems = [] } = {}
           );
           return currentSession.cache;
         }
+        // Sections that have recorded errors in parsed.data.errors were attempted
+        // but failed (e.g. attendance 403). Treat these as soft failures — the
+        // session is still valid, the data just couldn't be fetched this time.
+        const sectionErrors = parsed.data?.errors || {};
+        const softFailures = missingAfter.filter((item) => sectionErrors[item]);
+        const hardFailures = missingAfter.filter((item) => !sectionErrors[item]);
+        if (hardFailures.length === 0 && softFailures.length > 0) {
+          for (const section of softFailures) {
+            markSectionUnavailable(currentSession, section, sectionErrors[section]);
+          }
+          log(
+            "GO",
+            `soft section failures for ${email}: ${softFailures.join(", ")}${
+              parsed.data?.errors ? ` details=${JSON.stringify(parsed.data.errors)}` : ""
+            }`
+          );
+          return currentSession.cache;
+        }
         const errMsg = parsed.error || `Missing data after Go fetch: ${missingAfter.join(", ")}`;
         // Belt-and-suspenders: auth failures that slipped past classification checks
         if (goErrorLooksAuthFailure(errMsg) || goResultLooksExpired(parsed)) {
@@ -882,6 +919,7 @@ app.post("/login", loginLimiter, async (req, res) => {
       backend: "go",
       cache: {},
       meta: {
+        email,
         classification: parsed.classification,
         cookieNames: parsed.cookieNames || [],
         finalUrl: parsed.finalUrl || "",
@@ -935,6 +973,11 @@ app.get("/attendance", async (req, res) => {
 
   try {
     const s = sessions[email];
+    // If attendance was already attempted and marked unavailable (e.g. portal
+    // maintenance / 403), return empty immediately instead of re-fetching.
+    if (s.meta?.sectionsUnavailable?.attendance) {
+      return res.ok({ attendance: [], photosReady: true, unavailable: true });
+    }
     if (!hasCachedSection(s, "attendance")) {
       await hydrateGoSession(email, { sections: ["attendance"] });
     }
@@ -994,13 +1037,26 @@ app.get("/marks", async (req, res) => {
 
   try {
     const s = sessions[email];
+    if (s.meta?.sectionsUnavailable?.marks) {
+      // Try Supabase cache before returning empty
+      const cached = await supabaseClient.getCachedMarks(email).catch(() => null);
+      if (cached?.marks) {
+        log("MARKS", `Returning cached marks from Supabase for ${email}`);
+        return res.ok({ marks: cached.marks, fromCache: true });
+      }
+      return res.ok({ marks: [], unavailable: true });
+    }
     if (hasCachedSection(s, "marks")) {
       s.cache.marks = normalizeMarksRecords(s.cache.marks);
+      supabaseClient.cacheMarks(email, s.cache.marks).catch(() => {});
       return res.ok({ marks: s.cache.marks });
     }
 
     await hydrateGoSession(email, { sections: ["marks"] });
     s.cache.marks = normalizeMarksRecords(s.cache.marks);
+    if (s.cache.marks) {
+      supabaseClient.cacheMarks(email, s.cache.marks).catch(() => {});
+    }
     return res.ok({ marks: s.cache.marks });
   } catch (err) {
     if (err.expired) return res.fail(401, "Session expired. Please login again.");
@@ -1023,10 +1079,19 @@ app.get("/timetable", async (req, res) => {
     if (!hasCachedSection(s, "timetable")) {
       await hydrateGoSession(email, { sections: ["timetable"] });
     }
-    // Return immediately with whatever cached photos are available.
-    // Photo enrichment happens in the background.
-    setImmediate(() => warmTimetableFacultyPhotoUrls(email, "TIMETABLE"));
-    return res.ok({ timetable: s.cache.timetable, photosReady: areFacultyPhotosReady(s) });
+    if (s.cache.timetable) {
+      // Persist to Supabase
+      supabaseClient.cacheTimetable(email, s.cache.timetable).catch(() => {});
+      setImmediate(() => warmTimetableFacultyPhotoUrls(email, "TIMETABLE"));
+      return res.ok({ timetable: s.cache.timetable, photosReady: areFacultyPhotosReady(s) });
+    }
+    // Fallback: try Supabase cached timetable
+    const cached = await supabaseClient.getCachedTimetable(email).catch(() => null);
+    if (cached?.timetable) {
+      log("TIMETABLE", `Returning cached timetable from Supabase for ${email}`);
+      return res.ok({ timetable: cached.timetable, photosReady: false, fromCache: true });
+    }
+    return res.ok({ timetable: null, photosReady: false });
   } catch (err) {
     if (err.expired) return res.fail(401, "Session expired. Please login again.");
     log("TIMETABLE", `Error for ${email}: ${err.message}`);
@@ -1045,7 +1110,8 @@ app.get("/student", async (req, res) => {
   try {
     const s = sessions[email];
 
-    if (hasCachedSection(s, "studentInfo")) {
+    // If studentInfo was marked unavailable (e.g. attendance 403), skip to fallback
+    if (!s.meta?.sectionsUnavailable?.studentInfo && hasCachedSection(s, "studentInfo")) {
       if (needsGoStudentPhotoRefresh(s)) {
         try {
           await refreshGoStudentInfo(email);
@@ -1060,30 +1126,45 @@ app.get("/student", async (req, res) => {
           log("PHOTO", `student photo fallback failed for ${email}: ${photoErr.message}`);
         }
       }
-      if (!s.cache.studentInfo.PhotoUrl && s.cache.photo) {
+      if (s.cache.studentInfo && !s.cache.studentInfo.PhotoUrl && s.cache.photo) {
         s.cache.studentInfo.PhotoUrl = s.cache.photo;
       }
-      supabaseClient.cacheStudentProfile(email, s.cache.studentInfo).catch(err => 
-        log("PROFILE", `Cache save failed: ${err.message}`)
-      );
-      return res.ok({ studentInfo: s.cache.studentInfo });
-    }
-
-    await hydrateGoSession(email, { sections: ["studentInfo"] });
-    if (needsStudentPhotoFallback(s)) {
-      try {
-        await ensureUsableStudentPhoto(email);
-      } catch (photoErr) {
-        log("PHOTO", `student photo fallback failed for ${email}: ${photoErr.message}`);
+      if (s.cache.studentInfo) {
+        supabaseClient.cacheStudentProfile(email, s.cache.studentInfo).catch(err => 
+          log("PROFILE", `Cache save failed: ${err.message}`)
+        );
+        return res.ok({ studentInfo: s.cache.studentInfo });
       }
     }
-    if (s.cache.studentInfo && !s.cache.studentInfo.PhotoUrl && s.cache.photo) {
-      s.cache.studentInfo.PhotoUrl = s.cache.photo;
+
+    // If not yet attempted and not marked unavailable, try fetching
+    if (!s.meta?.sectionsUnavailable?.studentInfo) {
+      await hydrateGoSession(email, { sections: ["studentInfo"] });
+      if (s.cache.studentInfo) {
+        if (needsStudentPhotoFallback(s)) {
+          try {
+            await ensureUsableStudentPhoto(email);
+          } catch (photoErr) {
+            log("PHOTO", `student photo fallback failed for ${email}: ${photoErr.message}`);
+          }
+        }
+        if (!s.cache.studentInfo.PhotoUrl && s.cache.photo) {
+          s.cache.studentInfo.PhotoUrl = s.cache.photo;
+        }
+        supabaseClient.cacheStudentProfile(email, s.cache.studentInfo).catch(err => 
+          log("PROFILE", `Cache save failed: ${err.message}`)
+        );
+        return res.ok({ studentInfo: s.cache.studentInfo });
+      }
     }
-    supabaseClient.cacheStudentProfile(email, s.cache.studentInfo).catch(err => 
-      log("PROFILE", `Cache save failed: ${err.message}`)
-    );
-    return res.ok({ studentInfo: s.cache.studentInfo });
+    // Fallback: studentInfo unavailable from Go scraper (e.g. attendance 403).
+    // Try Supabase cached profile so the frontend doesn't break.
+    const cached = await supabaseClient.getCachedProfile(email).catch(() => null);
+    if (cached?.raw_data) {
+      log("STUDENT", `Returning cached profile for ${email} (Go scraper could not fetch)`);
+      return res.ok({ studentInfo: cached.raw_data });
+    }
+    return res.fail(500, "Could not fetch student info. The SRM portal may be temporarily unavailable.");
   } catch (err) {
     if (err.expired) return res.fail(401, "Session expired. Please login again.");
     log("STUDENT", `Error for ${email}: ${err.message}`);
@@ -1124,6 +1205,12 @@ app.get("/calendar", async (req, res) => {
     await hydrateGoSession(email, { calendarSems: [sem] });
     const calendar = s.cache[cacheKey] && Array.isArray(s.cache[cacheKey].months) ? s.cache[cacheKey] : null;
     if (!calendar) {
+      // Fallback: try Supabase cached calendar
+      const cached = await supabaseClient.getCachedCalendar(email, sem).catch(() => null);
+      if (cached?.calendar) {
+        log("CALENDAR", `Returning cached calendar from Supabase for ${email} (${sem})`);
+        return res.ok({ calendar: cached.calendar, sem, available: true, fromCache: true });
+      }
       return res.ok({
         calendar: null,
         sem,
@@ -1228,13 +1315,33 @@ app.get("/init", async (req, res) => {
     if (s.cache.studentInfo && !s.cache.studentInfo.PhotoUrl && s.cache.photo) {
       s.cache.studentInfo.PhotoUrl = s.cache.photo;
     }
+    // Fallback: if studentInfo is missing (e.g. attendance 403), try Supabase cache
+    let studentInfo = s.cache.studentInfo;
+    if (!studentInfo) {
+      const cached = await supabaseClient.getCachedProfile(email).catch(() => null);
+      if (cached?.raw_data) studentInfo = cached.raw_data;
+    }
+
+    // Fallback: if timetable is missing, try Supabase cache
+    let timetable = s.cache.timetable;
+    if (!timetable) {
+      const cachedTt = await supabaseClient.getCachedTimetable(email).catch(() => null);
+      if (cachedTt?.timetable) timetable = cachedTt.timetable;
+    }
+
+    // Fallback: if calendar is missing, try Supabase cache
+    let calendarFinal = calendar;
+    if (!calendarFinal) {
+      const cachedCal = await supabaseClient.getCachedCalendar(email, sem).catch(() => null);
+      if (cachedCal?.calendar) calendarFinal = cachedCal.calendar;
+    }
 
     const payload = {
-      studentInfo: s.cache.studentInfo,
-      timetable: s.cache.timetable,
-      calendar,
+      studentInfo,
+      timetable,
+      calendar: calendarFinal,
       sem,
-      calendarAvailable: !!calendar,
+      calendarAvailable: !!calendarFinal,
       photosReady: areFacultyPhotosReady(s),
     };
     // Faculty photo enrichment in the background — photos appear on next poll/refresh
@@ -1827,12 +1934,28 @@ app.get("/faculty", async (req, res) => {
     try {
       let profiles = [];
       for (const term of searchTerms) {
-        const searchRes = await fetch(`${SCRAPER_URL}/api/search-profiles?name=${encodeURIComponent(term)}`, { headers: scraperHeaders() });
-        if (searchRes.ok) {
-          const data = await searchRes.json();
-          profiles = data.profiles || [];
-          log("FACULTY", `Search "${term}" → ${profiles.length} result(s) for "${cleanName}"`);
-          if (profiles.length > 0) break;
+        try {
+          const searchRes = await fetch(`${SCRAPER_URL}/api/search-profiles?name=${encodeURIComponent(term)}`, { headers: scraperHeaders() });
+          if (searchRes.ok) {
+            const data = await searchRes.json();
+            profiles = data.profiles || [];
+            log("FACULTY", `Search "${term}" → ${profiles.length} result(s) for "${cleanName}"`);
+            if (profiles.length > 0) break;
+          }
+        } catch (_) { /* SCRAPER_URL unreachable, try next term or fall back below */ }
+      }
+
+      // Fallback: if SCRAPER_URL is unreachable, try Supabase faculty_cache
+      if (profiles.length === 0) {
+        for (const slug of [nameToSlug(cleanName), ...searchTerms.map(nameToSlug)]) {
+          try {
+            const cached = await supabaseClient.getCachedFacultyProfile(slug);
+            if (cached?.profile_data) {
+              profiles = [cached.profile_data];
+              log("FACULTY", `Search fallback via Supabase cache: ${slug}`);
+              break;
+            }
+          } catch (_) { /* try next */ }
         }
       }
 
@@ -1917,6 +2040,20 @@ app.get("/faculty", async (req, res) => {
             break;
           }
         } catch (_) { /* try next */ }
+      }
+
+      // Fallback: if SCRAPER_URL is unreachable, try Supabase faculty_cache
+      if (!selectedProfile) {
+        for (const slug of slugCandidates) {
+          try {
+            const cached = await supabaseClient.getCachedFacultyProfile(slug);
+            if (cached?.profile_data) {
+              selectedProfile = cached.profile_data;
+              log("FACULTY", `Found "${cleanName}" via Supabase cache: ${slug}`);
+              break;
+            }
+          } catch (_) { /* try next */ }
+        }
       }
 
       if (!selectedProfile) {

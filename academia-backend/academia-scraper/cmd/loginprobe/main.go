@@ -256,10 +256,16 @@ func fetchRequestedSections(session *LoginSession, resp *ProbeResponse, requeste
 	}
 
 	if attendanceErr != nil {
+		recordSectionError(&resp.Data, &mu, "attendance", attendanceErr)
+		// studentInfo and marks are parsed from the same attendance page HTML,
+		// so if attendance fails they are also unavailable.
+		recordSectionError(&resp.Data, &mu, "studentInfo", fmt.Errorf("student info unavailable: %s", attendanceErr))
+		recordSectionError(&resp.Data, &mu, "marks", fmt.Errorf("marks unavailable: %s", attendanceErr))
 		if resp.Error == "" {
 			resp.Error = attendanceErr.Error()
 		}
-		return attendanceErr
+		// Don't return immediately — other sections (timetable, calendar) may
+		// have succeeded. We'll check missing data at the end.
 	}
 
 	if timetableErr != nil {
@@ -284,8 +290,16 @@ func fetchRequestedSections(session *LoginSession, resp *ProbeResponse, requeste
 			nonCalendarMissing = append(nonCalendarMissing, item)
 		}
 	}
-	if len(nonCalendarMissing) > 0 {
-		err := fmt.Errorf("missing requested data: %s", strings.Join(nonCalendarMissing, ", "))
+	// Sections that have recorded errors were attempted but failed (e.g. 403).
+	// These are soft failures — don't treat them as fatal missing data.
+	fatalMissing := make([]string, 0, len(nonCalendarMissing))
+	for _, item := range nonCalendarMissing {
+		if _, hasErr := resp.Data.Errors[item]; !hasErr {
+			fatalMissing = append(fatalMissing, item)
+		}
+	}
+	if len(fatalMissing) > 0 {
+		err := fmt.Errorf("missing requested data: %s", strings.Join(fatalMissing, ", "))
 		if resp.Error == "" {
 			resp.Error = err.Error()
 		}
@@ -298,7 +312,7 @@ func fetchRequestedSections(session *LoginSession, resp *ProbeResponse, requeste
 	}
 
 	if resp.Classification == "" || resp.Classification == classUnknown {
-		if containsString(resp.CookieNames, "JSESSIONID") || len(nonCalendarMissing) == 0 {
+		if containsString(resp.CookieNames, "JSESSIONID") || len(fatalMissing) == 0 {
 			resp.Classification = classAuthenticated
 		}
 	}

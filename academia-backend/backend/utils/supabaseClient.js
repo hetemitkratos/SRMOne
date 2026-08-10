@@ -326,3 +326,86 @@ export async function saveCachedFacultyProfile(cacheKey, profileData) {
   if (error) console.error("[supabase] saveCachedFacultyProfile:", error.message);
   return null;
 }
+
+// ─── Timetable Cache ──────────────────────────────────────────────────────────
+
+export async function getCachedTimetable(email) {
+  if (!supabase) return null;
+  const { data, error } = await supabase
+    .from("timetable_cache")
+    .select("timetable, cached_at")
+    .eq("academia_email", email)
+    .maybeSingle();
+  if (error) { console.error("[supabase] getCachedTimetable:", error.message); return null; }
+  return data;
+}
+
+export async function cacheTimetable(email, timetable) {
+  if (!supabase) return null;
+  const { error } = await supabase
+    .from("timetable_cache")
+    .upsert({
+      academia_email: email,
+      timetable,
+      cached_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }, { onConflict: "academia_email" });
+  if (error) console.error("[supabase] cacheTimetable:", error.message);
+  return null;
+}
+
+// ─── Marks Cache ──────────────────────────────────────────────────────────────
+
+export async function getCachedMarks(email) {
+  if (!supabase) return null;
+  const { data, error } = await supabase
+    .from("marks_cache")
+    .select("marks, cached_at")
+    .eq("academia_email", email)
+    .maybeSingle();
+  if (error) { console.error("[supabase] getCachedMarks:", error.message); return null; }
+  return data;
+}
+
+export async function cacheMarks(email, marks) {
+  if (!supabase) return null;
+  const { error } = await supabase
+    .from("marks_cache")
+    .upsert({
+      academia_email: email,
+      marks,
+      cached_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }, { onConflict: "academia_email" });
+  if (error) console.error("[supabase] cacheMarks:", error.message);
+  return null;
+}
+
+// ─── Calendar Cache ───────────────────────────────────────────────────────────
+
+export async function getCachedCalendar(email, sem) {
+  if (!supabase) return null;
+  const { data, error } = await supabase
+    .from("calendar_cache")
+    .select("calendar, cached_at")
+    .eq("academia_email", email)
+    .eq("sem", sem)
+    .maybeSingle();
+  if (error) { console.error("[supabase] getCachedCalendar:", error.message); return null; }
+  return data;
+}
+
+export async function cacheCalendar(email, sem, calendar) {
+  if (!supabase) return null;
+  const { error } = await supabase
+    .from("calendar_cache")
+    .upsert({
+      academia_email: email,
+      sem,
+      calendar,
+      cached_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }, { onConflict: "academia_email,sem" });
+  if (error) console.error("[supabase] cacheCalendar:", error.message);
+  return null;
+}

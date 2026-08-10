@@ -21,7 +21,7 @@ async function request(path, options = {}) {
     throw new Error(`Invalid response from server (status ${res.status})`);
   }
 
-  if (!data.success) throw new Error(data.message || "Request failed");
+  if (!data.success) throw new Error(data.error || data.message || "Request failed");
   return data;
 }
 

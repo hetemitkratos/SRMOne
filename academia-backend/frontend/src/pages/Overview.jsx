@@ -42,16 +42,39 @@ export default function Overview() {
 
     const fetchData = async () => {
       try {
-        const [init, attendance] = await Promise.all([
+        const [initResult, attendanceResult] = await Promise.allSettled([
           api.init(user.email),
           api.attendance(user.email),
         ]);
         if (cancelled) return;
+
+        // If init failed with a session/auth error, redirect to login
+        if (initResult.status === "rejected") {
+          const errorMsg = initResult.reason?.message || "";
+          if (
+            errorMsg.includes("backend running") ||
+            errorMsg.includes("Empty response") ||
+            errorMsg.includes("session") ||
+            errorMsg.includes("unauthorized") ||
+            errorMsg.includes("not logged in")
+          ) {
+            logout();
+            navigate("/login", { replace: true });
+            return;
+          }
+          setError(initResult.reason?.message || "Failed to load data");
+          setLoading(false);
+          return;
+        }
+
+        const init = initResult.value;
+        const attendance = attendanceResult.status === "fulfilled" ? attendanceResult.value : null;
+
         setData({
           studentInfo: init.studentInfo,
           timetable: init.timetable,
           calendar: init.calendar,
-          attendance: attendance.attendance,
+          attendance: attendance?.attendance || [],
         });
         // Build calendar map for holiday/day-order detection
         if (init.calendar) {
@@ -67,7 +90,7 @@ export default function Overview() {
         setLoading(false);
 
         // If photos aren't ready yet, poll again in 3s (silently, no loading state)
-        const photosReady = init.photosReady && attendance.photosReady;
+        const photosReady = init.photosReady && (attendance?.photosReady ?? true);
         if (!photosReady) {
           pollTimer = setTimeout(fetchData, 3000);
         }

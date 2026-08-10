@@ -5,9 +5,16 @@ const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
 const { runScraper } = require("../integrations/go/go_scraper_client");
 const { encryptPassword, decryptPassword } = require("../utils/crypto");
-const { storeCredentials, getCredentials, removeCredentials, updateAutoLoginStatus, supabase, createNotification, hasUnreadNotificationOfType } = require("../utils/supabaseClient");
+const { storeCredentials, getCredentials, removeCredentials, updateAutoLoginStatus, supabase, createNotification, hasUnreadNotificationOfType,
+  getCachedPlacementProfile, cachePlacementProfile,
+  getCachedJobs, cacheJobs,
+  getCachedApplications, cacheApplications,
+  getCachedNotices, cacheNotices,
+  getCachedCompanies, cacheCompanies,
+} = require("../utils/supabaseClient");
 
 const app = express();
+app.set("trust proxy", 1);
 const PORT = process.env.PORT || 3001;
 
 const MAX_USERS = 8;
@@ -290,6 +297,7 @@ async function hydrateSections(email, sections, extra = {}) {
 
 function makeSectionEndpoint(sectionName, extraParams = {}) {
   return async (req, res) => {
+    const academiaEmail = req.headers["x-academia-email"];
     try {
       const data = await hydrateSections(req.email, [sectionName], {
         ...extraParams,
@@ -303,8 +311,27 @@ function makeSectionEndpoint(sectionName, extraParams = {}) {
       });
       const result = data[sectionName];
 
+      // Persist to Supabase cache (fire-and-forget)
+      if (academiaEmail && result && !result.error) {
+        setImmediate(() => {
+          try {
+            if (sectionName === "profile") {
+              cachePlacementProfile(academiaEmail, req.email, result).catch(() => {});
+            } else if (sectionName === "jobs") {
+              const jobs = result?._embedded?.entityModels || [];
+              cacheJobs(academiaEmail, result, jobs.length).catch(() => {});
+            } else if (sectionName === "tracker") {
+              cacheApplications(academiaEmail, result).catch(() => {});
+            } else if (sectionName === "notices") {
+              cacheNotices(academiaEmail, result).catch(() => {});
+            } else if (sectionName === "companies") {
+              cacheCompanies(academiaEmail, result).catch(() => {});
+            }
+          } catch (_) {}
+        });
+      }
+
       // Send notifications for new jobs and notices
-      const academiaEmail = req.headers["x-academia-email"];
       if (academiaEmail && supabase) {
         setImmediate(() => {
           try {
@@ -347,6 +374,43 @@ function makeSectionEndpoint(sectionName, extraParams = {}) {
 
       return res.ok({ data: result });
     } catch (err) {
+      // Fallback: try Supabase cache before returning error
+      if (academiaEmail) {
+        try {
+          let cached = null;
+          if (sectionName === "profile") {
+            cached = await getCachedPlacementProfile(academiaEmail).catch(() => null);
+            if (cached?.profile_data) {
+              console.log(`[cache] Returning cached profile from Supabase for ${academiaEmail}`);
+              return res.ok({ data: cached.profile_data, fromCache: true });
+            }
+          } else if (sectionName === "jobs") {
+            cached = await getCachedJobs(academiaEmail).catch(() => null);
+            if (cached?.jobs) {
+              console.log(`[cache] Returning cached jobs from Supabase for ${academiaEmail}`);
+              return res.ok({ data: cached.jobs, fromCache: true });
+            }
+          } else if (sectionName === "tracker") {
+            cached = await getCachedApplications(academiaEmail).catch(() => null);
+            if (cached?.applications) {
+              console.log(`[cache] Returning cached applications from Supabase for ${academiaEmail}`);
+              return res.ok({ data: cached.applications, fromCache: true });
+            }
+          } else if (sectionName === "notices") {
+            cached = await getCachedNotices(academiaEmail).catch(() => null);
+            if (cached?.notices) {
+              console.log(`[cache] Returning cached notices from Supabase for ${academiaEmail}`);
+              return res.ok({ data: cached.notices, fromCache: true });
+            }
+          } else if (sectionName === "companies") {
+            cached = await getCachedCompanies(academiaEmail).catch(() => null);
+            if (cached?.companies) {
+              console.log(`[cache] Returning cached companies from Supabase for ${academiaEmail}`);
+              return res.ok({ data: cached.companies, fromCache: true });
+            }
+          }
+        } catch (_) {}
+      }
       if (err.expired) return res.fail(401, err.message);
       return res.fail(500, err.message);
     }
