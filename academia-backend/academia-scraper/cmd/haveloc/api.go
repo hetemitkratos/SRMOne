@@ -338,7 +338,7 @@ func fetchStudentDocuments(client *FHClient, studentUUID string) (*json.RawMessa
 	return raw, err
 }
 
-func applyForJob(client *FHClient, jobUUID string, jobID int, answers []ApplyAnswer, resumeName string) (*json.RawMessage, int, error) {
+func applyForJob(client *FHClient, jobUUID string, jobID interface{}, answers []ApplyAnswer, resumeName string) (*json.RawMessage, int, error) {
 	url := baseAPIURL + "/jobTrackerApply"
 
 	answerBeans := make([]map[string]interface{}, len(answers))
