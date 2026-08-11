@@ -7,6 +7,7 @@ import {
   Send, Loader2, X,
 } from "lucide-react";
 import { useState, useMemo, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { usePlacementData } from "../hooks/usePlacementData.js";
 import { placementApi } from "../api/placementClient.js";
 import { useAuth } from "../hooks/useAuth.jsx";
@@ -1217,6 +1218,12 @@ function ApplyModal({ job, questions, isStudentResumeUpload, onClose, onApplied 
   const placementUser = JSON.parse(localStorage.getItem("placement_user") || "{}");
   const username = placementUser.username || "";
 
+  // Lock background scroll while the modal is open
+  useEffect(() => {
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = ""; };
+  }, []);
+
   useEffect(() => {
     if (!isStudentResumeUpload) {
       setResumesLoading(false);
@@ -1270,20 +1277,21 @@ function ApplyModal({ job, questions, isStudentResumeUpload, onClose, onApplied 
   }
 
   if (success) {
-    return (
+    return createPortal(
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
         <div className="bg-white rounded-[28px] p-8 max-w-md w-full text-center shadow-2xl">
-          <div className="w-16 h-16 rounded-full bg-green-100 flex items-center justify-center mx-auto mb-4">
-            <CheckCircle2 size={32} className="text-green-600" />
+          <div className="w-16 h-16 rounded-full bg-mint flex items-center justify-center mx-auto mb-4">
+            <CheckCircle2 size={32} className="text-green-800" />
           </div>
           <h3 className="font-display font-bold text-xl text-[#1A1A1A] mb-2">Application Submitted!</h3>
           <p className="text-sm text-slate-500">Your application for {job.jobTitle} at {job.companyName} has been submitted successfully.</p>
         </div>
-      </div>
+      </div>,
+      document.body
     );
   }
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={onClose}>
       <div
         className="bg-white rounded-[28px] max-w-lg w-full max-h-[85vh] overflow-y-auto shadow-2xl"
@@ -1369,7 +1377,7 @@ function ApplyModal({ job, questions, isStudentResumeUpload, onClose, onApplied 
                             key={j}
                             type="button"
                             onClick={() => handleAnswer(q.id, opt)}
-                            className={`px-3 py-1.5 rounded-full text-[12px] font-semibold border-2 cursor-pointer transition-colors ${
+                            className={`px-3 py-1.5 rounded-full text-[12px] font-semibold capitalize border-2 cursor-pointer transition-colors ${
                               answers[q.id] === opt
                                 ? "border-green-500 bg-green-500 text-white"
                                 : "border-slate-200 bg-white text-slate-600 hover:border-slate-300"
@@ -1416,7 +1424,7 @@ function ApplyModal({ job, questions, isStudentResumeUpload, onClose, onApplied 
           <button
             onClick={handleSubmit}
             disabled={submitting || !allMandatoryAnswered || (isStudentResumeUpload && !selectedResume)}
-            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full text-[13px] font-bold text-white bg-green-600 hover:bg-green-700 cursor-pointer transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full text-[13px] font-bold text-white bg-green-500 hover:bg-green-600 cursor-pointer transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           >
             {submitting ? (
               <>
@@ -1432,7 +1440,8 @@ function ApplyModal({ job, questions, isStudentResumeUpload, onClose, onApplied 
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
