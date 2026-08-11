@@ -5,13 +5,128 @@ const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
 const { runScraper } = require("../integrations/go/go_scraper_client");
 const { encryptPassword, decryptPassword } = require("../utils/crypto");
-const { storeCredentials, getCredentials, removeCredentials, updateAutoLoginStatus, supabase, createNotification, hasUnreadNotificationOfType,
+const { storeCredentials, getCredentials, getAllAutoLoginCredentials, removeCredentials, updateAutoLoginStatus, supabase, createNotification, hasUnreadNotificationOfType, hasNotificationForEntity,
   getCachedPlacementProfile, cachePlacementProfile,
   getCachedJobs, cacheJobs,
   getCachedApplications, cacheApplications,
   getCachedNotices, cacheNotices,
   getCachedCompanies, cacheCompanies,
 } = require("../utils/supabaseClient");
+
+/** Stable id for a placement job/notice entity. */
+function entityId(item) {
+  if (!item || typeof item !== "object") return null;
+  const raw = item.uuid ?? item.id ?? item.jobUuid ?? item.noticeId ?? null;
+  if (raw == null || String(raw).trim() === "") return null;
+  return String(raw);
+}
+
+/** Extract entity list from placement API payload shapes. */
+function extractEntityList(payload) {
+  if (!payload) return [];
+  if (Array.isArray(payload)) return payload;
+  if (Array.isArray(payload._embedded?.entityModels)) return payload._embedded.entityModels;
+  if (Array.isArray(payload.content)) return payload.content;
+  if (Array.isArray(payload.data)) return payload.data;
+  return [];
+}
+
+/**
+ * Notify about items that are new vs the previous Supabase cache.
+ * First fetch seeds cache without spamming. Later fetches notify on real diffs.
+ */
+async function notifyNewEntities({ academiaEmail, type, items, previousItems, titleFor, bodyFor, idKey }) {
+  if (!academiaEmail || !items?.length) return;
+
+  const prevIds = new Set(
+    (previousItems || []).map(entityId).filter(Boolean)
+  );
+  const isFirstSnapshot = prevIds.size === 0;
+
+  // Prefer newest first if createdDate exists
+  const sorted = [...items].sort((a, b) => {
+    const da = new Date(a.createdDate || a.created_at || a.postedDate || 0).getTime();
+    const db = new Date(b.createdDate || b.created_at || b.postedDate || 0).getTime();
+    return db - da;
+  });
+
+  // On first snapshot only consider items from the last 48h to avoid historic spam
+  const cutoffMs = Date.now() - 48 * 60 * 60 * 1000;
+  const candidates = sorted.filter((item) => {
+    const id = entityId(item);
+    if (!id) return false;
+    if (!isFirstSnapshot) return !prevIds.has(id);
+    const created = new Date(item.createdDate || item.created_at || item.postedDate || 0).getTime();
+    return Number.isFinite(created) && created >= cutoffMs;
+  });
+
+  // Cap how many we fan out per refresh
+  const toNotify = candidates.slice(0, 5);
+  for (const item of toNotify) {
+    const id = entityId(item);
+    try {
+      const already = await hasNotificationForEntity(academiaEmail, type, idKey, id);
+      if (already) continue;
+      await createNotification(academiaEmail, {
+        type,
+        title: titleFor(item),
+        body: bodyFor(item),
+        data: {
+          [idKey]: id,
+          jobId: item.id ?? undefined,
+          jobUuid: item.uuid ?? undefined,
+          noticeId: item.id ?? item.uuid ?? undefined,
+          jobTitle: item.jobTitle || item.title || undefined,
+          noticeTitle: item.title || item.subject || undefined,
+          companyName: item.companyName || undefined,
+        },
+      });
+    } catch (err) {
+      console.error(`[notifications] ${type} create failed:`, err.message);
+    }
+  }
+}
+
+/** Diff+notify+cache the jobs section for one user. Shared by the section endpoint and the background poller. */
+async function syncJobsSection(academiaEmail, result) {
+  const jobs = extractEntityList(result);
+  const prev = await getCachedJobs(academiaEmail).catch(() => null);
+  const prevJobs = extractEntityList(prev?.jobs);
+  await notifyNewEntities({
+    academiaEmail,
+    type: "new_job",
+    items: jobs,
+    previousItems: prevJobs,
+    idKey: "jobId",
+    titleFor: () => "New Job Posted",
+    bodyFor: (job) => {
+      const title = job.jobTitle || job.title || "New placement opportunity";
+      const company = job.companyName ? ` at ${job.companyName}` : "";
+      return `${title}${company} — check the Jobs page for details.`;
+    },
+  });
+  await cacheJobs(academiaEmail, result, jobs.length).catch(() => {});
+}
+
+/** Diff+notify+cache the notices section for one user. Shared by the section endpoint and the background poller. */
+async function syncNoticesSection(academiaEmail, result) {
+  const notices = extractEntityList(result);
+  const prev = await getCachedNotices(academiaEmail).catch(() => null);
+  const prevNotices = extractEntityList(prev?.notices);
+  await notifyNewEntities({
+    academiaEmail,
+    type: "new_notice",
+    items: notices,
+    previousItems: prevNotices,
+    idKey: "noticeId",
+    titleFor: () => "New Notice",
+    bodyFor: (notice) => {
+      const title = notice.title || notice.subject || "New notice from placement cell";
+      return `${title} — check the Notices page for details.`;
+    },
+  });
+  await cacheNotices(academiaEmail, result).catch(() => {});
+}
 
 const app = express();
 app.set("trust proxy", 1);
@@ -311,63 +426,23 @@ function makeSectionEndpoint(sectionName, extraParams = {}) {
       });
       const result = data[sectionName];
 
-      // Persist to Supabase cache (fire-and-forget)
+      // Cache + notify (must read previous cache BEFORE overwrite)
       if (academiaEmail && result && !result.error) {
-        setImmediate(() => {
+        setImmediate(async () => {
           try {
             if (sectionName === "profile") {
-              cachePlacementProfile(academiaEmail, req.email, result).catch(() => {});
+              await cachePlacementProfile(academiaEmail, req.email, result).catch(() => {});
             } else if (sectionName === "jobs") {
-              const jobs = result?._embedded?.entityModels || [];
-              cacheJobs(academiaEmail, result, jobs.length).catch(() => {});
+              await syncJobsSection(academiaEmail, result);
             } else if (sectionName === "tracker") {
-              cacheApplications(academiaEmail, result).catch(() => {});
+              await cacheApplications(academiaEmail, result).catch(() => {});
             } else if (sectionName === "notices") {
-              cacheNotices(academiaEmail, result).catch(() => {});
+              await syncNoticesSection(academiaEmail, result);
             } else if (sectionName === "companies") {
-              cacheCompanies(academiaEmail, result).catch(() => {});
-            }
-          } catch (_) {}
-        });
-      }
-
-      // Send notifications for new jobs and notices
-      if (academiaEmail && supabase) {
-        setImmediate(() => {
-          try {
-            if (sectionName === "jobs") {
-              const jobs = result?._embedded?.entityModels || [];
-              if (jobs.length > 0) {
-                hasUnreadNotificationOfType(academiaEmail, "new_job").then((hasUnread) => {
-                  if (!hasUnread) {
-                    const latestJob = jobs[0];
-                    createNotification(academiaEmail, {
-                      type: "new_job",
-                      title: "💼 New Job Posted",
-                      body: `${latestJob.title || latestJob.companyName || "New placement opportunity"} — check the Jobs page for details.`,
-                      data: { jobId: latestJob.id, jobTitle: latestJob.title },
-                    }).catch(() => {});
-                  }
-                }).catch(() => {});
-              }
-            } else if (sectionName === "notices") {
-              const notices = result?._embedded?.entityModels || [];
-              if (notices.length > 0) {
-                hasUnreadNotificationOfType(academiaEmail, "new_notice").then((hasUnread) => {
-                  if (!hasUnread) {
-                    const latestNotice = notices[0];
-                    createNotification(academiaEmail, {
-                      type: "new_notice",
-                      title: "📬 New Notice",
-                      body: `${latestNotice.title || latestNotice.subject || "New notice from placement cell"} — check the Notices page for details.`,
-                      data: { noticeId: latestNotice.id, noticeTitle: latestNotice.title },
-                    }).catch(() => {});
-                  }
-                }).catch(() => {});
-              }
+              await cacheCompanies(academiaEmail, result).catch(() => {});
             }
           } catch (err) {
-            console.error("[notifications] Section notif error:", err.message);
+            console.error("[notifications] Section cache/notif error:", err.message);
           }
         });
       }
@@ -843,6 +918,87 @@ app.get("/connection-status", async (req, res) => {
     return res.fail(500, err.message);
   }
 });
+
+/**
+ * Background poller — checks jobs/notices for every user with auto-login
+ * enabled, so notifications fire without the user having to open the
+ * Jobs/Notices page. Runs sequentially with a delay between users to
+ * avoid bursting the upstream Haveloc portal.
+ */
+const POLL_INTERVAL_MS = 20 * 60 * 1000; // 20 minutes
+const POLL_USER_DELAY_MS = 4 * 1000; // stagger requests to upstream portal
+
+let pollInProgress = false;
+
+async function pollUserJobsAndNotices(cred) {
+  const academiaEmail = cred.academia_email;
+  const username = cred.placement_username;
+
+  let session = sessions[username];
+  if (!session) {
+    if (cred.has_mfa) return; // can't silently auto-login MFA accounts
+    const password = decryptPassword(cred.encrypted_password);
+    const { parsed } = await runScraper({ mode: "login", username, password });
+    if (!parsed.success || parsed.requiresMfa) return;
+    session = sessions[username] = {
+      token: parsed.token,
+      encryptedToken: parsed.encryptedToken,
+      sub: parsed.sub,
+      uuid: parsed.uuid,
+      phaveloc: parsed.phaveloc,
+      publicUrl: parsed.publicUrl,
+      lastActive: Date.now(),
+      cache: {},
+      fetchErrors: {},
+    };
+    await updateAutoLoginStatus(academiaEmail).catch(() => {});
+  } else {
+    session.lastActive = Date.now();
+  }
+
+  // Force a fresh upstream fetch instead of serving the in-memory cache.
+  delete session.cache.jobs;
+  delete session.cache.notices;
+  delete session.fetchErrors?.jobs;
+  delete session.fetchErrors?.notices;
+
+  const data = await hydrateSections(username, ["jobs", "notices"], { uuid: session.uuid });
+
+  if (data.jobs && !data.jobs.error) {
+    await syncJobsSection(academiaEmail, data.jobs);
+  }
+  if (data.notices && !data.notices.error) {
+    await syncNoticesSection(academiaEmail, data.notices);
+  }
+}
+
+async function pollAllUsersForNewPostings() {
+  if (pollInProgress || !supabase) return;
+  pollInProgress = true;
+  try {
+    const creds = await getAllAutoLoginCredentials();
+    for (const cred of creds) {
+      try {
+        await pollUserJobsAndNotices(cred);
+      } catch (err) {
+        console.error(`[poll] failed for ${cred.academia_email}:`, err.message);
+      }
+      await new Promise((resolve) => setTimeout(resolve, POLL_USER_DELAY_MS));
+    }
+  } catch (err) {
+    console.error("[poll] pollAllUsersForNewPostings failed:", err.message);
+  } finally {
+    pollInProgress = false;
+  }
+}
+
+setInterval(() => {
+  pollAllUsersForNewPostings();
+}, POLL_INTERVAL_MS);
+// First pass shortly after boot so notifications don't wait a full interval.
+setTimeout(() => {
+  pollAllUsersForNewPostings();
+}, 30 * 1000);
 
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`Placement backend running on http://0.0.0.0:${PORT}`);

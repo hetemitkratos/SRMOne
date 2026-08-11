@@ -496,6 +496,71 @@ function buildAttendanceSnapshot(attendance = []) {
   };
 }
 
+/**
+ * Persist attendance snapshot + emit low-attendance alerts.
+ * Safe to call from /attendance and background warm — dedupes via recent notif + subject fingerprint.
+ */
+async function maybeNotifyLowAttendance(email, attendance, { threshold = 75 } = {}) {
+  if (!email || !Array.isArray(attendance) || attendance.length === 0) return;
+
+  try {
+    const overallPct =
+      attendance.reduce((sum, subj) => sum + parseFloat(subj.attendancePct || 0), 0) /
+      attendance.length;
+    supabaseClient.saveAttendanceSnapshot(email, attendance, overallPct).catch((err) =>
+      log("ATTENDANCE", `Snapshot save failed: ${err.message}`)
+    );
+
+    const settings = await supabaseClient.getNotificationSettings(email).catch(() => null);
+    if (settings && settings.attendance_alert_enabled === false) return;
+    const limit = Number(settings?.attendance_threshold);
+    const effectiveThreshold = Number.isFinite(limit) && limit > 0 ? limit : threshold;
+
+    const lowSubjects = attendance.filter((subj) => {
+      const pct = parseFloat(subj.attendancePct || 0);
+      return Number.isFinite(pct) && pct < effectiveThreshold;
+    });
+    if (lowSubjects.length === 0) return;
+
+    // Stable fingerprint of which subjects are low (sorted course codes + rounded pct)
+    const fingerprint = lowSubjects
+      .map((s) => `${s.courseCode || s.subject || "?"}:${Math.round(parseFloat(s.attendancePct || 0))}`)
+      .sort()
+      .join("|");
+
+    const latest = await supabaseClient.getLatestNotificationOfType(email, "low_attendance");
+    if (latest) {
+      const ageMs = Date.now() - new Date(latest.created_at).getTime();
+      const sameSet = latest.data?.fingerprint === fingerprint;
+      // Skip if same subjects within 18h, or any low_attendance notif within 6h
+      if ((sameSet && ageMs < 18 * 60 * 60 * 1000) || ageMs < 6 * 60 * 60 * 1000) {
+        return;
+      }
+    }
+
+    const subjectList = lowSubjects
+      .map((s) => `${s.courseCode || s.subject || "Subject"}: ${s.attendancePct}%`)
+      .join(", ");
+
+    await supabaseClient.createNotification(email, {
+      type: "low_attendance",
+      title: "Low Attendance Alert",
+      body: `${lowSubjects.length} subject${lowSubjects.length > 1 ? "s" : ""} below ${effectiveThreshold}%: ${subjectList}. Check the attendance page for details.`,
+      data: {
+        fingerprint,
+        threshold: effectiveThreshold,
+        subjects: lowSubjects.map((s) => ({
+          courseCode: s.courseCode || s.subject || null,
+          pct: s.attendancePct,
+        })),
+      },
+    });
+    log("NOTIFICATIONS", `Low attendance alert sent for ${email} (${lowSubjects.length} subjects)`);
+  } catch (err) {
+    log("NOTIFICATIONS", `Low attendance notif failed for ${email}: ${err.message}`);
+  }
+}
+
 function buildAcademiaSummary(email, session) {
   const studentInfo = session.cache?.studentInfo || {};
   const semester = studentInfo.Semester || null;
@@ -706,6 +771,11 @@ function warmAcademiaSession(email) {
       if (sessions[email]?.cache?.timetable) {
         warmFacultyCache(sessions[email].cache.timetable);
       }
+      // Attendance alerts should fire on login/warm, not only when user opens Attendance page
+      const att = sessions[email]?.cache?.attendance;
+      if (Array.isArray(att) && att.length > 0) {
+        maybeNotifyLowAttendance(email, att).catch(() => {});
+      }
       log("WARM", `Session cache warmed for ${email}`);
     } catch (err) {
       log("WARM", `Session warm-up failed for ${email}: ${err.message}`);
@@ -758,8 +828,8 @@ app.use(cors({
     if (!origin || ALLOWED_ORIGINS.includes(origin) || /^https?:\/\/(192\.168\.|10\.|172\.(1[6-9]|2[0-9]|3[01])\.|127\.|localhost)/.test(origin)) return cb(null, true);
     return cb(new Error(`CORS: origin not allowed — ${origin}`));
   },
-  methods: ["GET", "POST"],
-  allowedHeaders: ["Content-Type"],
+  methods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
 }));
 
 // Rate limiter — general API (120 req/min per IP)
@@ -990,33 +1060,11 @@ app.get("/attendance", async (req, res) => {
       );
     });
     
-    // Auto-snapshot attendance for history tracking
+    // Snapshot + low attendance alert (also runs on warm; safe to call often)
     if (attendance && attendance.length > 0) {
-      const overallPct = attendance.reduce((sum, subj) => sum + parseFloat(subj.attendancePct || 0), 0) / attendance.length;
-      supabaseClient.saveAttendanceSnapshot(email, attendance, overallPct).catch(err => 
-        log("ATTENDANCE", `Snapshot save failed: ${err.message}`)
-      );
-
-      // Low attendance alert — notify for subjects below 75% (once per subject)
-      const lowAttendanceSubjects = attendance.filter((subj) => {
-        const pct = parseFloat(subj.attendancePct || 0);
-        return pct < 75;
+      setImmediate(() => {
+        maybeNotifyLowAttendance(email, attendance).catch(() => {});
       });
-      if (lowAttendanceSubjects.length > 0) {
-        supabaseClient.hasUnreadNotificationOfType(email, "low_attendance").then((hasUnread) => {
-          if (!hasUnread) {
-            const subjectList = lowAttendanceSubjects
-              .map((s) => `${s.courseCode || s.subject || "Subject"}: ${s.attendancePct}%`)
-              .join(", ");
-            supabaseClient.createNotification(email, {
-              type: "low_attendance",
-              title: "⚠️ Low Attendance Alert",
-              body: `${lowAttendanceSubjects.length} subject${lowAttendanceSubjects.length > 1 ? "s" : ""} below 75%: ${subjectList}. Check the attendance page for details.`,
-              data: { subjects: lowAttendanceSubjects.map((s) => ({ courseCode: s.courseCode, pct: s.attendancePct })) },
-            }).catch((err) => log("NOTIFICATIONS", `Low attendance notif failed: ${err.message}`));
-          }
-        }).catch(() => {});
-      }
     }
     
     return res.ok({ attendance, photosReady: areFacultyPhotosReady(s) });

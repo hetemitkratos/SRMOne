@@ -75,6 +75,24 @@ async function removeCredentials(academiaEmail) {
 }
 
 /**
+ * List all credentials with auto-login enabled — used by the background
+ * poller to check for new jobs/notices without waiting for the user to
+ * open the app.
+ */
+async function getAllAutoLoginCredentials() {
+  if (!supabase) return [];
+  const { data, error } = await supabase
+    .from(TABLE)
+    .select("academia_email, placement_username, encrypted_password, has_mfa")
+    .eq("auto_login_enabled", true);
+  if (error) {
+    console.error("[supabase] getAllAutoLoginCredentials:", error.message);
+    return [];
+  }
+  return data || [];
+}
+
+/**
  * Update the last_auto_login timestamp and optionally toggle auto_login_enabled.
  */
 async function updateAutoLoginStatus(academiaEmail, enabled = null) {
@@ -92,11 +110,13 @@ module.exports = {
   supabase,
   storeCredentials,
   getCredentials,
+  getAllAutoLoginCredentials,
   removeCredentials,
   updateAutoLoginStatus,
   // Notification helpers (shared notifications table)
   createNotification,
   hasUnreadNotificationOfType,
+  hasNotificationForEntity,
   // Placement caching
   getCachedPlacementProfile,
   cachePlacementProfile,
@@ -133,6 +153,31 @@ async function hasUnreadNotificationOfType(email, type) {
     .eq("read", false);
   if (error) { console.error("[supabase] hasUnreadNotificationOfType:", error.message); return false; }
   return (count || 0) > 0;
+}
+
+/**
+ * Returns true if we already created a notification for this entity id
+ * (e.g. jobId / noticeId) under the given type — prevents spam & stale repeats.
+ */
+async function hasNotificationForEntity(email, type, entityKey, entityId) {
+  if (!supabase || entityId == null || entityId === "") return false;
+  const idStr = String(entityId);
+  const { data, error } = await supabase
+    .from("notifications")
+    .select("id, data")
+    .eq("academia_email", email)
+    .eq("type", type)
+    .order("created_at", { ascending: false })
+    .limit(40);
+  if (error) {
+    console.error("[supabase] hasNotificationForEntity:", error.message);
+    return false;
+  }
+  return (data || []).some((n) => {
+    const d = n.data || {};
+    const candidates = [d[entityKey], d.jobId, d.jobUuid, d.noticeId, d.id].filter((v) => v != null);
+    return candidates.some((v) => String(v) === idStr);
+  });
 }
 
 // ─── Placement Profile Cache ─────────────────────────────────────────────────

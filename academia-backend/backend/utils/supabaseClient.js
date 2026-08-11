@@ -173,6 +173,46 @@ export async function hasUnreadNotificationOfType(email, type) {
   return (count || 0) > 0;
 }
 
+/**
+ * True if a low_attendance (or similar) notif was created recently for a similar subject set.
+ * Prevents daily spam while still re-alerting when the situation changes or days later.
+ */
+export async function hasRecentNotificationOfType(email, type, withinHours = 24) {
+  if (!supabase) return false;
+  const since = new Date(Date.now() - withinHours * 60 * 60 * 1000).toISOString();
+  const { count, error } = await supabase
+    .from("notifications")
+    .select("*", { count: "exact", head: true })
+    .eq("academia_email", email)
+    .eq("type", type)
+    .gte("created_at", since);
+  if (error) {
+    console.error("[supabase] hasRecentNotificationOfType:", error.message);
+    return false;
+  }
+  return (count || 0) > 0;
+}
+
+/**
+ * Latest notification of a type (any read state), or null.
+ */
+export async function getLatestNotificationOfType(email, type) {
+  if (!supabase) return null;
+  const { data, error } = await supabase
+    .from("notifications")
+    .select("*")
+    .eq("academia_email", email)
+    .eq("type", type)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) {
+    console.error("[supabase] getLatestNotificationOfType:", error.message);
+    return null;
+  }
+  return data || null;
+}
+
 export async function getNotifications(email, unreadOnly = false) {
   if (!supabase) return [];
   let query = supabase
