@@ -2007,7 +2007,17 @@ app.get("/faculty", async (req, res) => {
       const parts = noTitle.split(/[\s.]+/).filter(Boolean);
       const trailingInitial = parts.length > 1 && parts[parts.length - 1].length === 1
         ? parts[parts.length - 1].toLowerCase() : null;
-      const bodyParts = (trailingInitial ? parts.slice(0, -1) : parts).map(p => p.toLowerCase());
+      // Detect leading single-letter initial(s) (e.g., "R.Mangalagowri" → ["r"])
+      const leadingInitials = [];
+      let startIdx = 0;
+      while (startIdx < parts.length - 1 && parts[startIdx].length === 1) {
+        leadingInitials.push(parts[startIdx].toLowerCase());
+        startIdx++;
+      }
+      const leadingInit = leadingInitials.join("") || null;
+      const bodyParts = (trailingInitial ? parts.slice(0, -1) : parts)
+        .slice(startIdx)
+        .map(p => p.toLowerCase());
       const bodySlug = bodyParts.join("-");
 
       const slugCandidates = [...new Set([
@@ -2027,6 +2037,11 @@ app.get("/faculty", async (req, res) => {
         bodySlug,
         // 8. rawName dots→spaces variation
         nameToSlug(rawName.replace(/\./g, " ").trim()),
+        // 9. Leading initial moved to end (e.g., mangalagowri-r, dr-mangalagowri-r)
+        ...leadingInit ? [
+          `${bodySlug}-${leadingInit}`,
+          ...TITLE_PREFIXES.map(t => `${t}-${bodySlug}-${leadingInit}`),
+        ] : [],
       ])].filter(Boolean);
 
       log("FACULTY", `Trying ${slugCandidates.length} slug(s) for "${cleanName}": ${slugCandidates.join(", ")}`);
