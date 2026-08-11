@@ -14,7 +14,7 @@ type ScraperRequest struct {
 	Sections     []string      `json:"sections,omitempty"`
 	UUID         string        `json:"uuid,omitempty"`
 	JobUUID      string        `json:"jobUuid,omitempty"`
-	JobID        int           `json:"jobId,omitempty"`
+	JobID        interface{}   `json:"jobId,omitempty"`
 	FileURL      string        `json:"fileUrl,omitempty"`
 	MFAToken     string        `json:"mfaToken,omitempty"`
 	TOTPCode     string        `json:"totpCode,omitempty"`

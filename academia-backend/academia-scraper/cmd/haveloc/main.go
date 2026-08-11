@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -292,7 +293,19 @@ func handleApply(req ScraperRequest) ScraperResponse {
 		return ScraperResponse{Error: fmt.Sprintf("set auth: %v", err)}
 	}
 
-	raw, status, err := applyForJob(client, req.JobUUID, req.JobID, req.ApplyAnswers, req.ResumeName)
+	jobIDInt := 0
+	if req.JobID != nil {
+		switch v := req.JobID.(type) {
+		case float64:
+			jobIDInt = int(v)
+		case string:
+			if parsed, err := strconv.Atoi(v); err == nil {
+				jobIDInt = parsed
+			}
+		}
+	}
+
+	raw, status, err := applyForJob(client, req.JobUUID, jobIDInt, req.ApplyAnswers, req.ResumeName)
 	if err != nil {
 		errMsg := fmt.Sprintf("apply failed: %v", err)
 		if status == 400 || status == 409 {
