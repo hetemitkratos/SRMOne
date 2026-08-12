@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -93,7 +94,9 @@ func (c *FHClient) doRequest(method, url string, body interface{}) (*json.RawMes
 			return nil, 0, fmt.Errorf("do request: %w", err)
 		}
 
-		if statusCode == 429 && attempt < maxRetries {
+		// 429 (rate limited) and 502/503/504 (upstream gateway hiccups) are
+		// usually transient — retry with backoff before giving up.
+		if (statusCode == 429 || statusCode == 502 || statusCode == 503 || statusCode == 504) && attempt < maxRetries {
 			time.Sleep(time.Duration(500*(attempt+1)) * time.Millisecond)
 			continue
 		}
@@ -104,7 +107,13 @@ func (c *FHClient) doRequest(method, url string, body interface{}) (*json.RawMes
 
 		if statusCode >= 400 {
 			raw := json.RawMessage(respBody)
-			return &raw, statusCode, fmt.Errorf("API error %d: %s", statusCode, string(respBody))
+			msg := string(respBody)
+			if isHTMLBody(respBody) {
+				// Gateway/proxy error pages (nginx 502, etc.) aren't useful to
+				// show a user — surface a short, clean message instead.
+				msg = fmt.Sprintf("Haveloc portal is temporarily unavailable (HTTP %d)", statusCode)
+			}
+			return &raw, statusCode, fmt.Errorf("API error %d: %s", statusCode, msg)
 		}
 
 		if len(respBody) == 0 {
@@ -116,7 +125,18 @@ func (c *FHClient) doRequest(method, url string, body interface{}) (*json.RawMes
 		return &raw, statusCode, nil
 	}
 
-	return nil, 0, fmt.Errorf("max retries exceeded for 429")
+	return nil, 0, fmt.Errorf("max retries exceeded")
+}
+
+// isHTMLBody reports whether body looks like an HTML error page rather than
+// the JSON the Haveloc API normally returns (e.g. an nginx 502 page).
+func isHTMLBody(body []byte) bool {
+	trimmed := bytes.TrimSpace(body)
+	if len(trimmed) == 0 {
+		return false
+	}
+	lower := bytes.ToLower(trimmed)
+	return bytes.HasPrefix(lower, []byte("<!doctype")) || bytes.HasPrefix(lower, []byte("<html"))
 }
 
 // fetchDirect downloads a binary file (for JD/PDF downloads).
