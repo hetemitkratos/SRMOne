@@ -146,6 +146,7 @@ func NewFHClient(host, userAgent string) *FHClient {
 			ReadTimeout:            60 * time.Second,
 			WriteTimeout:           60 * time.Second,
 			DisablePathNormalizing: true,
+			ReadBufferSize:         16384,
 		},
 	}
 }

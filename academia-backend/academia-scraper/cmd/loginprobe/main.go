@@ -178,6 +178,19 @@ func runProbe(req ProbeRequest) ProbeResponse {
 		if session.looksAuthenticated(finalSnap) {
 			resp.Classification = classAuthenticated
 		}
+
+		// Prime the portal session to refresh WAF/CSRF cookies before
+		// making XHR fragment requests. Without this, the portal WAF
+		// returns 403 on attendance/timetable pages.
+		_, primeErr := session.PrimePortalSession()
+		if primeErr != nil {
+			fmt.Fprintf(os.Stderr, "[runProbe] portal prime failed: %v — skipping section fetch\n", primeErr)
+			// Login succeeded but session is not usable for fragment fetches.
+			// Return as authenticated with no data — the server can retry later.
+			resp.Success = true
+			return finalizeResponse(session, resp)
+		}
+
 		if err := fetchRequestedSections(session, &resp, requestedSections, requestedCalendarSems); err != nil {
 			if resp.Error == "" {
 				resp.Error = err.Error()

@@ -121,18 +121,25 @@ export default function Dashboard() {
 
   useEffect(() => {
     let cancelled = false;
-    (async () => {
+    let retryCount = 0;
+    const maxRetries = 6;
+
+    const fetchStudent = async () => {
       try {
         const data = await api.student(user.email);
         if (!cancelled) setStudentInfo(data.studentInfo);
       } catch (err) {
-        // If server is down or auth failed, redirect to login
         if (!cancelled) {
           const errorMsg = err.message || "";
+          // If session expired, retry — SP background login may still be in progress
+          if ((errorMsg.includes("No active session") || errorMsg.includes("session expired")) && retryCount < maxRetries) {
+            retryCount++;
+            setTimeout(fetchStudent, 5000);
+            return;
+          }
           if (
             errorMsg.includes("backend running") ||
             errorMsg.includes("Empty response") ||
-            errorMsg.includes("session") ||
             errorMsg.includes("unauthorized") ||
             errorMsg.includes("not logged in")
           ) {
@@ -144,7 +151,9 @@ export default function Dashboard() {
       } finally {
         if (!cancelled) setLoading(false);
       }
-    })();
+    };
+
+    fetchStudent();
     return () => { cancelled = true; };
   }, [user.email, logout, navigate]);
 

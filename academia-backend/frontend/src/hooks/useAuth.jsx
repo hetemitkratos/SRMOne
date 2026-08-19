@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useCallback } from "react";
+import { api } from "../api/client.js";
 
 const AuthContext = createContext(null);
 
@@ -18,10 +19,30 @@ export function AuthProvider({ children }) {
     return localStorage.getItem("placement_connected") === "true";
   });
 
+  const [autoLoggingIn, setAutoLoggingIn] = useState(false);
+
   const login = useCallback((email) => {
     const u = { email };
     localStorage.setItem("srm_user", JSON.stringify(u));
     setUser(u);
+  }, []);
+
+  const autoLogin = useCallback(async (email) => {
+    setAutoLoggingIn(true);
+    try {
+      await api.autoLogin(email);
+      const u = { email };
+    localStorage.setItem("srm_user", JSON.stringify(u));
+    setUser(u);
+      return true;
+    } catch {
+      // Auto-login failed — clear stored user so they see the login form
+      localStorage.removeItem("srm_user");
+      setUser(null);
+      return false;
+    } finally {
+      setAutoLoggingIn(false);
+    }
   }, []);
 
   const loginPlacement = useCallback((username) => {
@@ -47,7 +68,8 @@ export function AuthProvider({ children }) {
 
   return (
     <AuthContext.Provider value={{
-      user, login, logout,
+      user, login, autoLogin, logout,
+      autoLoggingIn,
       placementUser, loginPlacement, logoutPlacement,
       placementConnected, setPlacementConnected,
     }}>

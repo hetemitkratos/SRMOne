@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useNavigate, Link } from "react-router-dom";
-import { Loader2, Eye, EyeOff, Sparkles, Briefcase, ChevronDown, ChevronUp } from "lucide-react";
+import { Loader2, Eye, EyeOff, Sparkles, Briefcase, ChevronDown, ChevronUp, CalendarCheck } from "lucide-react";
 import { api } from "../api/client.js";
 import { placementApi } from "../api/placementClient.js";
 import { useAuth } from "../hooks/useAuth.jsx";
@@ -17,12 +17,19 @@ function LogoMark({ size = 40 }) {
 }
 
 export default function Login() {
-  const { user } = useAuth();
+  const { user, autoLogin, autoLoggingIn } = useAuth();
   const navigate = useNavigate();
 
   useEffect(() => {
-    if (user) navigate("/dashboard", { replace: true });
-  }, [user, navigate]);
+    if (user) {
+      // Try auto-login with stored credentials
+      autoLogin(user.email).then((success) => {
+        if (success) {
+          navigate("/dashboard", { replace: true });
+        }
+      });
+    }
+  }, [user, autoLogin, navigate]);
 
   return (
     <div className="min-h-screen bg-[#F4F0EB] font-sans text-slate-900 lg:grid lg:grid-cols-2 relative overflow-x-hidden">
@@ -79,6 +86,15 @@ export default function Login() {
 
       {/* ─── MOBILE HERO + FORM / DESKTOP FORM ─── */}
       <div className="flex flex-col min-h-screen lg:min-h-0 lg:justify-center relative z-10">
+        {/* Auto-login overlay */}
+        {autoLoggingIn && (
+          <div className="absolute inset-0 z-50 flex items-center justify-center bg-white/80 backdrop-blur-sm">
+            <div className="flex flex-col items-center gap-3">
+              <Loader2 className="w-8 h-8 animate-spin text-[#D97757]" />
+              <p className="text-sm font-medium text-slate-600">Reconnecting your session…</p>
+            </div>
+          </div>
+        )}
         {/* Mobile hero — one quiet composition */}
         <div className="lg:hidden px-8 pt-12 pb-2">
           <motion.div
@@ -162,6 +178,17 @@ function LoginForm() {
   const [placementError, setPlacementError] = useState("");
   const [placementConnected, setPlacementConnectedLocal] = useState(false);
 
+  // Optional Student Portal password (if different from academia password)
+  const [showSpPwd, setShowSpPwd] = useState(false);
+  const [spPassword, setSpPassword] = useState("");
+
+  // SP login prompt (shown after academia login if no SP password was provided)
+  const [showSpPrompt, setShowSpPrompt] = useState(false);
+  const [spPromptPassword, setSpPromptPassword] = useState("");
+  const [spPromptLoading, setSpPromptLoading] = useState(false);
+  const [spPromptError, setSpPromptError] = useState("");
+  const [loggedInEmail, setLoggedInEmail] = useState("");
+
   const usernamePlaceholders = [
     "e.g. ready for placements?",
     "e.g. checking those marks...",
@@ -199,8 +226,9 @@ function LoginForm() {
     const email = `${username.trim().toLowerCase()}@srmist.edu.in`;
     setLoading(true);
     try {
-      await api.login(email, password);
+      await api.login(email, password, spPassword || undefined);
       login(email);
+      setLoggedInEmail(email);
 
       try {
         const result = await placementApi.autoLogin(email);
@@ -212,10 +240,34 @@ function LoginForm() {
         // Placement not connected — user can connect later
       }
 
+      // If no SP password provided, show prompt after navigating to dashboard
+      if (!spPassword) {
+        setShowSpPrompt(true);
+      }
+
       navigate("/dashboard", { replace: true });
     } catch (err) {
       setError(err.message || "Login failed. Check your credentials.");
       setLoading(false);
+    }
+  };
+
+  const handleSpPromptLogin = async (e) => {
+    e.preventDefault();
+    if (!spPromptPassword) {
+      setSpPromptError("Please enter your Student Portal password.");
+      return;
+    }
+    setSpPromptLoading(true);
+    setSpPromptError("");
+    try {
+      await api.spLogin(loggedInEmail, spPromptPassword);
+      setShowSpPrompt(false);
+      setSpPromptPassword("");
+    } catch (err) {
+      setSpPromptError(err.message || "Student Portal login failed. Check your SP password.");
+    } finally {
+      setSpPromptLoading(false);
     }
   };
 
@@ -346,6 +398,61 @@ function LoginForm() {
         </motion.button>
       </form>
 
+      {/* Optional: Different Student Portal password */}
+      <div className="mt-5">
+        <button
+          type="button"
+          onClick={() => setShowSpPwd(!showSpPwd)}
+          className="w-full flex items-center justify-between text-left cursor-pointer group"
+        >
+          <div className="flex items-center gap-2.5">
+            <div className="w-9 h-9 rounded-full bg-[#F4F0EB] flex items-center justify-center">
+              <CalendarCheck size={16} className="text-slate-500" />
+            </div>
+            <div>
+              <p className="text-[14px] font-bold text-slate-700">
+                {spPassword ? "Student Portal password set" : "Different Student Portal password?"}
+              </p>
+              <p className="text-[12px] text-slate-400 font-medium">
+                {spPassword ? "Will use this for SP login" : "Only if your SP password differs (optional)"}
+              </p>
+            </div>
+          </div>
+          {showSpPwd ? (
+            <ChevronUp size={18} className="text-slate-400 group-hover:text-slate-600" />
+          ) : (
+            <ChevronDown size={18} className="text-slate-400 group-hover:text-slate-600" />
+          )}
+        </button>
+
+        <AnimatePresence>
+          {showSpPwd && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: "auto" }}
+              exit={{ opacity: 0, height: 0 }}
+              className="overflow-hidden mt-4"
+            >
+              <div>
+                <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1.5 ml-1">
+                  Student Portal Password
+                </label>
+                <input
+                  type="password"
+                  value={spPassword}
+                  onChange={(e) => setSpPassword(e.target.value)}
+                  placeholder="Leave empty to use same password"
+                  className="w-full px-5 py-3.5 rounded-full text-[14px] font-medium outline-none transition-all border border-slate-200 bg-white shadow-[0_2px_10px_rgba(0,0,0,0.02)] text-slate-900 placeholder:text-slate-400 focus:border-slate-300 focus:ring-4 focus:ring-slate-100/50"
+                />
+                <p className="text-[11px] text-slate-400 font-medium leading-relaxed px-1 mt-2">
+                  If your Student Portal (sp.srmist.edu.in) password is different from your academia password, enter it here. We'll only try once to avoid lockout.
+                </p>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+
       {/* Optional Placement Connect */}
       <div className="mt-7 pt-5 border-t border-slate-100">
         <button
@@ -458,6 +565,78 @@ function LoginForm() {
           )}
         </AnimatePresence>
       </div>
+
+      {/* Student Portal Login Prompt */}
+      <AnimatePresence>
+        {showSpPrompt && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
+            onClick={() => setShowSpPrompt(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              onClick={(e) => e.stopPropagation()}
+              className="bg-white rounded-3xl p-7 max-w-md w-full mx-4 shadow-2xl"
+            >
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-11 h-11 rounded-full bg-amber-50 flex items-center justify-center">
+                  <CalendarCheck size={20} className="text-amber-600" />
+                </div>
+                <div>
+                  <h3 className="text-[16px] font-bold text-slate-800">Student Portal Login</h3>
+                  <p className="text-[12px] text-slate-400 font-medium">Required for attendance data</p>
+                </div>
+              </div>
+
+              <p className="text-[13px] text-slate-500 font-medium leading-relaxed mb-4">
+                Your Student Portal password may be different from your academia password. Enter it below to fetch attendance. We'll only try once to avoid lockout.
+              </p>
+
+              {spPromptError && (
+                <div className="mb-3 px-4 py-2.5 rounded-xl bg-red-50 border border-red-100 text-[12px] font-medium text-red-600">
+                  {spPromptError}
+                </div>
+              )}
+
+              <form onSubmit={handleSpPromptLogin}>
+                <input
+                  type="password"
+                  value={spPromptPassword}
+                  onChange={(e) => setSpPromptPassword(e.target.value)}
+                  placeholder="Student Portal password"
+                  autoFocus
+                  className="w-full px-5 py-3.5 rounded-full text-[14px] font-medium outline-none transition-all border border-slate-200 bg-white shadow-[0_2px_10px_rgba(0,0,0,0.02)] text-slate-900 placeholder:text-slate-400 focus:border-slate-300 focus:ring-4 focus:ring-slate-100/50 mb-4"
+                />
+                <div className="flex gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setShowSpPrompt(false)}
+                    className="flex-1 py-3.5 rounded-full font-bold text-[14px] text-slate-500 bg-slate-100 hover:bg-slate-200 transition-colors cursor-pointer"
+                  >
+                    Skip for now
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={spPromptLoading}
+                    className="flex-1 flex items-center justify-center gap-2 py-3.5 rounded-full font-bold text-white text-[14px] bg-slate-700 hover:bg-slate-800 transition-colors disabled:opacity-40 cursor-pointer"
+                  >
+                    {spPromptLoading ? (
+                      <><Loader2 size={16} className="animate-spin" /> Logging in…</>
+                    ) : (
+                      "Login & Fetch"
+                    )}
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </>
   );
 }

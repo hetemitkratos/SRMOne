@@ -26,10 +26,22 @@ async function request(path, options = {}) {
 }
 
 export const api = {
-  login: (email, password) =>
+  login: (email, password, spPassword) =>
     request("/login", {
       method: "POST",
-      body: JSON.stringify({ email, password }),
+      body: JSON.stringify({ email, password, spPassword: spPassword || undefined }),
+    }),
+
+  autoLogin: (email) =>
+    request("/auto-login", {
+      method: "POST",
+      body: JSON.stringify({ email }),
+    }),
+
+  spLogin: (email, spPassword) =>
+    request("/sp-login", {
+      method: "POST",
+      body: JSON.stringify({ email, spPassword }),
     }),
 
   logout: (email) =>
@@ -118,4 +130,15 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify({ email, updates }),
     }),
+
+  // Student Portal (sp.srmist.edu.in) — fallback for attendance
+  spLogin: (email, password, captchaApiKey) =>
+    request("/sp/login", {
+      method: "POST",
+      body: JSON.stringify({ email, password, captchaApiKey }),
+    }),
+  spAttendance: (email) =>
+    request(`/sp/attendance?email=${encodeURIComponent(email)}`),
+  spStudent: (email) =>
+    request(`/sp/student?email=${encodeURIComponent(email)}`),
 };

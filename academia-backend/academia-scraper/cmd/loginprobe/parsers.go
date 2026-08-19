@@ -7,6 +7,7 @@ import (
 	"fmt"
 	stdhtml "html"
 	"net/url"
+	"os"
 	"regexp"
 	"sort"
 	"strings"
@@ -177,20 +178,29 @@ func parseAttendance(decodedHTML string) ([]map[string]string, []string, error) 
 
 	var table *goquery.Selection
 	var headers []string
+	tableCount := 0
 	doc.Find("table").EachWithBreak(func(_ int, sel *goquery.Selection) bool {
+		tableCount++
 		rowHeaders := extractHeaders(sel)
+		fmt.Fprintf(os.Stderr, "[parseAttendance] table #%d headers=%v\n", tableCount, rowHeaders)
 		if len(rowHeaders) < 2 {
 			return true
 		}
 		if containsString(rowHeaders, "Attn %") {
 			table = sel
 			headers = rowHeaders
+			fmt.Fprintf(os.Stderr, "[parseAttendance] matched table #%d (has Attn %%)\n", tableCount)
 			return false
 		}
 		return true
 	})
 
 	if table == nil {
+		preview := decodedHTML
+		if len(preview) > 500 {
+			preview = preview[:500]
+		}
+		fmt.Fprintf(os.Stderr, "[parseAttendance] no table matched (tables=%d) HTML preview: %s\n", tableCount, preview)
 		return nil, nil, fmt.Errorf("attendance table not found in decoded HTML")
 	}
 

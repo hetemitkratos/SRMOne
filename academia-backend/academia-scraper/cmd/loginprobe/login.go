@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -19,7 +20,7 @@ const (
 	defaultPortalID             = "40-10002227248"
 	defaultStudentPhotoReportID = "2727643000298055031"
 	defaultSigninPath           = "/accounts/p/" + defaultPortalID + "/signin"
-	defaultAttendanceURL        = defaultBaseURL + "/srm_university/academia-academic-services/page/My_Attendance"
+	defaultAttendanceURL        = defaultBaseURL + "/srm_university/academia-academic-services/page/My_Time_Table_2023_24"
 	defaultPersonalTTURL        = defaultBaseURL + "/srm_university/academia-academic-services/page/My_Time_Table_2023_24"
 	defaultUnifiedTTB1          = defaultBaseURL + "/srm_university/academia-academic-services/page/Unified_Time_Table_2025_Batch_1"
 	defaultUnifiedTTB2          = defaultBaseURL + "/srm_university/academia-academic-services/page/Unified_Time_Table_2025_batch_2"
@@ -204,6 +205,12 @@ func (s *LoginSession) RunPassword(identifier, digest, password string) (*passwo
 	}
 	if snap.StatusCode < 200 || snap.StatusCode > 299 {
 		return &result, fmt.Errorf("password request returned %d", snap.StatusCode)
+	}
+	// The portal returns HTTP 200 even when the password is wrong, with an
+	// error code in the JSON body (e.g. IN102 = incorrect password).
+	// A successful password auth returns code "SI303" with a redirect_uri.
+	if result.redirectURI == "" && result.summary.ErrorCode != "" {
+		return &result, fmt.Errorf("password auth failed: %s (%s)", result.summary.LocalizedMessage, result.summary.ErrorCode)
 	}
 	return &result, nil
 }
@@ -406,7 +413,13 @@ func (s *LoginSession) PrimePortalSession() (RequestSnapshot, error) {
 	if err != nil {
 		return snap, fmt.Errorf("portal prime failed: %w", err)
 	}
+	fmt.Fprintf(os.Stderr, "[PrimePortalSession] URL=%s status=%d bodyLen=%d isLogin=%v\n", snap.URL, snap.StatusCode, len(snap.Body), looksLikeUnauthenticatedPage(snap.URL, string(snap.Body)))
 	if looksLikeUnauthenticatedPage(snap.URL, string(snap.Body)) {
+		bodyPreview := string(snap.Body)
+		if len(bodyPreview) > 300 {
+			bodyPreview = bodyPreview[:300]
+		}
+		fmt.Fprintf(os.Stderr, "[PrimePortalSession] session expired: URL=%s bodyPreview=%s\n", snap.URL, bodyPreview)
 		return snap, fmt.Errorf("session expired: portal redirected to sign-in")
 	}
 	if snap.StatusCode == 401 || snap.StatusCode == 403 {
@@ -471,13 +484,12 @@ func (s *LoginSession) fetchDecodedFragment(name, rawURL, referer string) (strin
 		"Accept":  "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
 		"Referer": referer,
 	}
-	// Only send X-Requested-With for non-attendance fragments — the SRM WAF
-	// blocks AJAX-flagged requests to the attendance page with 403.
-	if !strings.Contains(name, "attendance") {
-		headers["X-Requested-With"] = "XMLHttpRequest"
-	}
+	// Send X-Requested-With for all fragments — the SRM WAF requires it
+	// and returns 403 for page fragment requests without it.
+	headers["X-Requested-With"] = "XMLHttpRequest"
 	snap, err := s.Client.DoRequest(name, methodGet, rawURL, nil, "", headers, false)
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "[fetchDecodedFragment] %s URL=%s error=%v\n", name, rawURL, err)
 		return "", debug, fmt.Errorf("%s request failed: %w", name, err)
 	}
 
@@ -486,15 +498,25 @@ func (s *LoginSession) fetchDecodedFragment(name, rawURL, referer string) (strin
 		debug.contentType = ct
 	}
 	if snap.StatusCode < 200 || snap.StatusCode > 299 {
+		fmt.Fprintf(os.Stderr, "[fetchDecodedFragment] %s URL=%s finalURL=%s status=%d\n", name, rawURL, snap.URL, snap.StatusCode)
 		return "", debug, fmt.Errorf("%s request returned %d", name, snap.StatusCode)
 	}
 
 	body := string(snap.Body)
 
+	// Detect login page responses — the portal returns 200 with a login
+	// page HTML when the session is invalid. Without this check, the raw
+	// HTML fallback below would pass the login page through as "valid" data.
+	if looksLikeUnauthenticatedPage(snap.URL, body) {
+		fmt.Fprintf(os.Stderr, "[fetchDecodedFragment] %s URL=%s status=%d — login page detected, session expired\n", name, rawURL, snap.StatusCode)
+		return "", debug, fmt.Errorf("%s: session expired (login page returned)", name)
+	}
+
 	decoded, payload, decodeErr := decodeSanitizedHTML(body)
 	if decodeErr == nil {
 		debug.payloadFound = payload != ""
 		debug.payloadLength = len(payload)
+		fmt.Fprintf(os.Stderr, "[fetchDecodedFragment] %s URL=%s status=%d decodedLen=%d via=sanitized\n", name, rawURL, snap.StatusCode, len(decoded))
 		return decoded, debug, nil
 	}
 
@@ -502,13 +524,20 @@ func (s *LoginSession) fetchDecodedFragment(name, rawURL, referer string) (strin
 	if zmlErr == nil {
 		debug.payloadFound = payload != ""
 		debug.payloadLength = len(payload)
+		fmt.Fprintf(os.Stderr, "[fetchDecodedFragment] %s URL=%s status=%d decodedLen=%d via=zml\n", name, rawURL, snap.StatusCode, len(decoded))
 		return decoded, debug, nil
 	}
 
 	if strings.Contains(strings.ToLower(body), "<table") || strings.Contains(strings.ToLower(body), "<html") {
+		fmt.Fprintf(os.Stderr, "[fetchDecodedFragment] %s URL=%s status=%d decodedLen=%d via=raw\n", name, rawURL, snap.StatusCode, len(body))
 		return body, debug, nil
 	}
 
+	bodyPreview := body
+	if len(bodyPreview) > 300 {
+		bodyPreview = bodyPreview[:300]
+	}
+	fmt.Fprintf(os.Stderr, "[fetchDecodedFragment] %s URL=%s status=%d decode failed; bodyPreview=%s\n", name, rawURL, snap.StatusCode, bodyPreview)
 	return "", debug, fmt.Errorf("%v; %v", decodeErr, zmlErr)
 }
 
@@ -556,7 +585,7 @@ func (s *LoginSession) fetchAttendanceBundle(required map[string]bool, data *Fet
 	decoded, debug, err := s.fetchDecodedFragment(
 		"attendance",
 		defaultAttendanceURL,
-		s.ServiceURL+"/#Page:My_Attendance",
+		s.ServiceURL+"/#Page:My_Time_Table_2023_24",
 	)
 
 	// Retry on 403 with the portal home page as referer (hash-based referer
@@ -736,11 +765,23 @@ func (s *LoginSession) fetchAttendanceBundle(required map[string]bool, data *Fet
 }
 
 func (s *LoginSession) fetchTimetableBundle(data *FetchData, mu *sync.Mutex) error {
-	decoded, _, err := s.fetchDecodedFragment(
+	decoded, debug, err := s.fetchDecodedFragment(
 		"personal_timetable",
 		defaultPersonalTTURL,
 		s.ServiceURL+"/#Page:My_Time_Table_2023_24",
 	)
+
+	// Retry on 404/403 with the portal home page as referer (hash-based referer
+	// can cause the portal WAF to reject the fragment request).
+	if err != nil && (debug.statusCode == 404 || debug.statusCode == 403) {
+		time.Sleep(500 * time.Millisecond)
+		decoded, _, err = s.fetchDecodedFragment(
+			"personal_timetable_retry",
+			defaultPersonalTTURL,
+			s.ServiceURL+"/",
+		)
+	}
+
 	if err != nil {
 		return err
 	}
@@ -790,9 +831,18 @@ func (s *LoginSession) fetchCalendars(targetSems []string, data *FetchData, mu *
 	}
 
 	candidatesFor := func(sem string) []calendarCandidate {
-		yearPairs := []string{"2026_27", "2025_26", "2024_25"}
 		semToken := strings.ToUpper(sem)
-		out := make([]calendarCandidate, 0, len(yearPairs))
+		out := make([]calendarCandidate, 0, 4)
+
+		// New portal URL (combined academic reports page)
+		out = append(out, calendarCandidate{
+			url:     defaultBaseURL + "/srm_university/academia-academic-services/page/Academic_Reports",
+			referer: s.ServiceURL + "/#Academic_Reports",
+			name:    "calendar_" + sem + "_Academic_Reports",
+		})
+
+		// Legacy per-semester planner pages as fallback
+		yearPairs := []string{"2026_27", "2025_26", "2024_25"}
 		for _, year := range yearPairs {
 			pageName := fmt.Sprintf("Academic_Planner_%s_%s", year, semToken)
 			out = append(out, calendarCandidate{

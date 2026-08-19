@@ -150,13 +150,13 @@ $jobs = @()
 
 # 1. Academia backend (port 3000)
 Write-Host "  [1/4] Academia backend  -> http://localhost:3000" -ForegroundColor Cyan
-$jobs += Start-Process -FilePath "cmd.exe" -ArgumentList "/c", "npm run dev" -WorkingDirectory $ACADEMIA -PassThru -WindowStyle Normal
+$jobs += Start-Process -FilePath "powershell.exe" -ArgumentList "-NoProfile", "-Command", "npm run dev" -WorkingDirectory $ACADEMIA -PassThru -WindowStyle Normal
 
 Start-Sleep -Seconds 2
 
 # 2. Placement backend (port 3001)
 Write-Host "  [2/4] Placement backend -> http://localhost:3001" -ForegroundColor Cyan
-$jobs += Start-Process -FilePath "cmd.exe" -ArgumentList "/c", "npm start" -WorkingDirectory $PLACEMENT -PassThru -WindowStyle Normal
+$jobs += Start-Process -FilePath "powershell.exe" -ArgumentList "-NoProfile", "-Command", "npm start" -WorkingDirectory $PLACEMENT -PassThru -WindowStyle Normal
 
 Start-Sleep -Seconds 2
 
@@ -168,7 +168,7 @@ Start-Sleep -Seconds 2
 
 # 4. Frontend (port 5174)
 Write-Host "  [4/4] Frontend (Vite)   -> http://localhost:5174" -ForegroundColor Cyan
-$jobs += Start-Process -FilePath "cmd.exe" -ArgumentList "/c", "npm run dev" -WorkingDirectory $FRONTEND -PassThru -WindowStyle Normal
+$jobs += Start-Process -FilePath "powershell.exe" -ArgumentList "-NoProfile", "-Command", "npm run dev" -WorkingDirectory $FRONTEND -PassThru -WindowStyle Normal
 
 Write-Host ""
 Write-Host "All services launched in separate windows." -ForegroundColor Green

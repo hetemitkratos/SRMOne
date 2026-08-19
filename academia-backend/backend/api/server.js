@@ -6,10 +6,12 @@
  *   - Sessions stored in-memory: sessions[email] = { cookies, cache, meta, … }
  *   - Sessions expire after 30 minutes of inactivity (auto-destroyed)
  *   - ALL scraped data is cached server-side → repeat requests are instant
- *   - NO password storage, NO auto re-login
+ *   - Encrypted credentials stored in Supabase for auto-login (no manual re-login)
+ *   - Background job refreshes all users' data every 30 minutes
  *
  * Endpoints:
  *   POST /login                  → login via Go scraper, create session
+ *   POST /auto-login             → re-login using stored encrypted credentials
  *   GET  /init?email=            → fetch student + timetable + calendar in parallel
  *   GET  /attendance?email=      → fetch attendance
  *   GET  /marks?email=           → fetch marks
@@ -24,6 +26,11 @@
  *   GET  /faculty?name=          → faculty info via Go faculty scraper
  *   POST /logout                 → destroy session
  *   GET  /status                 → server health + active sessions
+ *
+ * Student Portal (sp.srmist.edu.in) — fallback when academia attendance is closed:
+ *   POST /sp/login               → login via student portal scraper (captcha auto-solved)
+ *   GET  /sp/attendance?email=   → fetch attendance from student portal
+ *   GET  /sp/student?email=      → fetch student info from student portal
  */
 
 import express from "express";
@@ -31,8 +38,10 @@ import cors from "cors";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
 import { runAcademiaScraper, getAcademiaScraperRuntime } from "../integrations/go/go_scraper_client.js";
+import { runStudentPortalScraper, getStudentPortalScraperRuntime } from "../integrations/go/sp_scraper_client.js";
 import { buildScheduleFromData } from "../utils/schedule_utils.js";
 import * as supabaseClient from "../utils/supabaseClient.js";
+import { encryptPassword, decryptPassword } from "../utils/crypto.js";
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
@@ -67,6 +76,10 @@ const ALLOWED_ORIGINS = Array.from(new Set([
  * Passwords are NEVER stored.
  */
 const sessions = {};
+
+// Student Portal sessions — persist independently of academia sessions
+// so SP attendance data survives academia session expiry
+const spSessions = {};
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -168,6 +181,8 @@ function mergeGoDataIntoCache(session, data = {}) {
     if (session.cache.studentInfo.PhotoUrl) {
       session.cache.photo = session.cache.studentInfo.PhotoUrl;
     }
+    // Persist to Supabase
+    supabaseClient.cacheStudentProfile(session.meta?.email, session.cache.studentInfo).catch(() => {});
   }
 
   if (Array.isArray(data.attendance) && data.attendance.length) {
@@ -629,7 +644,7 @@ async function runGoPayload(email, payload, tag) {
   return { parsed, runtime, exitCode };
 }
 
-async function hydrateGoSession(email, { sections = [], calendarSems = [] } = {}) {
+async function hydrateGoSession(email, { sections = [], calendarSems = [], softFail = true } = {}) {
   const requestedSections = normalizeGoSections(sections);
   const requestedCalendarSems = normalizeCalendarSems(calendarSems);
 
@@ -692,6 +707,21 @@ async function hydrateGoSession(email, { sections = [], calendarSems = [] } = {}
       }
 
       if (goResultLooksExpired(parsed)) {
+        if (softFail) {
+          // Don't destroy session — mark missing sections/calendar as unavailable and keep cached data
+          for (const section of fetchSections) {
+            if (!hasCachedSection(currentSession, section)) {
+              markSectionUnavailable(currentSession, section, parsed.error || "fetch failed");
+            }
+          }
+          for (const sem of fetchCalendarSems) {
+            if (!hasCachedCalendar(currentSession, sem)) {
+              markCalendarUnavailable(currentSession, sem, parsed.error || "fetch failed");
+            }
+          }
+          log("GO", `soft-fail: session fetch expired for ${email} — keeping session with cached data`);
+          return currentSession.cache;
+        }
         await destroySession(email, "expired (go session invalid)");
         throw Object.assign(new Error("Session expired. Please login again."), { expired: true });
       }
@@ -737,6 +767,13 @@ async function hydrateGoSession(email, { sections = [], calendarSems = [] } = {}
         const errMsg = parsed.error || `Missing data after Go fetch: ${missingAfter.join(", ")}`;
         // Belt-and-suspenders: auth failures that slipped past classification checks
         if (goErrorLooksAuthFailure(errMsg) || goResultLooksExpired(parsed)) {
+          if (softFail) {
+            for (const section of softFailures) {
+              markSectionUnavailable(currentSession, section, errMsg);
+            }
+            log("GO", `soft-fail: auth failure during fetch for ${email} — keeping session`);
+            return currentSession.cache;
+          }
           await destroySession(email, "expired (auth failure during fetch)");
           throw Object.assign(new Error("Session expired. Please login again."), { expired: true });
         }
@@ -766,6 +803,7 @@ function warmAcademiaSession(email) {
       await hydrateGoSession(email, {
         sections: ["studentInfo", "attendance", "marks", "timetable"],
         calendarSems: ["odd", "even"],
+        softFail: true,
       });
       warmTimetableFacultyPhotoUrls(email, "WARM");
       if (sessions[email]?.cache?.timetable) {
@@ -778,7 +816,15 @@ function warmAcademiaSession(email) {
       }
       log("WARM", `Session cache warmed for ${email}`);
     } catch (err) {
-      log("WARM", `Session warm-up failed for ${email}: ${err.message}`);
+      // Don't destroy the session on warm-up failure — the login_and_fetch
+      // already cached some data. The academia portal cookies expire very
+      // fast, so the fetch-mode prime will often fail. Keep whatever was
+      // cached from login and let SP fallback handle missing attendance.
+      if (err.expired && sessions[email]) {
+        log("WARM", `Session warm-up fetch failed for ${email}: ${err.message} — keeping cached data from login`);
+      } else {
+        log("WARM", `Session warm-up failed for ${email}: ${err.message}`);
+      }
     }
   }, 1500);
 }
@@ -794,6 +840,8 @@ async function destroySession(email, reason = "destroyed") {
   if (!s) return;
   log("SESSION", `Session for ${email} ${reason}`);
   delete sessions[email];
+  // Note: spSessions persist independently — don't delete them here
+  // They are only cleaned up on explicit logout or inactivity
 }
 
 // ─── Session cleanup (inactivity) ─────────────────────────────────────────────
@@ -803,6 +851,13 @@ setInterval(async () => {
   for (const email of Object.keys(sessions)) {
     if (now - sessions[email].lastActive > SESSION_TTL_MS) {
       await destroySession(email, `expired (inactive > ${SESSION_TTL_MS / 60000}m)`);
+    }
+  }
+  // Clean up expired SP sessions too
+  for (const email of Object.keys(spSessions)) {
+    if (now - spSessions[email].lastActive > SESSION_TTL_MS) {
+      log("SP_SESSION", `SP session for ${email} expired (inactive > ${SESSION_TTL_MS / 60000}m)`);
+      delete spSessions[email];
     }
   }
 }, CLEANUP_INTERVAL_MS);
@@ -907,7 +962,7 @@ app.get("/status", (_req, res) => {
  * Passwords are used only for login and NEVER stored.
  */
 app.post("/login", loginLimiter, async (req, res) => {
-  const { email, password } = req.body;
+  const { email, password, spPassword } = req.body;
   if (!email || !password)
     return res.fail(400, "email and password are required");
 
@@ -1001,7 +1056,66 @@ app.post("/login", loginLimiter, async (req, res) => {
     }
 
     log("LOGIN", `Login success for ${email}`);
+
+    // Save encrypted credentials for auto-login (best-effort, non-blocking)
+    setImmediate(async () => {
+      try {
+        const encPwd = encryptPassword(password);
+        const encSpPwd = spPassword ? encryptPassword(spPassword) : null;
+        await supabaseClient.saveAcademiaCredentials(email, encPwd, encSpPwd);
+        log("LOGIN", `Credentials saved for auto-login: ${email}`);
+      } catch (err) {
+        log("LOGIN", `Failed to save credentials for ${email}: ${err.message}`);
+      }
+    });
+
     warmAcademiaSession(email);
+
+    // Background: login to Student Portal to pre-cache attendance data
+    // Only attempt if spPassword was explicitly provided to avoid lockout from wrong password
+    if (spPassword) {
+      setImmediate(() => {
+        runStudentPortalScraper({
+          mode: "login_and_fetch",
+          email,
+          password: spPassword,
+          captchaApiKey: process.env.CAPTCHA_SOLVE_API_KEY || "",
+          captchaApiUrl: process.env.CAPTCHA_SOLVE_API_URL || "",
+        }).then(({ parsed, stderr }) => {
+          if (stderr?.trim()) {
+            log("SP_LOGIN", `Background stderr for ${email}: ${stderr.trim().slice(0, 2000)}`);
+          }
+          if (parsed?.success) {
+            spSessions[email] = {
+              cookies: parsed.cookies || [],
+              lastActive: Date.now(),
+              attendance: parsed.attendance || [],
+              studentInfo: parsed.studentInfo || {},
+            };
+            const session = sessions[email];
+            if (session) {
+              session.spCookies = parsed.cookies || [];
+              session.meta = {
+                ...session.meta,
+                spClassification: parsed.classification,
+                spLoginAt: Date.now(),
+              };
+              if (parsed.attendance?.length) {
+                session.cache.spAttendance = parsed.attendance;
+              }
+              if (parsed.studentInfo?.name) {
+                session.cache.spStudentInfo = parsed.studentInfo;
+              }
+            }
+            log("SP_LOGIN", `Background SP login for ${email}: cached ${parsed.attendance?.length || 0} attendance records${parsed.error ? ` (error: ${parsed.error})` : ""}`);
+          } else {
+            log("SP_LOGIN", `Background SP login failed for ${email}: ${parsed?.error || parsed?.classification || "unknown"}`);
+          }
+        }).catch((err) => {
+          log("SP_LOGIN", `Background SP login error for ${email}: ${err.message}`);
+        });
+      });
+    }
 
     // Send welcome notification on first login (only if no welcome sent before)
     supabaseClient.hasNotificationOfType(email, "welcome").then((alreadySent) => {
@@ -1023,6 +1137,186 @@ app.post("/login", loginLimiter, async (req, res) => {
 });
 
 /**
+ * POST /sp-login
+ * Body: { email, spPassword }
+ * Dedicated Student Portal login — called from frontend when user provides SP password.
+ * Only attempts once to avoid lockout.
+ */
+app.post("/sp-login", loginLimiter, async (req, res) => {
+  const { email, spPassword } = req.body;
+  if (!email || !spPassword) return res.fail(400, "email and spPassword are required");
+
+  try {
+    const { parsed, stderr } = await runStudentPortalScraper({
+      mode: "login_and_fetch",
+      email,
+      password: spPassword,
+      captchaApiKey: process.env.CAPTCHA_SOLVE_API_KEY || "",
+      captchaApiUrl: process.env.CAPTCHA_SOLVE_API_URL || "",
+    });
+
+    if (stderr?.trim()) {
+      log("SP_LOGIN", `stderr for ${email}: ${stderr.trim().slice(0, 1000)}`);
+    }
+
+    if (parsed?.success) {
+      spSessions[email] = {
+        cookies: parsed.cookies || [],
+        lastActive: Date.now(),
+        attendance: parsed.attendance || [],
+        studentInfo: parsed.studentInfo || {},
+      };
+      const session = sessions[email];
+      if (session) {
+        session.spCookies = parsed.cookies || [];
+        session.meta = { ...session.meta, spClassification: parsed.classification, spLoginAt: Date.now() };
+        if (parsed.attendance?.length) session.cache.spAttendance = parsed.attendance;
+        if (parsed.studentInfo?.name) session.cache.spStudentInfo = parsed.studentInfo;
+      }
+
+      // Save SP password to credentials (best-effort)
+      setImmediate(async () => {
+        try {
+          const encSpPwd = encryptPassword(spPassword);
+          await supabaseClient.saveAcademiaCredentials(email, undefined, encSpPwd);
+          log("SP_LOGIN", `SP credentials saved for ${email}`);
+        } catch (err) {
+          log("SP_LOGIN", `Failed to save SP credentials for ${email}: ${err.message}`);
+        }
+      });
+
+      log("SP_LOGIN", `SP login success for ${email}: ${parsed.attendance?.length || 0} attendance records`);
+      return res.ok({
+        message: "Student Portal login successful",
+        attendanceCount: parsed.attendance?.length || 0,
+        studentInfo: parsed.studentInfo || null,
+      });
+    } else {
+      log("SP_LOGIN", `SP login failed for ${email}: ${parsed?.error || parsed?.classification || "unknown"}`);
+      return res.fail(401, parsed?.error || "Student Portal login failed — check your SP password and try again");
+    }
+  } catch (err) {
+    log("SP_LOGIN", `SP login error for ${email}: ${err.message}`);
+    return res.fail(500, err.message);
+  }
+});
+
+/**
+ * POST /auto-login
+ * Body: { email }
+ * Re-login using stored encrypted credentials from Supabase.
+ * Returns success if login succeeded, or indicates no stored credentials.
+ */
+app.post("/auto-login", async (req, res) => {
+  const { email } = req.body;
+  if (!email) return res.fail(400, "email is required");
+
+  // If session is still alive, reuse it
+  if (sessions[email]) {
+    touch(email);
+    log("AUTO_LOGIN", `Session still active for ${email} — no re-login needed`);
+    return res.ok({ message: "Session active", reused: true });
+  }
+
+  if (Object.keys(sessions).length >= MAX_USERS) {
+    log("AUTO_LOGIN", `Max users reached — rejected ${email}`);
+    return res.fail(503, "Max users reached. Try again later.");
+  }
+
+  try {
+    const creds = await supabaseClient.getAcademiaCredentials(email);
+    if (!creds || !creds.encrypted_password) {
+      return res.fail(404, "No stored credentials. Please login manually.");
+    }
+
+    let password, spPassword;
+    try {
+      password = decryptPassword(creds.encrypted_password);
+      if (creds.encrypted_sp_password) {
+        spPassword = decryptPassword(creds.encrypted_sp_password);
+      }
+    } catch (decryptErr) {
+      log("AUTO_LOGIN", `Decryption failed for ${email}: ${decryptErr.message}`);
+      return res.fail(500, "Credential decryption failed. Please login manually.");
+    }
+
+    log("AUTO_LOGIN", `Re-authenticating ${email} via stored credentials`);
+    const { parsed } = await runGoPayload(email, {
+      mode: "login_and_fetch",
+      email,
+      password,
+      sections: ["studentInfo", "attendance", "marks", "timetable"],
+      calendarSems: ["odd", "even"],
+    }, "auto-login");
+
+    const cookieCount = Array.isArray(parsed.cookies)
+      ? parsed.cookies.length
+      : (parsed.cookieNames?.length ?? 0);
+
+    if (!(parsed.success && parsed.classification === GO_CLASS_AUTHENTICATED && cookieCount > 0)) {
+      log("AUTO_LOGIN", `Re-login failed for ${email}: ${parsed.error || parsed.classification}`);
+      return res.fail(401, parsed.error || "Auto-login failed. Please login manually.");
+    }
+
+    sessions[email] = {
+      cookies: parsed.cookies || [],
+      lastActive: Date.now(),
+      backend: "go",
+      cache: {},
+      meta: {
+        email,
+        classification: parsed.classification,
+        cookieNames: parsed.cookieNames || [],
+        finalUrl: parsed.finalUrl || "",
+      },
+    };
+    mergeGoDataIntoCache(sessions[email], parsed.data);
+
+    log("AUTO_LOGIN", `Auto-login success for ${email}`);
+    supabaseClient.updateAutoLoginTimestamp(email).catch(() => {});
+    warmAcademiaSession(email);
+
+    // Background SP login — only if we have a stored SP password
+    if (spPassword) {
+      setImmediate(() => {
+        runStudentPortalScraper({
+          mode: "login_and_fetch",
+          email,
+          password: spPassword,
+          captchaApiKey: process.env.CAPTCHA_SOLVE_API_KEY || "",
+          captchaApiUrl: process.env.CAPTCHA_SOLVE_API_URL || "",
+        }).then(({ parsed: spParsed, stderr }) => {
+          if (stderr?.trim()) {
+            log("SP_LOGIN", `Auto-login SP stderr for ${email}: ${stderr.trim().slice(0, 2000)}`);
+          }
+          if (spParsed?.success) {
+            spSessions[email] = {
+              cookies: spParsed.cookies || [],
+              lastActive: Date.now(),
+              attendance: spParsed.attendance || [],
+              studentInfo: spParsed.studentInfo || {},
+            };
+            const session = sessions[email];
+            if (session) {
+              session.spCookies = spParsed.cookies || [];
+              session.meta = { ...session.meta, spClassification: spParsed.classification, spLoginAt: Date.now() };
+              if (spParsed.attendance?.length) session.cache.spAttendance = spParsed.attendance;
+              if (spParsed.studentInfo?.name) session.cache.spStudentInfo = spParsed.studentInfo;
+            }
+            log("SP_LOGIN", `Auto-login SP cached ${spParsed.attendance?.length || 0} attendance records for ${email}`);
+          }
+        }).catch((err) => log("SP_LOGIN", `Auto-login SP error for ${email}: ${err.message}`));
+      });
+    }
+
+    return res.ok({ message: "Auto-login successful", cookieCount });
+  } catch (err) {
+    log("AUTO_LOGIN", `Error for ${email}: ${err.message}`);
+    return res.fail(500, err.message);
+  }
+});
+
+/**
  * POST /logout
  * Body: { email }
  */
@@ -1030,6 +1324,7 @@ app.post("/logout", async (req, res) => {
   const { email } = req.body;
   if (!email) return res.fail(400, "email is required");
   await destroySession(email, "logged out");
+  delete spSessions[email];
   res.ok({ message: "Session destroyed" });
 });
 
@@ -1039,17 +1334,44 @@ app.post("/logout", async (req, res) => {
 app.get("/attendance", async (req, res) => {
   const { email } = req.query;
   if (!email) return res.fail(400, "email query param is required");
-  if (!sessions[email]) return res.fail(401, "No active session. Please login first.");
+
+  // If no academia session, try SP session fallback
+  if (!sessions[email]) {
+    const spSess = spSessions[email];
+    if (spSess?.attendance?.length) {
+      return res.ok({ attendance: spSess.attendance, photosReady: true, source: "student_portal" });
+    }
+    return res.fail(401, "No active session. Please login first.");
+  }
 
   try {
     const s = sessions[email];
     // If attendance was already attempted and marked unavailable (e.g. portal
     // maintenance / 403), return empty immediately instead of re-fetching.
     if (s.meta?.sectionsUnavailable?.attendance) {
+      // Academia attendance unavailable — try Student Portal fallback
+      if (s.cache?.spAttendance?.length) {
+        return res.ok({ attendance: s.cache.spAttendance, photosReady: true, source: "student_portal" });
+      }
+      const spSess = spSessions[email];
+      if (spSess?.attendance?.length) {
+        return res.ok({ attendance: spSess.attendance, photosReady: true, source: "student_portal" });
+      }
       return res.ok({ attendance: [], photosReady: true, unavailable: true });
     }
     if (!hasCachedSection(s, "attendance")) {
-      await hydrateGoSession(email, { sections: ["attendance"] });
+      await hydrateGoSession(email, { sections: ["attendance"], softFail: true });
+    }
+    // If academia attendance is still empty after fetch, try SP fallback
+    const cachedAttendance = s.cache?.attendance;
+    if ((!cachedAttendance || cachedAttendance.length === 0)) {
+      if (s.cache?.spAttendance?.length) {
+        return res.ok({ attendance: s.cache.spAttendance, photosReady: true, source: "student_portal" });
+      }
+      const spSess = spSessions[email];
+      if (spSess?.attendance?.length) {
+        return res.ok({ attendance: spSess.attendance, photosReady: true, source: "student_portal" });
+      }
     }
     // Return immediately with whatever cached photos are available.
     // Photo enrichment happens in the background.
@@ -1100,7 +1422,7 @@ app.get("/marks", async (req, res) => {
       return res.ok({ marks: s.cache.marks });
     }
 
-    await hydrateGoSession(email, { sections: ["marks"] });
+    await hydrateGoSession(email, { sections: ["marks"], softFail: true });
     s.cache.marks = normalizeMarksRecords(s.cache.marks);
     if (s.cache.marks) {
       supabaseClient.cacheMarks(email, s.cache.marks).catch(() => {});
@@ -1153,7 +1475,19 @@ app.get("/timetable", async (req, res) => {
 app.get("/student", async (req, res) => {
   const { email } = req.query;
   if (!email) return res.fail(400, "email query param is required");
-  if (!sessions[email]) return res.fail(401, "No active session. Please login first.");
+
+  // If no academia session, try SP + Supabase fallback
+  if (!sessions[email]) {
+    const spSess = spSessions[email];
+    if (spSess?.studentInfo?.name) {
+      return res.ok({ studentInfo: spSess.studentInfo, photosReady: true, source: "student_portal" });
+    }
+    const cached = await supabaseClient.getCachedProfile(email).catch(() => null);
+    if (cached?.raw_data) {
+      return res.ok({ studentInfo: cached.raw_data, photosReady: true, source: "cache" });
+    }
+    return res.fail(401, "No active session. Please login first.");
+  }
 
   try {
     const s = sessions[email];
@@ -1320,7 +1654,34 @@ app.get("/calendar", async (req, res) => {
 app.get("/init", async (req, res) => {
   const { email } = req.query;
   if (!email) return res.fail(400, "email query param is required");
-  if (!sessions[email]) return res.fail(401, "No active session. Please login first.");
+
+  // If no academia session, try SP + Supabase fallback
+  if (!sessions[email]) {
+    const spSess = spSessions[email];
+    const cached = await supabaseClient.getCachedProfile(email).catch(() => null);
+    const cachedTt = await supabaseClient.getCachedTimetable(email).catch(() => null);
+    const cachedCal = await supabaseClient.getCachedCalendar(email, "odd").catch(() => null);
+
+    const studentInfo = spSess?.studentInfo?.name
+      ? spSess.studentInfo
+      : cached?.raw_data || null;
+    const timetable = cachedTt?.timetable || null;
+    const calendar = cachedCal?.calendar || null;
+
+    if (!studentInfo && !spSess) {
+      return res.fail(401, "No active session. Please login first.");
+    }
+
+    return res.ok({
+      studentInfo,
+      timetable,
+      calendar,
+      sem: "odd",
+      calendarAvailable: !!calendar,
+      photosReady: true,
+      source: spSess ? "student_portal" : "cache",
+    });
+  }
 
   try {
     const s = sessions[email];
@@ -1444,7 +1805,29 @@ app.get("/summary", async (req, res) => {
 app.get("/all", async (req, res) => {
   const { email } = req.query;
   if (!email) return res.fail(400, "email query param is required");
-  if (!sessions[email]) return res.fail(401, "No active session. Please login first.");
+
+  // If no academia session, try SP + Supabase fallback
+  if (!sessions[email]) {
+    const spSess = spSessions[email];
+    const cached = await supabaseClient.getCachedProfile(email).catch(() => null);
+    const cachedTt = await supabaseClient.getCachedTimetable(email).catch(() => null);
+
+    const studentInfo = spSess?.studentInfo?.name ? spSess.studentInfo : cached?.raw_data || null;
+    const attendance = spSess?.attendance?.length ? spSess.attendance : [];
+    const timetable = cachedTt?.timetable || null;
+
+    if (!studentInfo && !spSess) {
+      return res.fail(401, "No active session. Please login first.");
+    }
+
+    return res.ok({
+      studentInfo,
+      attendance,
+      marks: [],
+      timetable,
+      source: spSess ? "student_portal" : "cache",
+    });
+  }
 
   try {
     const s = sessions[email];
@@ -2452,16 +2835,338 @@ app.post("/test/notification", async (req, res) => {
   }
 });
 
+// ─── Student Portal (sp.srmist.edu.in) Endpoints ──────────────────────────────
+
+/**
+ * POST /sp/login
+ * Body: { email, password, captchaApiKey? }
+ * Logs in to the SRM Student Portal via Go scraper (auto-solves captcha).
+ * Stores student portal cookies in the session alongside academia cookies.
+ */
+app.post("/sp/login", loginLimiter, async (req, res) => {
+  const { email, password, captchaApiKey } = req.body;
+  if (!email || !password)
+    return res.fail(400, "email and password are required");
+
+  if (!email.toLowerCase().endsWith("@srmist.edu.in"))
+    return res.fail(400, "Only @srmist.edu.in email addresses are allowed.");
+
+  try {
+    log("SP_LOGIN", `Authenticating ${email} via Student Portal scraper`);
+
+    const apiKey = captchaApiKey || process.env.CAPTCHA_SOLVE_API_KEY || "";
+    const { parsed, stderr, runtime } = await runStudentPortalScraper({
+      mode: "login_and_fetch",
+      email,
+      password,
+      captchaApiKey: apiKey,
+      captchaApiUrl: process.env.CAPTCHA_SOLVE_API_URL || "",
+    });
+
+    if (stderr?.trim()) {
+      log("SP_LOGIN", `stderr for ${email} (${runtime}): ${stderr.trim()}`);
+    }
+
+    if (!parsed) {
+      return res.fail(500, "Student portal scraper returned no JSON");
+    }
+
+    log("SP_LOGIN", `${email} success=${parsed.success} classification=${parsed.classification}${parsed.error ? ` error=${parsed.error}` : ""}`);
+
+    if (!parsed.success) {
+      if (parsed.classification === "captcha_needed") {
+        return res.fail(400, "Captcha could not be solved automatically. Set CAPTCHA_SOLVE_API_KEY environment variable with an OpenAI API key.");
+      }
+      if (parsed.classification === "invalid_credentials") {
+        return res.fail(401, parsed.error || "Invalid credentials");
+      }
+      return res.fail(500, parsed.error || "Student portal login failed");
+    }
+
+    // Store in persistent spSessions (survives academia session death)
+    spSessions[email] = {
+      cookies: parsed.cookies || [],
+      lastActive: Date.now(),
+      attendance: parsed.attendance || [],
+      studentInfo: parsed.studentInfo || {},
+    };
+
+    // Also merge into academia session if it exists
+    const session = sessions[email];
+    if (session) {
+      session.spCookies = parsed.cookies || [];
+      session.meta = {
+        ...session.meta,
+        spClassification: parsed.classification,
+        spLoginAt: Date.now(),
+      };
+      if (parsed.attendance && parsed.attendance.length) {
+        session.cache.spAttendance = parsed.attendance;
+      }
+      if (parsed.studentInfo && parsed.studentInfo.name) {
+        session.cache.spStudentInfo = parsed.studentInfo;
+      }
+    }
+
+    return res.ok({
+      message: "Student portal login successful",
+      attendance: parsed.attendance || [],
+      studentInfo: parsed.studentInfo || {},
+    });
+  } catch (err) {
+    log("SP_LOGIN", `Error for ${email}: ${err.message}`);
+    return res.fail(500, err.message);
+  }
+});
+
+/**
+ * GET /sp/attendance?email=
+ * Fetches attendance from the SRM Student Portal.
+ * Requires a prior /sp/login or existing academia session (will try to
+ * reuse the same email/password — but student portal needs separate login).
+ */
+app.get("/sp/attendance", async (req, res) => {
+  const { email } = req.query;
+  if (!email) return res.fail(400, "email query param is required");
+
+  // Try persistent SP session first
+  const spSess = spSessions[email];
+  const session = sessions[email];
+  const spCookies = spSess?.cookies || session?.spCookies || [];
+
+  if (!spCookies.length) {
+    return res.fail(401, "No student portal session. Please login via /sp/login first.");
+  }
+
+  try {
+    // Return cached data if available (from spSessions or academia session)
+    const cachedAtt = spSess?.attendance?.length ? spSess.attendance : session?.cache?.spAttendance;
+    if (cachedAtt?.length) {
+      return res.ok({ attendance: cachedAtt, fromCache: true });
+    }
+
+    // Fetch with existing cookies
+    const { parsed } = await runStudentPortalScraper({
+      mode: "fetch",
+      email,
+      cookies: spCookies,
+    });
+
+    if (!parsed || !parsed.success) {
+      return res.fail(500, parsed?.error || "Failed to fetch attendance from student portal");
+    }
+
+    if (parsed.attendance && parsed.attendance.length) {
+      if (spSess) spSess.attendance = parsed.attendance;
+      if (session) session.cache.spAttendance = parsed.attendance;
+    }
+
+    return res.ok({ attendance: parsed.attendance || [] });
+  } catch (err) {
+    log("SP_ATTENDANCE", `Error for ${email}: ${err.message}`);
+    return res.fail(500, err.message);
+  }
+});
+
+/**
+ * GET /sp/student?email=
+ * Fetches student info from the SRM Student Portal.
+ */
+app.get("/sp/student", async (req, res) => {
+  const { email } = req.query;
+  if (!email) return res.fail(400, "email query param is required");
+
+  const spSess = spSessions[email];
+  const session = sessions[email];
+  const spCookies = spSess?.cookies || session?.spCookies || [];
+
+  if (!spCookies.length) {
+    return res.fail(401, "No student portal session. Please login via /sp/login first.");
+  }
+
+  try {
+    const cachedInfo = spSess?.studentInfo?.name ? spSess.studentInfo : session?.cache?.spStudentInfo;
+    if (cachedInfo?.name) {
+      return res.ok({ studentInfo: cachedInfo, fromCache: true });
+    }
+
+    const { parsed } = await runStudentPortalScraper({
+      mode: "fetch",
+      email,
+      cookies: spCookies,
+    });
+
+    if (!parsed || !parsed.success) {
+      return res.fail(500, parsed?.error || "Failed to fetch student info from student portal");
+    }
+
+    if (parsed.studentInfo && parsed.studentInfo.name) {
+      if (spSess) spSess.studentInfo = parsed.studentInfo;
+      if (session) session.cache.spStudentInfo = parsed.studentInfo;
+    }
+
+    return res.ok({ studentInfo: parsed.studentInfo || {} });
+  } catch (err) {
+    log("SP_STUDENT", `Error for ${email}: ${err.message}`);
+    return res.fail(500, err.message);
+  }
+});
+
+// ─── Background Refresh Job ───────────────────────────────────────────────────
+// Every 30 minutes, re-login all users with stored credentials and refresh
+// their cached data (timetable, attendance, marks, calendar, student info).
+// Also refreshes faculty photo links.
+
+const REFRESH_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes
+
+async function refreshAllUsers() {
+  let emails;
+  try {
+    emails = await supabaseClient.getAllAutoLoginEmails();
+  } catch (err) {
+    log("REFRESH", `Failed to get auto-login emails: ${err.message}`);
+    return;
+  }
+
+  if (!emails.length) {
+    log("REFRESH", "No users with stored credentials — skipping refresh");
+    return;
+  }
+
+  log("REFRESH", `Refreshing data for ${emails.length} user(s): ${emails.map(e => e.academia_email).join(", ")}`);
+
+  for (const row of emails) {
+    const email = row.academia_email;
+    try {
+      // If session is still alive, just refresh data
+      if (sessions[email]) {
+        touch(email);
+        log("REFRESH", `Session active for ${email} — refreshing cached data`);
+        try {
+          await hydrateGoSession(email, {
+            sections: ["studentInfo", "attendance", "marks", "timetable"],
+            calendarSems: ["odd", "even"],
+            softFail: true,
+          });
+          warmTimetableFacultyPhotoUrls(email, "REFRESH");
+          if (sessions[email]?.cache?.timetable) {
+            warmFacultyCache(sessions[email].cache.timetable);
+          }
+          log("REFRESH", `Data refreshed for ${email}`);
+        } catch (err) {
+          if (err.expired) {
+            log("REFRESH", `Session expired during refresh for ${email} — will re-login next cycle`);
+            await destroySession(email, "expired during refresh");
+          } else {
+            log("REFRESH", `Refresh failed for ${email}: ${err.message}`);
+          }
+        }
+        continue;
+      }
+
+      // Session is dead — re-login using stored credentials
+      let password, spPassword;
+      try {
+        password = decryptPassword(row.encrypted_password);
+        if (row.encrypted_sp_password) {
+          spPassword = decryptPassword(row.encrypted_sp_password);
+        }
+      } catch (decryptErr) {
+        log("REFRESH", `Decryption failed for ${email}: ${decryptErr.message}`);
+        continue;
+      }
+
+      if (Object.keys(sessions).length >= MAX_USERS) {
+        log("REFRESH", `Max users reached — skipping re-login for ${email}`);
+        continue;
+      }
+
+      log("REFRESH", `Re-logging in ${email} via stored credentials`);
+      const { parsed } = await runGoPayload(email, {
+        mode: "login_and_fetch",
+        email,
+        password,
+        sections: ["studentInfo", "attendance", "marks", "timetable"],
+        calendarSems: ["odd", "even"],
+      }, `refresh-${email}`);
+
+      const cookieCount = Array.isArray(parsed.cookies)
+        ? parsed.cookies.length
+        : (parsed.cookieNames?.length ?? 0);
+
+      if (!(parsed.success && parsed.classification === GO_CLASS_AUTHENTICATED && cookieCount > 0)) {
+        log("REFRESH", `Re-login failed for ${email}: ${parsed.error || parsed.classification}`);
+        continue;
+      }
+
+      sessions[email] = {
+        cookies: parsed.cookies || [],
+        lastActive: Date.now(),
+        backend: "go",
+        cache: {},
+        meta: {
+          email,
+          classification: parsed.classification,
+          cookieNames: parsed.cookieNames || [],
+          finalUrl: parsed.finalUrl || "",
+        },
+      };
+      mergeGoDataIntoCache(sessions[email], parsed.data);
+      supabaseClient.updateAutoLoginTimestamp(email).catch(() => {});
+      warmTimetableFacultyPhotoUrls(email, "REFRESH");
+      if (sessions[email]?.cache?.timetable) {
+        warmFacultyCache(sessions[email].cache.timetable);
+      }
+      log("REFRESH", `Re-login + refresh success for ${email}`);
+
+      // Background SP login — only if stored SP password exists
+      if (spPassword) {
+        setImmediate(() => {
+          runStudentPortalScraper({
+            mode: "login_and_fetch",
+            email,
+            password: spPassword,
+            captchaApiKey: process.env.CAPTCHA_SOLVE_API_KEY || "",
+            captchaApiUrl: process.env.CAPTCHA_SOLVE_API_URL || "",
+          }).then(({ parsed: spParsed }) => {
+            if (spParsed?.success) {
+              spSessions[email] = {
+                cookies: spParsed.cookies || [],
+                lastActive: Date.now(),
+                attendance: spParsed.attendance || [],
+                studentInfo: spParsed.studentInfo || {},
+              };
+              const session = sessions[email];
+              if (session) {
+                session.spCookies = spParsed.cookies || [];
+                if (spParsed.attendance?.length) session.cache.spAttendance = spParsed.attendance;
+                if (spParsed.studentInfo?.name) session.cache.spStudentInfo = spParsed.studentInfo;
+              }
+              log("REFRESH", `SP refresh cached ${spParsed.attendance?.length || 0} attendance records for ${email}`);
+            }
+          }).catch((err) => log("REFRESH", `SP refresh error for ${email}: ${err.message}`));
+        });
+      }
+    } catch (err) {
+      log("REFRESH", `Error refreshing ${email}: ${err.message}`);
+    }
+  }
+}
+
 // ─── Startup ──────────────────────────────────────────────────────────────────
 
 function start() {
   const runtime = getAcademiaScraperRuntime();
   log("SERVER", `Go scraper: ${runtime.command}${runtime.args?.length ? ` ${runtime.args.join(" ")}` : ""} (source: ${runtime.source})`);
 
+  const spRuntime = getStudentPortalScraperRuntime();
+  log("SERVER", `Student Portal scraper: ${spRuntime.command}${spRuntime.args?.length ? ` ${spRuntime.args.join(" ")}` : ""} (source: ${spRuntime.source})`);
+
   app.listen(PORT, "0.0.0.0", () => {
     log("SERVER", `API server running on http://0.0.0.0:${PORT}`);
     log("SERVER", "Endpoints:");
     log("SERVER", "  POST /login              { email, password }");
+    log("SERVER", "  POST /auto-login         { email } — re-login via stored credentials");
     log("SERVER", "  GET  /init               ?email=&sem=odd|even");
     log("SERVER", "  GET  /attendance         ?email=");
     log("SERVER", "  GET  /marks              ?email=");
@@ -2474,15 +3179,32 @@ function start() {
     log("SERVER", "  GET  /student-photo      ?email=");
     log("SERVER", "  GET  /faculty-photo      ?url=");
     log("SERVER", "  GET  /faculty            ?name=&email=");
+    log("SERVER", "  POST /sp/login           { email, password } (Student Portal)");
+    log("SERVER", "  GET  /sp/attendance      ?email= (Student Portal)");
+    log("SERVER", "  GET  /sp/student         ?email= (Student Portal)");
     log("SERVER", "  POST /logout             { email }");
     log("SERVER", "  GET  /status");
+    log("SERVER", `Background refresh job: every ${REFRESH_INTERVAL_MS / 60000} minutes`);
   });
+
+  // Start background refresh job
+  setInterval(() => {
+    refreshAllUsers().catch((err) => log("REFRESH", `Background refresh error: ${err.message}`));
+  }, REFRESH_INTERVAL_MS);
+
+  // Also run an initial refresh 30 seconds after startup (to restore sessions for users with stored credentials)
+  setTimeout(() => {
+    refreshAllUsers().catch((err) => log("REFRESH", `Initial refresh error: ${err.message}`));
+  }, 30 * 1000);
 
   for (const sig of ["SIGINT", "SIGTERM"]) {
     process.on(sig, () => {
       log("SERVER", `${sig} received — shutting down...`);
       for (const email of Object.keys(sessions)) {
         destroySession(email, "server shutdown");
+      }
+      for (const email of Object.keys(spSessions)) {
+        delete spSessions[email];
       }
       process.exit(0);
     });

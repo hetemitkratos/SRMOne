@@ -367,6 +367,79 @@ export async function saveCachedFacultyProfile(cacheKey, profileData) {
   return null;
 }
 
+// ─── Academia Credentials (encrypted) ─────────────────────────────────────────
+
+export async function saveAcademiaCredentials(email, encryptedPassword, encryptedSpPassword = null) {
+  if (!supabase) return null;
+  const patch = {
+    academia_email: email,
+    updated_at: new Date().toISOString(),
+  };
+  if (encryptedPassword !== undefined) patch.encrypted_password = encryptedPassword;
+  if (encryptedSpPassword !== undefined) patch.encrypted_sp_password = encryptedSpPassword;
+  const { data, error } = await supabase
+    .from("academia_credentials")
+    .upsert(patch, { onConflict: "academia_email" })
+    .select()
+    .single();
+  if (error) console.error("[supabase] saveAcademiaCredentials:", error.message);
+  return data;
+}
+
+export async function getAcademiaCredentials(email) {
+  if (!supabase) return null;
+  const { data, error } = await supabase
+    .from("academia_credentials")
+    .select("*")
+    .eq("academia_email", email)
+    .maybeSingle();
+  if (error) {
+    console.error("[supabase] getAcademiaCredentials:", error.message);
+    return null;
+  }
+  return data;
+}
+
+export async function getAllAutoLoginEmails() {
+  if (!supabase) return [];
+  const { data, error } = await supabase
+    .from("academia_credentials")
+    .select("academia_email, encrypted_password, encrypted_sp_password")
+    .eq("auto_login_enabled", true);
+  if (error) {
+    console.error("[supabase] getAllAutoLoginEmails:", error.message);
+    return [];
+  }
+  return data || [];
+}
+
+export async function updateAutoLoginTimestamp(email) {
+  if (!supabase) return;
+  const { error } = await supabase
+    .from("academia_credentials")
+    .update({ last_auto_login: new Date().toISOString() })
+    .eq("academia_email", email);
+  if (error) console.error("[supabase] updateAutoLoginTimestamp:", error.message);
+}
+
+export async function setAutoLoginEnabled(email, enabled) {
+  if (!supabase) return;
+  const { error } = await supabase
+    .from("academia_credentials")
+    .update({ auto_login_enabled: enabled, updated_at: new Date().toISOString() })
+    .eq("academia_email", email);
+  if (error) console.error("[supabase] setAutoLoginEnabled:", error.message);
+}
+
+export async function deleteAcademiaCredentials(email) {
+  if (!supabase) return;
+  const { error } = await supabase
+    .from("academia_credentials")
+    .delete()
+    .eq("academia_email", email);
+  if (error) console.error("[supabase] deleteAcademiaCredentials:", error.message);
+}
+
 // ─── Timetable Cache ──────────────────────────────────────────────────────────
 
 export async function getCachedTimetable(email) {
