@@ -17,6 +17,9 @@ COPY academia-backend/academia-scraper/ ./
 # Build the loginprobe binary for Linux
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /loginprobe ./cmd/loginprobe
 
+# Build the studentportal binary for Linux
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /studentportal ./cmd/studentportal
+
 # ─── Stage 2: Node runtime ────────────────────────────────────────────────────
 FROM node:20-alpine
 
@@ -30,8 +33,9 @@ RUN npm ci --omit=dev 2>/dev/null || npm install --omit=dev
 COPY academia-backend/backend/ ./backend/
 COPY academia-backend/server.js ./
 
-# Copy the compiled Go binary
+# Copy the compiled Go binaries
 COPY --from=go-builder /loginprobe /app/academia-scraper/loginprobe
+COPY --from=go-builder /studentportal /app/academia-scraper/studentportal
 
 # Set environment defaults
 ENV NODE_ENV=production

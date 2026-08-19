@@ -36,6 +36,10 @@ services:
         sync: false
       - key: ENCRYPTION_KEY
         sync: false  # 32+ char key for encrypting academia/SP passwords
+      - key: CAPTCHA_SOLVE_API_KEY
+        sync: false  # API key for captcha solving service (SP login)
+      - key: CAPTCHA_SOLVE_API_URL
+        sync: false  # URL for captcha solving API (SP login)
 
   # ─── Placement Backend (Haveloc placement portal scraper + API) ──────────
   - type: web
