@@ -68,7 +68,9 @@ async function handleProfile(req: Request): Promise<Response> {
 }
 
 async function handleJobs(req: Request): Promise<Response> {
-  return getGlobalData(TABLES.jobs, 500);
+  const academiaEmail = req.headers.get("x-academia-email");
+  if (!academiaEmail) return json({ success: false, error: "x-academia-email header is required" }, 400);
+  return getUserData(TABLES.jobs, academiaEmail);
 }
 
 async function handleCompanies(req: Request): Promise<Response> {

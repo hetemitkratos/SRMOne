@@ -331,7 +331,7 @@ export default function Tracker() {
       .catch(() => {});
   }, [userEmail]);
 
-  const applications = data?._embedded?.entityModels || [];
+  const applications = data?.data?._embedded?.entityModels || data?._embedded?.entityModels || [];
   const groupedJobs = useMemo(() => groupByJob(applications), [data]);
 
   const filteredJobs = useMemo(() => {
