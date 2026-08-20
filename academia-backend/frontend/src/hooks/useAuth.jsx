@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useCallback } from "react";
+import { createContext, useContext, useState, useCallback, useEffect, useRef } from "react";
 import { api, setSessionToken, clearSessionToken } from "../api/client.js";
 
 const AuthContext = createContext(null);
@@ -40,7 +40,8 @@ export function AuthProvider({ children }) {
     try {
       const savedToken = localStorage.getItem("srm_session_token");
       if (savedToken) setSessionToken(savedToken);
-      await api.autoLogin(email);
+      const result = await api.autoLogin(email);
+      // api.autoLogin already calls setSessionToken which saves to localStorage
       const u = { email };
       localStorage.setItem("srm_user", JSON.stringify(u));
       setUser(u);
@@ -79,6 +80,21 @@ export function AuthProvider({ children }) {
     localStorage.removeItem("placement_user");
     setPlacementUser(null);
   }, []);
+
+  // Proactive token refresh — refresh every 4 hours to keep session alive
+  const refreshTimerRef = useRef(null);
+  useEffect(() => {
+    if (!user?.email) return;
+    const refresh = async () => {
+      try {
+        await api.autoLogin(user.email);
+      } catch {
+        // Silent fail — 401 retry logic in client.js handles per-request refresh
+      }
+    };
+    refreshTimerRef.current = setInterval(refresh, 4 * 60 * 60 * 1000);
+    return () => clearInterval(refreshTimerRef.current);
+  }, [user?.email]);
 
   return (
     <AuthContext.Provider value={{

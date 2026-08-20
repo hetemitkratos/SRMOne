@@ -2,11 +2,40 @@ const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || "https://kolpioxbznypm
 const AUTH_BASE = `${SUPABASE_URL}/functions/v1/auth-session`;
 const API_BASE = `${SUPABASE_URL}/functions/v1/api-gateway`;
 
-let _sessionToken = null;
+let _sessionToken = localStorage.getItem("srm_session_token") || null;
 
-export function setSessionToken(token) { _sessionToken = token; }
+export function setSessionToken(token) {
+  _sessionToken = token;
+  if (token) localStorage.setItem("srm_session_token", token);
+}
 export function getSessionToken() { return _sessionToken; }
-export function clearSessionToken() { _sessionToken = null; }
+export function clearSessionToken() {
+  _sessionToken = null;
+  localStorage.removeItem("srm_session_token");
+}
+
+let _isRefreshing = false;
+
+async function refreshToken() {
+  if (_isRefreshing) return false;
+  _isRefreshing = true;
+  try {
+    const res = await fetch(`${AUTH_BASE}/refresh`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...( _sessionToken ? { "x-session-token": _sessionToken } : {}) },
+    });
+    const data = await res.json();
+    if (data.success && data.token) {
+      setSessionToken(data.token);
+      return true;
+    }
+    return false;
+  } catch {
+    return false;
+  } finally {
+    _isRefreshing = false;
+  }
+}
 
 async function request(path, options = {}) {
   const headers = {
@@ -19,6 +48,21 @@ async function request(path, options = {}) {
     ...options,
     headers,
   });
+
+  // Auto-refresh on 401: try to refresh token and retry once
+  if (res.status === 401) {
+    const refreshed = await refreshToken();
+    if (refreshed) {
+      const retryHeaders = { ...headers, "x-session-token": _sessionToken };
+      const retryRes = await fetch(`${API_BASE}${path}`, { ...options, headers: retryHeaders });
+      const retryText = await retryRes.text();
+      if (!retryText) throw new Error(`Server returned empty response (status ${retryRes.status})`);
+      let retryData;
+      try { retryData = JSON.parse(retryText); } catch { throw new Error(`Invalid response from server (status ${retryRes.status})`); }
+      if (!retryData.success) throw new Error(retryData.error || retryData.message || "Request failed");
+      return retryData;
+    }
+  }
 
   const text = await res.text();
   if (!text) {
