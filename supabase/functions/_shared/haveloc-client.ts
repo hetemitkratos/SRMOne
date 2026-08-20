@@ -113,6 +113,15 @@ export class HavelocClientAsync {
           throw new Error("authentication expired");
         }
 
+        // 409 is handled by the caller (e.g. session limit in login)
+        if (status === 409) {
+          try {
+            return { data: JSON.parse(text), status };
+          } catch {
+            return { data: text, status };
+          }
+        }
+
         if (status >= 400) {
           const isHTML = text.trimStart().startsWith("<!doctype") || text.trimStart().startsWith("<html");
           const msg = isHTML ? `Haveloc portal is temporarily unavailable (HTTP ${status})` : text;

@@ -206,43 +206,14 @@ async function handleRefresh(req: Request): Promise<Response> {
   const session = await requireSession(req);
   if (!session) return json({ success: false, error: "Unauthorized" }, 401);
 
-  // Check if stored credentials still exist
-  const supabase = getSupabase();
-  const { data: creds } = await supabase
-    .from("academia_credentials")
-    .select("encrypted_password")
-    .eq("academia_email", session.email)
-    .single();
-
-  if (!creds?.encrypted_password) {
-    return json({ success: false, error: "Credentials not found — please log in again" }, 401);
-  }
-
-  // Decrypt password and verify session is still valid via academia
-  let password: string;
-  try {
-    password = await decryptPassword(creds.encrypted_password);
-  } catch {
-    return json({ success: false, error: "Failed to decrypt credentials" }, 500);
-  }
-
-  const loginSession = new AcademiaLoginSession();
-  const result = await loginSession.login(session.email, password);
-
-  if (!result.success || result.classification !== CLASS_AUTHENTICATED) {
-    return json(
-      { success: false, error: "Session expired — please log in again", classification: result.classification },
-      401,
-    );
-  }
-
-  // Re-issue token with fresh login
+  // Token is still valid — re-issue a fresh one with extended expiry
   const token = await createSessionToken({
     userId: session.userId,
     email: session.email,
   });
 
   // Update last_seen_at
+  const supabase = getSupabase();
   await supabase
     .from("student_profiles")
     .update({ last_seen_at: new Date().toISOString(), updated_at: new Date().toISOString() })
