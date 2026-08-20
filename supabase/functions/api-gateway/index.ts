@@ -73,7 +73,14 @@ async function handleProfile(supabase: ReturnType<typeof createClient>, session:
 
   if (error) return json({ success: false, error: error.message }, 500);
   if (!data) return json({ success: false, error: "Profile not found" }, 404);
-  return json({ success: true, ...data });
+
+  // Build studentInfo from raw_data, ensuring PhotoUrl is set from photo_url column
+  const studentInfo = (data.raw_data as Record<string, string>) || {};
+  if (data.photo_url && !studentInfo["PhotoUrl"]) {
+    studentInfo["PhotoUrl"] = data.photo_url;
+  }
+
+  return json({ success: true, ...data, studentInfo });
 }
 
 // ─── GET /attendance ─────────────────────────────────────────────────────────
@@ -178,6 +185,9 @@ async function handleSummary(supabase: ReturnType<typeof createClient>, session:
   if (!profile) return json({ success: false, error: "Profile not found" }, 404);
 
   const studentInfo = (profile.raw_data as Record<string, unknown>) || {};
+  if (profile.photo_url && !studentInfo["PhotoUrl"]) {
+    studentInfo["PhotoUrl"] = profile.photo_url;
+  }
   const semType = getSemType({ Semester: String(studentInfo.Semester || "1") });
   const calendar = semType === "even" ? calEvenRes.data?.calendar : calOddRes.data?.calendar;
   const timetable = ttRes.data?.timetable;

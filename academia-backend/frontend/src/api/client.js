@@ -149,7 +149,11 @@ export const api = {
   summary: (email) => request(`/summary`),
   schedule: (email) => request(`/summary`),
   studentPhoto: (email) => null,
-  facultyPhoto: (url) => null,
+  facultyPhoto: (url) => {
+    if (!url) return "";
+    if (url.startsWith("data:") || url.startsWith("http")) return url;
+    return "";
+  },
   faculty: (name) => request(`/faculty?name=${encodeURIComponent(name)}`),
 
   // Profile caching (handled by sync, no-op on frontend)
