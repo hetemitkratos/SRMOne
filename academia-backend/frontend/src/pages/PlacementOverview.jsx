@@ -12,7 +12,7 @@ export default function PlacementOverview() {
 
   useEffect(() => {
     if (studentStats.data) {
-      const s = studentStats.data;
+      const s = studentStats.data?.data || studentStats.data;
       const embedded = s?._embedded?.entityModels?.[0];
       if (embedded) {
         setStats({
@@ -43,7 +43,7 @@ export default function PlacementOverview() {
   const loading = studentStats.loading || profile.loading;
   if (loading) return <Loading label="Fetching placement dashboard…" />;
 
-  const profileData = profile.data?._embedded?.entityModels?.[0] || profile.data;
+  const profileData = profile.data?.data?._embedded?.entityModels?.[0] || profile.data?.data || profile.data;
   const studentName = profileData?.name || profileData?.firstName || "Student";
 
   return (
