@@ -20,10 +20,16 @@ import { AcademiaLoginSession } from "../_shared/academia-login.ts";
 const CLASS_AUTHENTICATED = "authenticated_session_established";
 const CLASS_INVALID_CREDS = "invalid_credentials";
 
+const CORS_HEADERS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "POST, GET, PUT, DELETE, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization, x-session-token",
+};
+
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...CORS_HEADERS },
   });
 }
 
@@ -294,11 +300,7 @@ Deno.serve(async (req: Request) => {
   // CORS preflight
   if (method === "OPTIONS") {
     return new Response(null, {
-      headers: {
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "POST, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type, Authorization, x-session-token",
-      },
+      headers: CORS_HEADERS,
     });
   }
 

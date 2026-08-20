@@ -163,7 +163,7 @@ export default function Login() {
 
 function LoginForm() {
   const navigate = useNavigate();
-  const { login, loginPlacement, setPlacementConnected } = useAuth();
+  const { login, loginWithToken, loginPlacement, setPlacementConnected } = useAuth();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [showPwd, setShowPwd] = useState(false);
