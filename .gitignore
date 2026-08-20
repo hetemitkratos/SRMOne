@@ -36,6 +36,19 @@ debug_*.html
 *_test.txt
 faculty_*.txt
 jd_*.txt
+academia-backend/academia-scraper/stderr*.txt
+academia-backend/academia-scraper/stdout*.txt
+academia-backend/academia-scraper/*.html
+academia-backend/academia-scraper/*.txt
+academia-backend/academia-scraper/test_*.json
+academia-backend/academia-scraper/cmd/sptest/
+academia-backend/academia-scraper/cmd/unpackjs/
+academia-backend/academia-scraper/guardlogin*.js
+academia-backend/academia-scraper/secure2.js
+academia-backend/academia-scraper/solve_captcha.py
+academia-backend/academia-scraper/unpacked_*.js
+academia-backend/academia-scraper/playwright_*.txt
+pdf_extract.txt
 
 # Test output JSON (large scraped data)
 haveloc-scraper/*_raw.json
@@ -63,3 +76,7 @@ frontend/node_modules/.vite/
 # Supabase
 supabase/.branches
 supabase/.temp
+supabase/supabase/
+
+# Architecture docs (large PDFs)
+*.pdf
