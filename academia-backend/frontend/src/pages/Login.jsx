@@ -17,7 +17,7 @@ function LogoMark({ size = 40 }) {
 }
 
 export default function Login() {
-  const { user, autoLogin, autoLoggingIn } = useAuth();
+  const { user, autoLogin, autoLoggingIn, loginWithToken } = useAuth();
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -226,8 +226,8 @@ function LoginForm() {
     const email = `${username.trim().toLowerCase()}@srmist.edu.in`;
     setLoading(true);
     try {
-      await api.login(email, password, spPassword || undefined);
-      login(email);
+      const result = await api.login(email, password, spPassword || undefined);
+      loginWithToken(email, result.token);
       setLoggedInEmail(email);
 
       try {

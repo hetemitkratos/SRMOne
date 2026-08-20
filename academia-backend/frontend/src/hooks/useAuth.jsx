@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useCallback } from "react";
-import { api } from "../api/client.js";
+import { api, setSessionToken, clearSessionToken } from "../api/client.js";
 
 const AuthContext = createContext(null);
 
@@ -27,17 +27,29 @@ export function AuthProvider({ children }) {
     setUser(u);
   }, []);
 
+  const loginWithToken = useCallback((email, token) => {
+    const u = { email };
+    localStorage.setItem("srm_user", JSON.stringify(u));
+    localStorage.setItem("srm_session_token", token);
+    setSessionToken(token);
+    setUser(u);
+  }, []);
+
   const autoLogin = useCallback(async (email) => {
     setAutoLoggingIn(true);
     try {
+      const savedToken = localStorage.getItem("srm_session_token");
+      if (savedToken) setSessionToken(savedToken);
       await api.autoLogin(email);
       const u = { email };
-    localStorage.setItem("srm_user", JSON.stringify(u));
-    setUser(u);
+      localStorage.setItem("srm_user", JSON.stringify(u));
+      setUser(u);
       return true;
     } catch {
       // Auto-login failed — clear stored user so they see the login form
       localStorage.removeItem("srm_user");
+      localStorage.removeItem("srm_session_token");
+      clearSessionToken();
       setUser(null);
       return false;
     } finally {
@@ -58,6 +70,8 @@ export function AuthProvider({ children }) {
 
   const logout = useCallback(() => {
     localStorage.removeItem("srm_user");
+    localStorage.removeItem("srm_session_token");
+    clearSessionToken();
     setUser(null);
   }, []);
 
@@ -68,7 +82,7 @@ export function AuthProvider({ children }) {
 
   return (
     <AuthContext.Provider value={{
-      user, login, autoLogin, logout,
+      user, login, loginWithToken, autoLogin, logout,
       autoLoggingIn,
       placementUser, loginPlacement, logoutPlacement,
       placementConnected, setPlacementConnected,

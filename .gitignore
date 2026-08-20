@@ -80,3 +80,6 @@ supabase/supabase/
 
 # Architecture docs (large PDFs)
 *.pdf
+
+.vercel
+.env*

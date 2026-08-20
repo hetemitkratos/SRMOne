@@ -1,12 +1,23 @@
-const BASE = "/api";
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || "https://kolpioxbznypmvivbdhn.supabase.co";
+const AUTH_BASE = `${SUPABASE_URL}/functions/v1/auth-session`;
+const API_BASE = `${SUPABASE_URL}/functions/v1/api-gateway`;
+
+let _sessionToken = null;
+
+export function setSessionToken(token) { _sessionToken = token; }
+export function getSessionToken() { return _sessionToken; }
+export function clearSessionToken() { _sessionToken = null; }
 
 async function request(path, options = {}) {
-  const res = await fetch(`${BASE}${path}`, {
+  const headers = {
+    "Content-Type": "application/json",
+    ...(options.headers || {}),
+  };
+  if (_sessionToken) headers["x-session-token"] = _sessionToken;
+
+  const res = await fetch(`${API_BASE}${path}`, {
     ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...(options.headers || {}),
-    },
+    headers,
   });
 
   const text = await res.text();
@@ -25,120 +36,139 @@ async function request(path, options = {}) {
   return data;
 }
 
+async function authRequest(path, options = {}) {
+  const headers = {
+    "Content-Type": "application/json",
+    ...(options.headers || {}),
+  };
+  if (_sessionToken) headers["x-session-token"] = _sessionToken;
+
+  const res = await fetch(`${AUTH_BASE}${path}`, {
+    ...options,
+    headers,
+  });
+
+  const text = await res.text();
+  if (!text) {
+    throw new Error(`Server returned empty response (status ${res.status})`);
+  }
+
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    throw new Error(`Invalid response from server (status ${res.status})`);
+  }
+
+  if (!data.success) throw new Error(data.error || data.message || "Request failed");
+  return data;
+}
+
 export const api = {
-  login: (email, password, spPassword) =>
-    request("/login", {
+  login: async (email, password, spPassword) => {
+    const data = await authRequest("/login", {
       method: "POST",
       body: JSON.stringify({ email, password, spPassword: spPassword || undefined }),
-    }),
+    });
+    if (data.token) setSessionToken(data.token);
+    return data;
+  },
 
-  autoLogin: (email) =>
-    request("/auto-login", {
+  autoLogin: async (email) => {
+    const data = await authRequest("/refresh", {
       method: "POST",
-      body: JSON.stringify({ email }),
-    }),
+    });
+    if (data.token) setSessionToken(data.token);
+    return data;
+  },
 
   spLogin: (email, spPassword) =>
-    request("/sp-login", {
+    authRequest("/sp-login", {
       method: "POST",
-      body: JSON.stringify({ email, spPassword }),
+      body: JSON.stringify({ spPassword }),
     }),
 
-  logout: (email) =>
-    request("/logout", {
-      method: "POST",
-      body: JSON.stringify({ email }),
-    }),
+  logout: () => {
+    const p = authRequest("/logout", { method: "POST" });
+    clearSessionToken();
+    return p;
+  },
 
-  init: (email) => request(`/init?email=${encodeURIComponent(email)}`),
-  student: (email) => request(`/student?email=${encodeURIComponent(email)}`),
-  attendance: (email) => request(`/attendance?email=${encodeURIComponent(email)}`),
-  marks: (email) => request(`/marks?email=${encodeURIComponent(email)}`),
-  timetable: (email) => request(`/timetable?email=${encodeURIComponent(email)}`),
+  init: (email) => request(`/summary`),
+  student: (email) => request(`/profile`),
+  attendance: (email) => request(`/attendance`),
+  marks: (email) => request(`/marks`),
+  timetable: (email) => request(`/timetable`),
   calendar: (email, sem = "even") =>
-    request(`/calendar?email=${encodeURIComponent(email)}&sem=${sem}`),
-  all: (email) => request(`/all?email=${encodeURIComponent(email)}`),
-  summary: (email) => request(`/summary?email=${encodeURIComponent(email)}`),
-  schedule: (email) => request(`/schedule?email=${encodeURIComponent(email)}`),
-  studentPhoto: (email) => `${BASE}/student-photo?email=${encodeURIComponent(email)}`,
-  facultyPhoto: (url) => `${BASE}/faculty-photo?url=${encodeURIComponent(url)}`,
+    request(`/calendar?sem=${sem}`),
+  all: (email) => request(`/summary`),
+  summary: (email) => request(`/summary`),
+  schedule: (email) => request(`/summary`),
+  studentPhoto: (email) => null,
+  facultyPhoto: (url) => null,
   faculty: (name) => request(`/faculty?name=${encodeURIComponent(name)}`),
 
-  // Profile caching
-  getCachedProfile: (email) => request(`/profile/cache?email=${encodeURIComponent(email)}`),
+  // Profile caching (handled by sync, no-op on frontend)
+  getCachedProfile: (email) => request(`/profile`),
   cacheProfile: (email, studentInfo) =>
-    request("/profile/cache", {
-      method: "POST",
-      body: JSON.stringify({ email, studentInfo }),
-    }),
+    Promise.resolve({ success: true }),
 
   // Attendance history
   getAttendanceHistory: (email, days = 30) =>
-    request(`/attendance/history?email=${encodeURIComponent(email)}&days=${days}`),
+    request(`/attendance/history?days=${days}`),
   saveAttendanceSnapshot: (email, subjects, overallPct) =>
-    request("/attendance/snapshot", {
-      method: "POST",
-      body: JSON.stringify({ email, subjects, overallPct }),
-    }),
+    Promise.resolve({ success: true }),
 
   // Settings sync
-  getSettings: (email) => request(`/settings?email=${encodeURIComponent(email)}`),
+  getSettings: (email) => request(`/settings`),
   saveSettings: (email, settings) =>
     request("/settings", {
-      method: "POST",
-      body: JSON.stringify({ email, settings }),
+      method: "PUT",
+      body: JSON.stringify(settings),
     }),
 
   // Notifications
   getNotifications: (email, unreadOnly = false) =>
-    request(`/notifications?email=${encodeURIComponent(email)}&unreadOnly=${unreadOnly}`),
+    request(`/notifications?unreadOnly=${unreadOnly}`),
   createNotification: (email, { type, title, body, data }) =>
     request("/notifications", {
       method: "POST",
-      body: JSON.stringify({ email, type, title, body, data }),
+      body: JSON.stringify({ type, title, body, data }),
     }),
   markNotificationRead: (id) =>
-    request(`/notifications/${id}/read`, { method: "PATCH" }),
+    request(`/notifications/${id}/read`, { method: "POST" }),
   markAllNotificationsRead: (email) =>
-    request("/notifications/read-all", {
-      method: "POST",
-      body: JSON.stringify({ email }),
-    }),
+    request("/notifications/read-all", { method: "POST" }),
 
   // Notification settings
   getNotificationSettings: (email) =>
-    request(`/notification-settings?email=${encodeURIComponent(email)}`),
+    request(`/notification-settings`),
   saveNotificationSettings: (email, settings) =>
     request("/notification-settings", {
-      method: "POST",
-      body: JSON.stringify({ email, settings }),
+      method: "PUT",
+      body: JSON.stringify(settings),
     }),
 
   // Job bookmarks
-  getBookmarks: (email) => request(`/bookmarks?email=${encodeURIComponent(email)}`),
+  getBookmarks: (email) => request(`/bookmarks`),
   addBookmark: (email, { jobUuid, jobTitle, companyName, jobData, notes }) =>
     request("/bookmarks", {
       method: "POST",
-      body: JSON.stringify({ email, jobUuid, jobTitle, companyName, jobData, notes }),
+      body: JSON.stringify({ jobUuid, jobTitle, companyName, jobData, notes }),
     }),
   removeBookmark: (email, jobUuid) =>
-    request(`/bookmarks/${encodeURIComponent(jobUuid)}?email=${encodeURIComponent(email)}`, {
+    request(`/bookmarks/${encodeURIComponent(jobUuid)}`, {
       method: "DELETE",
     }),
   updateBookmark: (email, jobUuid, updates) =>
     request(`/bookmarks/${encodeURIComponent(jobUuid)}`, {
       method: "PATCH",
-      body: JSON.stringify({ email, updates }),
+      body: JSON.stringify({ updates }),
     }),
 
-  // Student Portal (sp.srmist.edu.in) — fallback for attendance
-  spLogin: (email, password, captchaApiKey) =>
-    request("/sp/login", {
-      method: "POST",
-      body: JSON.stringify({ email, password, captchaApiKey }),
-    }),
+  // Student Portal (sp.srmist.edu.in) — not yet migrated
   spAttendance: (email) =>
-    request(`/sp/attendance?email=${encodeURIComponent(email)}`),
+    Promise.resolve({ success: false, error: "SP portal not yet migrated" }),
   spStudent: (email) =>
-    request(`/sp/student?email=${encodeURIComponent(email)}`),
+    Promise.resolve({ success: false, error: "SP portal not yet migrated" }),
 };
