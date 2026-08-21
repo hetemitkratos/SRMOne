@@ -159,6 +159,8 @@ async function handleConnect(req: Request): Promise<Response> {
   }
 }
 
+const AUTO_LOGIN_COOLDOWN_MS = 10 * 60 * 1000; // 10 minutes
+
 async function handleAutoLogin(req: Request): Promise<Response> {
   const { academiaEmail } = await req.json();
   if (!academiaEmail) return json({ success: false, error: "academiaEmail is required" }, 400);
@@ -180,6 +182,20 @@ async function handleAutoLogin(req: Request): Promise<Response> {
       requiresMfa: true,
       username: creds.placement_username,
     });
+  }
+
+  // Cooldown: skip Haveloc login if we recently logged in (within 10 min)
+  if (creds.last_auto_login) {
+    const lastLogin = new Date(creds.last_auto_login).getTime();
+    const elapsed = Date.now() - lastLogin;
+    if (elapsed < AUTO_LOGIN_COOLDOWN_MS) {
+      return json({
+        success: true,
+        connected: true,
+        username: creds.placement_username,
+        cached: true,
+      });
+    }
   }
 
   try {
