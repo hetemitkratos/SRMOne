@@ -2,22 +2,13 @@
   "buildCommand": "npm install && npm run build",
   "outputDirectory": "dist",
   "framework": "vite",
-  "functions": {
-    "api/ping.js": {
-      "maxDuration": 15
-    }
-  },
   "crons": [
     {
-      "path": "/api/ping",
+      "path": "/api/health",
       "schedule": "*/14 * * * *"
     }
   ],
   "rewrites": [
-    {
-      "source": "/api/ping",
-      "destination": "/api/ping"
-    },
     {
       "source": "/api/:path*",
       "destination": "https://academia-backend-5h12.onrender.com/:path*"

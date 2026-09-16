@@ -4,5 +4,8 @@
   "rewrites": [
     { "source": "/api/:path*", "destination": "https://academia-backend-5h12.onrender.com/:path*" },
     { "source": "/(.*)", "destination": "/index.html" }
+  ],
+  "crons": [
+    { "path": "/api/health", "schedule": "*/14 * * * *" }
   ]
 }
