@@ -7,8 +7,6 @@
  * This keeps the core backend (login, attendance, timetable) warm 24/7
  * while staying within the 750 free hours/month limit.
  *
- * The placement backend is intentionally NOT pinged — it sleeps and
- * cold-starts only when a user accesses placements (~30s wait, acceptable).
  */
 
 export default async function handler(req, res) {

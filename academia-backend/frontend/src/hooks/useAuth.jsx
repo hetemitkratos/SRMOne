@@ -9,16 +9,6 @@ export function AuthProvider({ children }) {
     return saved ? JSON.parse(saved) : null;
   });
 
-  const [placementUser, setPlacementUser] = useState(() => {
-    const saved = localStorage.getItem("placement_user");
-    return saved ? JSON.parse(saved) : null;
-  });
-
-  // Tracks whether placement credentials are stored in Supabase (one-time connect)
-  const [placementConnected, setPlacementConnectedState] = useState(() => {
-    return localStorage.getItem("placement_connected") === "true";
-  });
-
   const [autoLoggingIn, setAutoLoggingIn] = useState(false);
 
   const login = useCallback((email) => {
@@ -45,33 +35,15 @@ export function AuthProvider({ children }) {
     }
   }, []);
 
-  const loginPlacement = useCallback((username) => {
-    const u = { username };
-    localStorage.setItem("placement_user", JSON.stringify(u));
-    setPlacementUser(u);
-  }, []);
-
-  const setPlacementConnected = useCallback((connected) => {
-    localStorage.setItem("placement_connected", connected ? "true" : "false");
-    setPlacementConnectedState(connected);
-  }, []);
-
   const logout = useCallback(() => {
     localStorage.removeItem("srm_user");
     setUser(null);
-  }, []);
-
-  const logoutPlacement = useCallback(() => {
-    localStorage.removeItem("placement_user");
-    setPlacementUser(null);
   }, []);
 
   return (
     <AuthContext.Provider value={{
       user, login, autoLogin, logout,
       autoLoggingIn,
-      placementUser, loginPlacement, logoutPlacement,
-      placementConnected, setPlacementConnected,
     }}>
       {children}
     </AuthContext.Provider>

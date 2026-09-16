@@ -1123,7 +1123,7 @@ app.post("/login", loginLimiter, async (req, res) => {
         supabaseClient.createNotification(email, {
           type: "welcome",
           title: "Welcome to SRM One! 🎉",
-          body: "You're all set. Track attendance, view timetables, check marks, and browse placements — all in one place.",
+          body: "You're all set. Track attendance, view timetables, and check marks — all in one place.",
           data: { timestamp: new Date().toISOString() },
         }).catch((err) => log("NOTIFICATIONS", `Welcome notif failed for ${email}: ${err.message}`));
       }
@@ -2758,60 +2758,6 @@ app.post("/notification-settings", async (req, res) => {
   } catch (err) {
     log("NOTIFICATION_SETTINGS", `Upsert error: ${err.message}`);
     return res.status(500).json({ success: false, message: "Failed to save notification settings" });
-  }
-});
-
-// GET /bookmarks?email= — Get job bookmarks
-app.get("/bookmarks", async (req, res) => {
-  const { email } = req.query;
-  if (!email) return res.status(400).json({ success: false, message: "Missing email" });
-  try {
-    const bookmarks = await supabaseClient.getJobBookmarks(email);
-    return res.json({ success: true, data: bookmarks });
-  } catch (err) {
-    log("BOOKMARKS", `Fetch error: ${err.message}`);
-    return res.status(500).json({ success: false, message: "Failed to fetch bookmarks" });
-  }
-});
-
-// POST /bookmarks — Add/update job bookmark
-app.post("/bookmarks", async (req, res) => {
-  const { email, jobUuid, jobTitle, companyName, jobData, notes } = req.body;
-  if (!email || !jobUuid) return res.status(400).json({ success: false, message: "Missing email or jobUuid" });
-  try {
-    const bookmark = await supabaseClient.addJobBookmark(email, { jobUuid, jobTitle, companyName, jobData, notes });
-    return res.json({ success: true, data: bookmark });
-  } catch (err) {
-    log("BOOKMARKS", `Add error: ${err.message}`);
-    return res.status(500).json({ success: false, message: "Failed to add bookmark" });
-  }
-});
-
-// PATCH /bookmarks/:jobUuid — Update bookmark
-app.patch("/bookmarks/:jobUuid", async (req, res) => {
-  const { jobUuid } = req.params;
-  const { email, updates } = req.body;
-  if (!email || !updates) return res.status(400).json({ success: false, message: "Missing email or updates" });
-  try {
-    const bookmark = await supabaseClient.updateJobBookmark(email, jobUuid, updates);
-    return res.json({ success: true, data: bookmark });
-  } catch (err) {
-    log("BOOKMARKS", `Update error: ${err.message}`);
-    return res.status(500).json({ success: false, message: "Failed to update bookmark" });
-  }
-});
-
-// DELETE /bookmarks/:jobUuid?email= — Remove bookmark
-app.delete("/bookmarks/:jobUuid", async (req, res) => {
-  const { jobUuid } = req.params;
-  const { email } = req.query;
-  if (!email) return res.status(400).json({ success: false, message: "Missing email" });
-  try {
-    await supabaseClient.removeJobBookmark(email, jobUuid);
-    return res.json({ success: true });
-  } catch (err) {
-    log("BOOKMARKS", `Delete error: ${err.message}`);
-    return res.status(500).json({ success: false, message: "Failed to delete bookmark" });
   }
 });
 

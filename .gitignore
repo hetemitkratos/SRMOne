@@ -14,8 +14,6 @@ frontend/dist/
 *.dll
 *.so
 *.dylib
-haveloc-scraper/haveloc-scraper.exe
-haveloc-scraper/scraper.exe
 academia-backend/academia-scraper/*.exe
 academia-backend/faculty-scraper/*.exe
 
@@ -38,9 +36,6 @@ faculty_*.txt
 jd_*.txt
 
 # Test output JSON (large scraped data)
-haveloc-scraper/*_raw.json
-haveloc-scraper/test_*.json
-haveloc-scraper/jd_result.json
 
 # Images (not part of source)
 *.png
@@ -63,3 +58,4 @@ frontend/node_modules/.vite/
 # Supabase
 supabase/.branches
 supabase/.temp
+.vercel/

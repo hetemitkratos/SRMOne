@@ -280,63 +280,6 @@ export async function upsertNotificationSettings(email, settings) {
   return data;
 }
 
-// ─── Job Bookmarks ───────────────────────────────────────────────────────────
-
-export async function getJobBookmarks(email) {
-  if (!supabase) return [];
-  const { data, error } = await supabase
-    .from("job_bookmarks")
-    .select("*")
-    .eq("academia_email", email)
-    .order("bookmarked_at", { ascending: false });
-  if (error) {
-    console.error("[supabase] getJobBookmarks:", error.message);
-    return [];
-  }
-  return data || [];
-}
-
-export async function addJobBookmark(email, { jobUuid, jobTitle, companyName, jobData, notes }) {
-  if (!supabase) return null;
-  const { data, error } = await supabase
-    .from("job_bookmarks")
-    .upsert({
-      academia_email: email,
-      job_uuid: jobUuid,
-      job_title: jobTitle,
-      company_name: companyName,
-      job_data: jobData,
-      notes: notes || "",
-    }, { onConflict: "academia_email,job_uuid" })
-    .select()
-    .single();
-  if (error) console.error("[supabase] addJobBookmark:", error.message);
-  return data;
-}
-
-export async function updateJobBookmark(email, jobUuid, updates) {
-  if (!supabase) return null;
-  const { data, error } = await supabase
-    .from("job_bookmarks")
-    .update({ ...updates, updated_at: new Date().toISOString() })
-    .eq("academia_email", email)
-    .eq("job_uuid", jobUuid)
-    .select()
-    .single();
-  if (error) console.error("[supabase] updateJobBookmark:", error.message);
-  return data;
-}
-
-export async function removeJobBookmark(email, jobUuid) {
-  if (!supabase) return;
-  const { error } = await supabase
-    .from("job_bookmarks")
-    .delete()
-    .eq("academia_email", email)
-    .eq("job_uuid", jobUuid);
-  if (error) console.error("[supabase] removeJobBookmark:", error.message);
-}
-
 // ─── Faculty Profile Cache ───────────────────────────────────────────────────
 // Persists scraped faculty profiles so we don't re-scrape SRM on every request.
 

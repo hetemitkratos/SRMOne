@@ -1,9 +1,8 @@
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useNavigate, Link } from "react-router-dom";
-import { Loader2, Eye, EyeOff, Sparkles, Briefcase, ChevronDown, ChevronUp, CalendarCheck } from "lucide-react";
+import { Loader2, Eye, EyeOff, ChevronDown, ChevronUp, CalendarCheck } from "lucide-react";
 import { api } from "../api/client.js";
-import { placementApi } from "../api/placementClient.js";
 import { useAuth } from "../hooks/useAuth.jsx";
 
 function LogoMark({ size = 40 }) {
@@ -66,7 +65,7 @@ export default function Login() {
             transition={{ duration: 0.6, delay: 0.2 }}
             className="text-[17px] text-slate-600 leading-relaxed font-medium"
           >
-            Personalized dashboards for attendance, marks, placement, and timetable — all in one place.
+            Personalized dashboards for attendance, marks, and timetable — all in one place.
           </motion.p>
         </div>
 
@@ -111,7 +110,7 @@ export default function Login() {
             </div>
 
             <p className="mt-6 text-[15px] leading-snug text-slate-600 font-medium tracking-tight">
-              Attendance, marks, placements
+              Attendance, marks
               <br />
               and timetable — in one place.
             </p>
@@ -163,20 +162,13 @@ export default function Login() {
 
 function LoginForm() {
   const navigate = useNavigate();
-  const { login, loginPlacement, setPlacementConnected } = useAuth();
+  const { login } = useAuth();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [showPwd, setShowPwd] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [agreed, setAgreed] = useState(false);
-
-  const [showPlacement, setShowPlacement] = useState(false);
-  const [placementUsername, setPlacementUsername] = useState("");
-  const [placementPassword, setPlacementPassword] = useState("");
-  const [placementLoading, setPlacementLoading] = useState(false);
-  const [placementError, setPlacementError] = useState("");
-  const [placementConnected, setPlacementConnectedLocal] = useState(false);
 
   // Optional Student Portal password (if different from academia password)
   const [showSpPwd, setShowSpPwd] = useState(false);
@@ -230,16 +222,6 @@ function LoginForm() {
       login(email);
       setLoggedInEmail(email);
 
-      try {
-        const result = await placementApi.autoLogin(email);
-        if (result.connected && result.username) {
-          loginPlacement(result.username);
-          setPlacementConnected(true);
-        }
-      } catch {
-        // Placement not connected — user can connect later
-      }
-
       // If no SP password provided, show prompt after navigating to dashboard
       if (!spPassword) {
         setShowSpPrompt(true);
@@ -268,29 +250,6 @@ function LoginForm() {
       setSpPromptError(err.message || "Student Portal login failed. Check your SP password.");
     } finally {
       setSpPromptLoading(false);
-    }
-  };
-
-  const handlePlacementConnect = async (e) => {
-    e.preventDefault();
-    setPlacementError("");
-    if (!placementUsername || !placementPassword) {
-      setPlacementError("Please fill in placement credentials.");
-      return;
-    }
-    const email = `${username.trim().toLowerCase()}@srmist.edu.in`;
-    setPlacementLoading(true);
-    try {
-      const result = await placementApi.connect(email, placementUsername.trim(), placementPassword);
-      if (result.username) {
-        loginPlacement(result.username);
-        setPlacementConnected(true);
-        setPlacementConnectedLocal(true);
-      }
-    } catch (err) {
-      setPlacementError(err.message || "Failed to connect placement account.");
-    } finally {
-      setPlacementLoading(false);
     }
   };
 
@@ -447,119 +406,6 @@ function LoginForm() {
                 <p className="text-[11px] text-slate-400 font-medium leading-relaxed px-1 mt-2">
                   If your Student Portal (sp.srmist.edu.in) password is different from your academia password, enter it here. We'll only try once to avoid lockout.
                 </p>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </div>
-
-      {/* Optional Placement Connect */}
-      <div className="mt-7 pt-5 border-t border-slate-100">
-        <button
-          type="button"
-          onClick={() => setShowPlacement(!showPlacement)}
-          className="w-full flex items-center justify-between text-left cursor-pointer group"
-        >
-          <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-full bg-[#F4F0EB] flex items-center justify-center overflow-hidden p-1.5">
-              <img src="/assets/access-account_aydp.svg" alt="" className="w-full h-full object-contain" />
-            </div>
-            <div>
-              <p className="text-[14px] font-bold text-slate-700">
-                {placementConnected ? "Placement Connected" : "Track Placements?"}
-              </p>
-              <p className="text-[12px] text-slate-400 font-medium">
-                {placementConnected
-                  ? "Auto-login enabled"
-                  : "Connect your Haveloc account (optional)"}
-              </p>
-            </div>
-          </div>
-          {showPlacement ? (
-            <ChevronUp size={18} className="text-slate-400 group-hover:text-slate-600" />
-          ) : (
-            <ChevronDown size={18} className="text-slate-400 group-hover:text-slate-600" />
-          )}
-        </button>
-
-        <AnimatePresence>
-          {showPlacement && !placementConnected && (
-            <motion.div
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: "auto" }}
-              exit={{ opacity: 0, height: 0 }}
-              className="overflow-hidden mt-4"
-            >
-              <form onSubmit={handlePlacementConnect} className="flex flex-col gap-4">
-                {placementError && (
-                  <div className="px-4 py-3 rounded-2xl text-[13px] font-medium text-red-600 bg-red-50 border border-red-100 flex items-center gap-2">
-                    <span className="w-1.5 h-1.5 rounded-full bg-red-500 flex-shrink-0" />
-                    {placementError}
-                  </div>
-                )}
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1.5 ml-1">
-                    Roll Number
-                  </label>
-                  <input
-                    type="text"
-                    value={placementUsername}
-                    onChange={(e) => setPlacementUsername(e.target.value)}
-                    placeholder="RA2311056010266"
-                    autoCapitalize="none"
-                    className="w-full px-5 py-3.5 rounded-full text-[14px] font-medium outline-none transition-all border border-slate-200 bg-white shadow-[0_2px_10px_rgba(0,0,0,0.02)] text-slate-900 placeholder:text-slate-400 focus:border-slate-300 focus:ring-4 focus:ring-slate-100/50"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1.5 ml-1">
-                    Placement Password
-                  </label>
-                  <input
-                    type="password"
-                    value={placementPassword}
-                    onChange={(e) => setPlacementPassword(e.target.value)}
-                    placeholder="Haveloc password"
-                    className="w-full px-5 py-3.5 rounded-full text-[14px] font-medium outline-none transition-all border border-slate-200 bg-white shadow-[0_2px_10px_rgba(0,0,0,0.02)] text-slate-900 placeholder:text-slate-400 focus:border-slate-300 focus:ring-4 focus:ring-slate-100/50"
-                  />
-                </div>
-                <p className="text-[11px] text-slate-400 font-medium leading-relaxed px-1">
-                  Credentials are encrypted and stored securely. You can disconnect anytime from Placement.
-                </p>
-                <button
-                  type="submit"
-                  disabled={placementLoading}
-                  className="w-full flex items-center justify-center gap-2 py-3.5 rounded-full font-bold text-white text-[14px] bg-slate-700 hover:bg-slate-800 transition-colors disabled:opacity-40 cursor-pointer"
-                >
-                  {placementLoading ? (
-                    <>
-                      <Loader2 size={16} className="animate-spin" /> Connecting…
-                    </>
-                  ) : (
-                    <>
-                      <Briefcase size={15} /> Connect Placement
-                    </>
-                  )}
-                </button>
-              </form>
-            </motion.div>
-          )}
-          {showPlacement && placementConnected && (
-            <motion.div
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: "auto" }}
-              exit={{ opacity: 0, height: 0 }}
-              className="overflow-hidden mt-4"
-            >
-              <div className="px-4 py-4 rounded-2xl bg-green-50 border border-green-100 flex items-center gap-3">
-                <div className="w-8 h-8 rounded-full bg-green-100 flex items-center justify-center flex-shrink-0">
-                  <Sparkles size={15} className="text-green-600" />
-                </div>
-                <div>
-                  <p className="text-[13px] font-bold text-green-700">Placement account connected!</p>
-                  <p className="text-[12px] text-green-600 font-medium">
-                    You&apos;ll be auto-logged in when you sign in.
-                  </p>
-                </div>
               </div>
             </motion.div>
           )}

@@ -6,7 +6,6 @@
 #
 # ✅ KEEP-ALIVE: A Vercel Cron Job (api/ping.js) automatically pings the
 # academia-backend /health endpoint every 14 minutes to keep it warm.
-# The placement-backend sleeps (cold-starts ~30s when accessed).
 # Total: ~720 hours/month → stays within free tier.
 #
 # After connecting your GitHub repo, Render will read this file and create
@@ -40,26 +39,3 @@ services:
         sync: false  # API key for captcha solving service (SP login)
       - key: CAPTCHA_SOLVE_API_URL
         sync: false  # URL for captcha solving API (SP login)
-
-  # ─── Placement Backend (Haveloc placement portal scraper + API) ──────────
-  - type: web
-    name: placement-backend
-    runtime: docker
-    dockerfilePath: ./placement-backend/Dockerfile
-    dockerContext: .
-    plan: free
-    healthCheckPath: /health
-    autoDeploy: true
-    envVars:
-      - key: NODE_ENV
-        value: production
-      - key: PORT
-        value: 3001
-      - key: ALLOWED_ORIGINS
-        sync: false  # Set in dashboard: https://srmone.in,https://www.srmone.in
-      - key: SUPABASE_URL
-        sync: false
-      - key: SUPABASE_SERVICE_KEY
-        sync: false
-      - key: ENCRYPTION_KEY
-        sync: false  # 32-char hex key for encrypting placement passwords

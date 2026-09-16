@@ -13,9 +13,8 @@ const SECTIONS = [
         </p>
         <p>
           The Service is an independent, student-built platform that aggregates data from SRM
-          University's Academia portal and Haveloc placement portal. SRM One is not affiliated with,
-          endorsed by, or officially connected to SRM Institute of Science and Technology or Haveloc
-          Technologies.
+          University's Academia portal. SRM One is not affiliated with,
+          endorsed by, or officially connected to SRM Institute of Science and Technology.
         </p>
       </>
     ),
@@ -42,8 +41,8 @@ const SECTIONS = [
       <>
         <p>
           You are solely responsible for maintaining the confidentiality of your SRMIST username and
-          password. The Service uses your credentials solely to authenticate with SRM's Academia and
-          Haveloc placement portals on your behalf, to retrieve your own academic and placement data.
+          password. The Service uses your credentials solely to authenticate with SRM's Academia
+          portal on your behalf, to retrieve your own academic data.
         </p>
         <ul>
           <li>
@@ -53,11 +52,6 @@ const SECTIONS = [
           <li>
             Session tokens (cookies) are stored in memory and cleared when you log out or the session
             expires.
-          </li>
-          <li>
-            <strong>Placement credentials</strong> (Haveloc password) are encrypted using AES-256-CBC
-            and stored in our Supabase database to enable automatic login. You can disconnect and
-            erase these at any time from the Placement settings.
           </li>
           <li>
             You must not share your credentials with any third party or allow unauthorized access to
@@ -75,11 +69,8 @@ const SECTIONS = [
         <ul>
           <li>View your attendance, marks, timetable, and academic calendar.</li>
           <li>Track attendance trends over time with historical snapshots and predictions.</li>
-          <li>Track placement opportunities, job applications, and interview schedules.</li>
-          <li>Bookmark jobs with personal notes for later reference.</li>
           <li>View faculty information, photos, and detailed academic profiles.</li>
-          <li>Receive in-app notifications for low attendance, new jobs, holidays, and notices.</li>
-          <li>Connect your Haveloc placement account for automatic login (optional).</li>
+          <li>Receive in-app notifications for low attendance and holidays.</li>
         </ul>
         <p>You agree NOT to:</p>
         <ul>
@@ -88,7 +79,7 @@ const SECTIONS = [
           <li>Reverse engineer, decompile, or disassemble any part of the Service.</li>
           <li>Use automated scripts, bots, or crawlers to overload or disrupt the Service.</li>
           <li>Resell, redistribute, or republish data obtained through the Service.</li>
-          <li>Share, sell, or distribute your account access or placement credentials to others.</li>
+          <li>Share, sell, or distribute your account access or credentials to others.</li>
         </ul>
       </>
     ),
@@ -98,7 +89,7 @@ const SECTIONS = [
     body: (
       <>
         <p>
-          The Service retrieves data from third-party portals (SRM Academia, Haveloc) in real time.
+          The Service retrieves data from third-party portals (SRM Academia) in real time.
           We do not guarantee that:
         </p>
         <ul>
@@ -106,12 +97,12 @@ const SECTIONS = [
           <li>The Service will be available without interruption or downtime.</li>
           <li>All features (e.g., academic calendar, specific faculty pages) will function at all
             times, as they depend on the availability of upstream portals.</li>
-          <li>Notifications (low attendance, new jobs, holidays) will always be timely or accurate,
+          <li>Notifications (low attendance, holidays) will always be timely or accurate,
             as they depend on data fetched from upstream portals.</li>
         </ul>
         <p>
-          You should always verify critical information (attendance requirements, exam dates,
-          placement deadlines) directly with official university sources. Notifications are
+          You should always verify critical information (attendance requirements, exam
+          dates) directly with official university sources. Notifications are
           informational only and should not be your sole source of truth.
         </p>
       </>
@@ -164,8 +155,8 @@ const SECTIONS = [
         </p>
         <ul>
           <li>Any loss of data, grades, or academic standing resulting from reliance on the Service.</li>
-          <li>Any missed deadlines, interviews, or opportunities due to Service unavailability.</li>
-          <li>Any failure to receive or act upon notifications (low attendance, new jobs, holidays).</li>
+          <li>Any missed deadlines or opportunities due to Service unavailability.</li>
+          <li>Any failure to receive or act upon notifications (low attendance, holidays).</li>
           <li>Any unauthorized access to your account due to your failure to protect your credentials.</li>
           <li>Any actions taken by the university or third parties in response to your use of the Service.</li>
         </ul>

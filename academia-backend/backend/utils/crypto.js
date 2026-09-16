@@ -1,7 +1,7 @@
 /**
  * AES-256-CBC encryption for storing academia/SP passwords securely.
  * Uses Node.js built-in crypto module — no extra dependencies.
- * Reuses the same pattern as placement-backend/utils/crypto.js.
+ * Reuses the same pattern across backend services.
  */
 import crypto from "crypto";
 

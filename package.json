@@ -2,16 +2,15 @@
   "name": "srm-one",
   "version": "1.0.0",
   "private": true,
-  "description": "SRM One — unified launcher for academia + placement + frontend",
+  "description": "SRM One — unified launcher for academia + frontend",
   "scripts": {
-    "start": "concurrently -n academia,placement,frontend -c cyan,magenta,green \"npm:academia\" \"npm:placement\" \"npm:frontend\"",
+    "start": "concurrently -n academia,frontend -c cyan,green \"npm:academia\" \"npm:frontend\"",
     "dev": "npm start",
     "build": "npm --prefix academia-backend/frontend install && npm --prefix academia-backend/frontend run build",
     "academia": "npm --prefix academia-backend run dev",
-    "placement": "npm --prefix placement-backend start",
     "frontend": "npm --prefix academia-backend/frontend run dev",
     "stop": "powershell -ExecutionPolicy Bypass -File ./start-all.ps1 -Stop",
-    "install:all": "npm --prefix academia-backend install && npm --prefix placement-backend install && npm --prefix academia-backend/frontend install"
+    "install:all": "npm --prefix academia-backend install && npm --prefix academia-backend/frontend install"
   },
   "devDependencies": {
     "concurrently": "^9.2.1"

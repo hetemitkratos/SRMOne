@@ -1,7 +1,7 @@
 /**
  * Supabase client for frontend (anon key).
- * Used for Realtime subscriptions to notifications and job bookmarks.
- * All CRUD operations go through the academia/placement backend APIs.
+ * Used for Realtime subscriptions to notifications.
+ * All CRUD operations go through the academia backend API.
  */
 import { createClient } from "@supabase/supabase-js";
 

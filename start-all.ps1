@@ -2,9 +2,8 @@
 #
 # Services:
 #   1. Academia backend  -> http://localhost:3000
-#   2. Placement backend -> http://localhost:3001
-#   3. Faculty scraper   -> http://localhost:8080
-#   4. Frontend (Vite)   -> http://localhost:5174
+#   2. Faculty scraper   -> http://localhost:8080
+#   3. Frontend (Vite)   -> http://localhost:5174
 #
 # Usage:
 #   .\start-all.ps1            # start everything
@@ -20,13 +19,11 @@ $ErrorActionPreference = "Stop"
 
 $ROOT       = $PSScriptRoot
 $ACADEMIA   = Join-Path $ROOT "academia-backend"
-$PLACEMENT  = Join-Path $ROOT "placement-backend"
 $FRONTEND   = Join-Path $ACADEMIA "frontend"
 $FACULTY    = Join-Path $ACADEMIA "faculty-scraper"
 
 $PORTS = @{
   "Academia backend"  = 3000
-  "Placement backend" = 3001
   "Faculty scraper"   = 8080
   "Frontend"          = 5174
 }
@@ -88,7 +85,7 @@ if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {
 }
 
 # Verify directories exist
-foreach ($dir in @($ACADEMIA, $PLACEMENT, $FRONTEND, $FACULTY)) {
+foreach ($dir in @($ACADEMIA, $FRONTEND, $FACULTY)) {
   if (-not (Test-Path $dir)) {
     Write-Host "ERROR: Missing directory: $dir" -ForegroundColor Red
     exit 1
@@ -123,7 +120,6 @@ if ($needBuild) {
 # Verify node_modules exist
 foreach ($check in @(
   @{ Dir = $ACADEMIA;  Label = "academia-backend" },
-  @{ Dir = $PLACEMENT; Label = "placement-backend" },
   @{ Dir = $FRONTEND;  Label = "frontend" }
 )) {
   $nm = Join-Path $check.Dir "node_modules"
@@ -149,25 +145,19 @@ Write-Host ""
 $jobs = @()
 
 # 1. Academia backend (port 3000)
-Write-Host "  [1/4] Academia backend  -> http://localhost:3000" -ForegroundColor Cyan
+Write-Host "  [1/3] Academia backend  -> http://localhost:3000" -ForegroundColor Cyan
 $jobs += Start-Process -FilePath "powershell.exe" -ArgumentList "-NoProfile", "-Command", "npm run dev" -WorkingDirectory $ACADEMIA -PassThru -WindowStyle Normal
 
 Start-Sleep -Seconds 2
 
-# 2. Placement backend (port 3001)
-Write-Host "  [2/4] Placement backend -> http://localhost:3001" -ForegroundColor Cyan
-$jobs += Start-Process -FilePath "powershell.exe" -ArgumentList "-NoProfile", "-Command", "npm start" -WorkingDirectory $PLACEMENT -PassThru -WindowStyle Normal
-
-Start-Sleep -Seconds 2
-
-# 3. Faculty scraper (port 8080, Go binary)
-Write-Host "  [3/4] Faculty scraper   -> http://localhost:8080" -ForegroundColor Cyan
+# 2. Faculty scraper (port 8080, Go binary)
+Write-Host "  [2/3] Faculty scraper   -> http://localhost:8080" -ForegroundColor Cyan
 $jobs += Start-Process -FilePath $facultyExe -WorkingDirectory $FACULTY -PassThru -WindowStyle Normal
 
 Start-Sleep -Seconds 2
 
-# 4. Frontend (port 5174)
-Write-Host "  [4/4] Frontend (Vite)   -> http://localhost:5174" -ForegroundColor Cyan
+# 3. Frontend (port 5174)
+Write-Host "  [3/3] Frontend (Vite)   -> http://localhost:5174" -ForegroundColor Cyan
 $jobs += Start-Process -FilePath "powershell.exe" -ArgumentList "-NoProfile", "-Command", "npm run dev" -WorkingDirectory $FRONTEND -PassThru -WindowStyle Normal
 
 Write-Host ""
@@ -211,7 +201,6 @@ if (-not $lanIP) {
 Write-Host "Local server URLs:" -ForegroundColor Yellow
 Write-Host "  Frontend          -> http://localhost:5174" -ForegroundColor White
 Write-Host "  Academia backend  -> http://localhost:3000" -ForegroundColor White
-Write-Host "  Placement backend -> http://localhost:3001" -ForegroundColor White
 Write-Host "  Faculty scraper   -> http://localhost:8080" -ForegroundColor White
 Write-Host ""
 
@@ -219,7 +208,6 @@ if ($lanIP) {
   Write-Host "Local network URLs (accessible from other devices on your Wi-Fi):" -ForegroundColor Yellow
   Write-Host "  Frontend          -> http://$($lanIP):5174" -ForegroundColor Green
   Write-Host "  Academia backend  -> http://$($lanIP):3000" -ForegroundColor Green
-  Write-Host "  Placement backend -> http://$($lanIP):3001" -ForegroundColor Green
   Write-Host "  Faculty scraper   -> http://$($lanIP):8080" -ForegroundColor Green
   Write-Host ""
   Write-Host "Open http://$($lanIP):5174 on any device on your network." -ForegroundColor Cyan

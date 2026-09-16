@@ -114,23 +114,6 @@ export const api = {
       body: JSON.stringify({ email, settings }),
     }),
 
-  // Job bookmarks
-  getBookmarks: (email) => request(`/bookmarks?email=${encodeURIComponent(email)}`),
-  addBookmark: (email, { jobUuid, jobTitle, companyName, jobData, notes }) =>
-    request("/bookmarks", {
-      method: "POST",
-      body: JSON.stringify({ email, jobUuid, jobTitle, companyName, jobData, notes }),
-    }),
-  removeBookmark: (email, jobUuid) =>
-    request(`/bookmarks/${encodeURIComponent(jobUuid)}?email=${encodeURIComponent(email)}`, {
-      method: "DELETE",
-    }),
-  updateBookmark: (email, jobUuid, updates) =>
-    request(`/bookmarks/${encodeURIComponent(jobUuid)}`, {
-      method: "PATCH",
-      body: JSON.stringify({ email, updates }),
-    }),
-
   // Student Portal (sp.srmist.edu.in) — fallback for attendance
   spLogin: (email, password, captchaApiKey) =>
     request("/sp/login", {

@@ -9,7 +9,6 @@ npm-debug.log
 # Go build artifacts
 academia-backend/academia-scraper/*.exe
 academia-backend/academia-scraper/loginprobe
-academia-backend/academia-scraper/haveloc-scraper
 academia-backend/.gocache
 
 # Environment files (NEVER include in Docker context)

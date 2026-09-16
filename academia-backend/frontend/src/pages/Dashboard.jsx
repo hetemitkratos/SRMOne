@@ -1,14 +1,12 @@
 import { useEffect, useState, useRef } from "react";
 import { Routes, Route, NavLink, Navigate, useNavigate, useLocation } from "react-router-dom";
-import { Bell, Mail, Menu, X, LogOut, Briefcase } from "lucide-react";
+import { Bell, Menu, X, LogOut } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import anime from "animejs";
 import { useAuth } from "../hooks/useAuth.jsx";
 import { api } from "../api/client.js";
-import { placementApi, setAcademiaEmail } from "../api/placementClient.js";
 import ImagePreview from "../components/ImagePreview.jsx";
 import NotificationBell from "../components/NotificationBell.jsx";
-import PlacementConnectModal from "../components/PlacementConnectModal.jsx";
 
 import Overview from "./Overview.jsx";
 import Attendance from "./Attendance.jsx";
@@ -25,42 +23,18 @@ const NAV_ITEMS = [
 ];
 
 export default function Dashboard() {
-  const { user, logout, placementUser, loginPlacement, logoutPlacement, setPlacementConnected, placementConnected } = useAuth();
+  const { user, logout } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
 
-  // Set academia email for placement API notifications
-  useEffect(() => {
-    if (user?.email) setAcademiaEmail(user.email);
-  }, [user?.email]);
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const [photoPreviewOpen, setPhotoPreviewOpen] = useState(false);
   const [studentInfo, setStudentInfo] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [showPlacementConnect, setShowPlacementConnect] = useState(false);
 
   const navRefs = useRef([]);
   const [indicatorStyle, setIndicatorStyle] = useState({ width: 0, left: 0, opacity: 0 });
-
-  // Auto-login to placement on mount if not already connected
-  useEffect(() => {
-    if (!user?.email || placementUser) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const result = await placementApi.autoLogin(user.email);
-        if (cancelled) return;
-        if (result.connected && result.username) {
-          loginPlacement(result.username);
-          setPlacementConnected(true);
-        }
-      } catch {
-        // Not connected or auto-login failed — user can connect from Placement page
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [user?.email, placementUser, loginPlacement, setPlacementConnected]);
 
   useEffect(() => {
     const t = setTimeout(() => {
@@ -97,27 +71,10 @@ export default function Dashboard() {
 
   // Lock body scroll when mobile menu or photo preview is open
   useEffect(() => {
-    const lock = mobileOpen || photoPreviewOpen || showPlacementConnect;
+    const lock = mobileOpen || photoPreviewOpen;
     document.body.style.overflow = lock ? "hidden" : "";
     return () => { document.body.style.overflow = ""; };
-  }, [mobileOpen, photoPreviewOpen, showPlacementConnect]);
-
-  // Handle placement button click — navigate if connected, open modal if not
-  const handlePlacementClick = () => {
-    setProfileMenuOpen(false);
-    setMobileOpen(false);
-    if (placementUser || placementConnected) {
-      navigate("/placement");
-    } else {
-      setShowPlacementConnect(true);
-    }
-  };
-
-  const handlePlacementConnectSuccess = () => {
-    setShowPlacementConnect(false);
-    // Small delay then navigate to placement
-    setTimeout(() => navigate("/placement"), 300);
-  };
+  }, [mobileOpen, photoPreviewOpen]);
 
   useEffect(() => {
     let cancelled = false;
@@ -161,12 +118,6 @@ export default function Dashboard() {
     try {
       await api.logout(user.email);
     } catch { /* ignore */ }
-    if (placementUser) {
-      try {
-        await import("../api/placementClient.js").then((m) => m.placementApi.logout(placementUser.username));
-      } catch { /* ignore */ }
-      logoutPlacement();
-    }
     logout();
     navigate("/login", { replace: true });
   };
@@ -213,22 +164,6 @@ export default function Dashboard() {
         </nav>
 
         <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0">
-          <button
-            onClick={handlePlacementClick}
-            className="hidden md:inline-flex items-center gap-2 rounded-full bg-[#1A1A1A] text-white px-4 py-2.5 text-sm font-bold hover:bg-black transition-colors cursor-pointer shadow-sm"
-            title={placementUser || placementConnected ? "Open Placement Portal" : "Connect Placement Account"}
-          >
-            <Briefcase size={15} strokeWidth={2.5} />
-            {placementUser || placementConnected ? "Placement" : "Connect Placement"}
-          </button>
-
-          <button
-            onClick={() => navigate("/placement/notices")}
-            className="relative w-9 h-9 sm:w-11 sm:h-11 rounded-full bg-white flex items-center justify-center text-slate-500 hover:text-[#1A1A1A] hover:bg-slate-50 transition-colors shadow-sm cursor-pointer border border-slate-100"
-            title="Notices"
-          >
-            <Mail className="w-[16px] h-[16px] sm:w-[18px] sm:h-[18px]" strokeWidth={2.5} />
-          </button>
           <NotificationBell />
 
           <div className="relative ml-1 flex items-center">
@@ -327,13 +262,6 @@ export default function Dashboard() {
                   )}
                   <div className="p-2 space-y-1">
                     <button
-                      onClick={handlePlacementClick}
-                      className="w-full flex items-center gap-3 px-4 py-3 rounded-[16px] text-[#1A1A1A] hover:bg-slate-50 transition-colors cursor-pointer font-bold text-sm"
-                    >
-                      <Briefcase size={16} strokeWidth={2.5} />
-                      {placementUser || placementConnected ? "Placement Portal" : "Connect Placement"}
-                    </button>
-                    <button
                       onClick={() => { setProfileMenuOpen(false); handleLogout(); }}
                       className="w-full flex items-center gap-3 px-4 py-3 rounded-[16px] text-red-600 hover:bg-red-50 hover:text-red-700 transition-colors cursor-pointer font-bold text-sm"
                     >
@@ -394,18 +322,6 @@ export default function Dashboard() {
               </NavLink>
             </motion.div>
           ))}
-          <motion.div
-            initial={false}
-            animate={mobileOpen ? { opacity: 1, y: 0 } : { opacity: 0, y: 10 }}
-            transition={{ delay: mobileOpen ? 0.1 + NAV_ITEMS.length * 0.05 : 0, type: "tween", duration: 0.2, ease: "easeOut" }}
-          >
-            <button
-              onClick={handlePlacementClick}
-              className="text-3xl font-display font-bold text-[#1A1A1A] cursor-pointer hover:text-slate-600 transition-colors"
-            >
-              {placementUser || placementConnected ? "Placement" : "Connect Placement"}
-            </button>
-          </motion.div>
         </nav>
       </motion.div>
 
@@ -417,12 +333,6 @@ export default function Dashboard() {
             <Route path="timetable" element={<Timetable />} />
             <Route path="marks" element={<Marks />} />
             <Route path="calendar" element={<Calendar />} />
-            <Route path="placement" element={<Navigate to="/placement" replace />} />
-            <Route path="companies" element={<Navigate to="/placement/companies" replace />} />
-            <Route path="jobs" element={<Navigate to="/placement/jobs" replace />} />
-            <Route path="tracker" element={<Navigate to="/placement/tracker" replace />} />
-            <Route path="notices" element={<Navigate to="/placement/notices" replace />} />
-            <Route path="policies" element={<Navigate to="/placement/policies" replace />} />
           </Routes>
         </div>
       </main>
@@ -434,13 +344,6 @@ export default function Dashboard() {
         caption={studentInfo?.Name || "Your profile photo"}
         onClose={() => setPhotoPreviewOpen(false)}
       />
-
-      {showPlacementConnect && (
-        <PlacementConnectModal
-          onClose={() => setShowPlacementConnect(false)}
-          onSuccess={handlePlacementConnectSuccess}
-        />
-      )}
     </div>
   );
 }

@@ -9,8 +9,8 @@ const SECTIONS = [
         <p>
           This Privacy Policy describes how SRM One ("the Service", "we", "us") collects, uses, and
           protects your personal information when you use our platform. The Service is a
-          student-built dashboard that aggregates academic and placement data from SRM University's
-          Academia portal and the Haveloc placement portal.
+          student-built dashboard that aggregates academic data from SRM University's
+          Academia portal.
         </p>
         <p>
           We are committed to protecting your privacy and being transparent about our data practices.
@@ -36,11 +36,6 @@ const SECTIONS = [
             browser.</strong> Discarded from memory immediately after authentication succeeds.
           </li>
           <li>
-            <strong>Haveloc placement password:</strong> Encrypted using AES-256-CBC and stored in
-            our Supabase database to enable automatic placement login. You can disconnect and erase
-            this at any time from the Placement settings.
-          </li>
-          <li>
             <strong>Session cookies:</strong> Stored in server memory during your active session.
             Cleared when you log out or the session expires (30 minutes of inactivity).
           </li>
@@ -60,14 +55,7 @@ const SECTIONS = [
           <li>Academic calendar (in-memory only).</li>
         </ul>
 
-        <h3>2.3 Placement Data</h3>
-        <ul>
-          <li>Company listings, job postings, application tracker, placement cycles.</li>
-          <li><strong>Job bookmarks</strong> with personal notes — stored in Supabase, accessible across devices.</li>
-          <li>Placement notices and policies (cached in-memory).</li>
-        </ul>
-
-        <h3>2.4 Faculty Data (Public)</h3>
+        <h3>2.3 Faculty Data (Public)</h3>
         <p>
           Faculty names, designations, departments, email addresses, campus, profile photos, and
           detailed profiles (education, publications, awards, work experience) are sourced from SRM
@@ -77,15 +65,15 @@ const SECTIONS = [
           scraping.
         </p>
 
-        <h3>2.5 Notifications</h3>
+        <h3>2.4 Notifications</h3>
         <p>
           The Service generates in-app notifications for events such as welcome messages, low
-          attendance alerts, new job postings, upcoming holidays, and new placement notices. These
+          attendance alerts, and upcoming holidays. These
           notifications are stored in Supabase and linked to your email address. You can mark
           notifications as read or clear them at any time.
         </p>
 
-        <h3>2.6 Usage Data (Minimal)</h3>
+        <h3>2.5 Usage Data (Minimal)</h3>
         <p>
           The Service does not use analytics, tracking pixels, or advertising SDKs. Server logs may
           include anonymized error messages and request timestamps for debugging purposes. These
@@ -101,11 +89,11 @@ const SECTIONS = [
         <p>Your data is used solely for the following purposes:</p>
         <ul>
           <li>
-            <strong>Authentication:</strong> To log you into SRM Academia and Haveloc portals on your
+            <strong>Authentication:</strong> To log you into the SRM Academia portal on your
             behalf.
           </li>
           <li>
-            <strong>Data display:</strong> To present your academic and placement information in a
+            <strong>Data display:</strong> To present your academic information in a
             unified dashboard.
           </li>
           <li>
@@ -117,12 +105,7 @@ const SECTIONS = [
             trends and predictions.
           </li>
           <li>
-            <strong>Job tracking:</strong> To save bookmarked jobs with personal notes, accessible
-            across your devices.
-          </li>
-          <li>
-            <strong>Notifications:</strong> To alert you about low attendance, new jobs, holidays,
-            and placement notices.
+            <strong>Notifications:</strong> To alert you about low attendance and holidays.
           </li>
           <li>
             <strong>Faculty profiles:</strong> To display faculty photos and detailed profiles
@@ -147,24 +130,17 @@ const SECTIONS = [
       <>
         <h3>4.1 In-Memory (Session Data)</h3>
         <p>
-          Academic and placement data fetched during your active session is stored in server memory
+          Academic data fetched during your active session is stored in server memory
           (RAM). When you log out or the session expires, all cached data is garbage-collected.
-          This includes timetable, marks, calendar, and placement listings.
+          This includes timetable, marks, and calendar.
         </p>
 
         <h3>4.2 Supabase Database (Persisted)</h3>
         <p>The following data is persisted in our Supabase database:</p>
         <ul>
           <li>
-            <strong>Placement credentials</strong> (encrypted with AES-256-CBC) — retained until you
-            disconnect your placement account.
-          </li>
-          <li>
             <strong>Attendance snapshots</strong> — daily snapshots retained for trend analysis.
             Deletable on request.
-          </li>
-          <li>
-            <strong>Job bookmarks</strong> with notes — retained until you manually remove them.
           </li>
           <li>
             <strong>Notifications</strong> — retained for 90 days, then automatically purged.
@@ -181,7 +157,6 @@ const SECTIONS = [
         <p>The following is stored in your browser's <code>localStorage</code>:</p>
         <ul>
           <li><code>srm_user</code>: Your email address (to identify you across page refreshes).</li>
-          <li><code>placement_user</code>: Your Haveloc username (for the placement dashboard).</li>
           <li>Faculty profile cache (24-hour TTL for faster loading).</li>
           <li>UI preferences (theme, collapsed menus, dismissed banners).</li>
         </ul>
@@ -201,10 +176,6 @@ const SECTIONS = [
           <li>
             <strong>No password storage:</strong> SRM passwords are never written to disk, database,
             or logs. They exist in memory only for the duration of the login request.
-          </li>
-          <li>
-            <strong>Encrypted placement credentials:</strong> Haveloc passwords are encrypted using
-            AES-256-CBC before being stored in Supabase. The encryption key is held server-side only.
           </li>
           <li>
             <strong>Row-Level Security (RLS):</strong> Supabase database access is restricted to the
@@ -249,17 +220,12 @@ const SECTIONS = [
             on their servers.
           </li>
           <li>
-            <strong>Haveloc placement portal (placements.haveloc.com):</strong> We authenticate using
-            your credentials and retrieve your placement data. Haveloc's privacy policy applies to
-            data stored on their servers.
-          </li>
-          <li>
             <strong>SRM public website (srmist.edu.in):</strong> We scrape publicly available faculty
             profile pages. No authentication is required for this data.
           </li>
           <li>
-            <strong>Supabase (supabase.com):</strong> Hosts our database for encrypted placement
-            credentials, attendance snapshots, job bookmarks, notifications, and faculty cache.
+            <strong>Supabase (supabase.com):</strong> Hosts our database for
+            attendance snapshots, notifications, and faculty cache.
             Supabase is SOC 2 Type II compliant and encrypts data at rest and in transit.
           </li>
           <li>
@@ -273,8 +239,8 @@ const SECTIONS = [
         </ul>
         <p>
           We are not responsible for the privacy practices or data handling of these third-party
-          services. Your use of SRM Academia and Haveloc is subject to their respective terms and
-          privacy policies.
+          services. Your use of SRM Academia is subject to its terms and
+          privacy policy.
         </p>
       </>
     ),
@@ -291,17 +257,13 @@ const SECTIONS = [
           </li>
           <li>
             <strong>Deletion:</strong> Logging out clears your session from server memory. You can
-            disconnect your placement account to erase encrypted credentials. You can request full
-            deletion of your Supabase records (attendance snapshots, bookmarks, notifications) by
+            request full
+            deletion of your Supabase records (attendance snapshots, notifications) by
             contacting us.
           </li>
           <li>
             <strong>Opt-out of notifications:</strong> You can disable specific notification types
-            (low attendance, new jobs, holidays, notices) from the notification settings panel.
-          </li>
-          <li>
-            <strong>Disconnect placement:</strong> You can disconnect your Haveloc placement account
-            at any time, which immediately erases your encrypted credentials from Supabase.
+            (low attendance, holidays) from the notification settings panel.
           </li>
           <li>
             <strong>Data portability:</strong> You can export your academic data by using the
