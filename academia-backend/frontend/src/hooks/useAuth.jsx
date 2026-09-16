@@ -1,5 +1,5 @@
-import { createContext, useContext, useState, useCallback, useEffect, useRef } from "react";
-import { api, setSessionToken, clearSessionToken } from "../api/client.js";
+import { createContext, useContext, useState, useCallback } from "react";
+import { api } from "../api/client.js";
 
 const AuthContext = createContext(null);
 
@@ -27,30 +27,17 @@ export function AuthProvider({ children }) {
     setUser(u);
   }, []);
 
-  const loginWithToken = useCallback((email, token) => {
-    const u = { email };
-    localStorage.setItem("srm_user", JSON.stringify(u));
-    localStorage.setItem("srm_session_token", token);
-    setSessionToken(token);
-    setUser(u);
-  }, []);
-
   const autoLogin = useCallback(async (email) => {
     setAutoLoggingIn(true);
     try {
-      const savedToken = localStorage.getItem("srm_session_token");
-      if (savedToken) setSessionToken(savedToken);
-      const result = await api.autoLogin(email);
-      // api.autoLogin already calls setSessionToken which saves to localStorage
+      await api.autoLogin(email);
       const u = { email };
-      localStorage.setItem("srm_user", JSON.stringify(u));
-      setUser(u);
+    localStorage.setItem("srm_user", JSON.stringify(u));
+    setUser(u);
       return true;
     } catch {
       // Auto-login failed — clear stored user so they see the login form
       localStorage.removeItem("srm_user");
-      localStorage.removeItem("srm_session_token");
-      clearSessionToken();
       setUser(null);
       return false;
     } finally {
@@ -71,8 +58,6 @@ export function AuthProvider({ children }) {
 
   const logout = useCallback(() => {
     localStorage.removeItem("srm_user");
-    localStorage.removeItem("srm_session_token");
-    clearSessionToken();
     setUser(null);
   }, []);
 
@@ -81,24 +66,9 @@ export function AuthProvider({ children }) {
     setPlacementUser(null);
   }, []);
 
-  // Proactive token refresh — refresh every 4 hours to keep session alive
-  const refreshTimerRef = useRef(null);
-  useEffect(() => {
-    if (!user?.email) return;
-    const refresh = async () => {
-      try {
-        await api.autoLogin(user.email);
-      } catch {
-        // Silent fail — 401 retry logic in client.js handles per-request refresh
-      }
-    };
-    refreshTimerRef.current = setInterval(refresh, 4 * 60 * 60 * 1000);
-    return () => clearInterval(refreshTimerRef.current);
-  }, [user?.email]);
-
   return (
     <AuthContext.Provider value={{
-      user, login, loginWithToken, autoLogin, logout,
+      user, login, autoLogin, logout,
       autoLoggingIn,
       placementUser, loginPlacement, logoutPlacement,
       placementConnected, setPlacementConnected,

@@ -1,19 +1,17 @@
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || "https://kolpioxbznypmvivbdhn.supabase.co";
-const SESSION_BASE = `${SUPABASE_URL}/functions/v1/placement-session`;
-const GATEWAY_BASE = `${SUPABASE_URL}/functions/v1/placement-gateway`;
+const BASE = "/placement-api";
 
-// Cache the academia email so we can send it as a header for data requests
+// Cache the academia email so we can send it as a header for notifications
 let _academiaEmail = null;
 export function setAcademiaEmail(email) { _academiaEmail = email; }
 
-async function sessionRequest(path, options = {}) {
+async function request(path, options = {}) {
   const headers = {
     "Content-Type": "application/json",
     ...(options.headers || {}),
   };
   if (_academiaEmail) headers["x-academia-email"] = _academiaEmail;
 
-  const res = await fetch(`${SESSION_BASE}${path}`, {
+  const res = await fetch(`${BASE}${path}`, {
     ...options,
     headers,
   });
@@ -34,149 +32,122 @@ async function sessionRequest(path, options = {}) {
   return data;
 }
 
-async function gatewayRequest(path, options = {}) {
-  const headers = {
-    "Content-Type": "application/json",
-    ...(options.headers || {}),
-  };
-  if (_academiaEmail) headers["x-academia-email"] = _academiaEmail;
-
-  const res = await fetch(`${GATEWAY_BASE}${path}`, {
-    ...options,
-    headers,
-  });
-
-  const text = await res.text();
-  if (!text) {
-    throw new Error(`Empty response from server (status ${res.status})`);
-  }
-
-  let data;
-  try {
-    data = JSON.parse(text);
-  } catch {
-    throw new Error(`Invalid JSON response (status ${res.status}): ${text.substring(0, 200)}`);
-  }
-
-  if (!data.success) throw new Error(data.error || data.message || "Request failed");
-  return data;
+function getAuthHeaders(username) {
+  return { "x-user-email": username };
 }
 
 export const placementApi = {
-  // ─── Session routes (placement-session Edge Function) ──────────────────────
-
   login: (username, password) =>
-    sessionRequest("/login", {
+    request("/login", {
       method: "POST",
       body: JSON.stringify({ username, password }),
     }),
 
   verifyMfa: (username, mfaToken, totpCode, emailOtp) =>
-    sessionRequest("/verify-mfa", {
+    request("/verify-mfa", {
       method: "POST",
       body: JSON.stringify({ username, mfaToken, totpCode, emailOtp }),
     }),
 
   sendMfaEmail: (mfaToken) =>
-    sessionRequest("/send-mfa-email", {
+    request("/send-mfa-email", {
       method: "POST",
       body: JSON.stringify({ mfaToken }),
     }),
 
+  // ─── One-time connect + auto-login (Supabase credential storage) ──────────
+
   /** Connect placement account and store encrypted credentials */
   connect: (academiaEmail, username, password) =>
-    sessionRequest("/connect", {
+    request("/connect", {
       method: "POST",
       body: JSON.stringify({ academiaEmail, username, password }),
     }),
 
   /** Attempt silent auto-login using stored credentials */
   autoLogin: (academiaEmail) =>
-    sessionRequest("/auto-login", {
+    request("/auto-login", {
       method: "POST",
       body: JSON.stringify({ academiaEmail }),
     }),
 
-  /** Remove stored credentials */
+  /** Remove stored credentials and destroy session */
   disconnect: (academiaEmail) =>
-    sessionRequest("/disconnect", {
+    request("/disconnect", {
       method: "POST",
       body: JSON.stringify({ academiaEmail }),
     }),
 
   /** Check if placement account is connected */
   connectionStatus: (academiaEmail) =>
-    sessionRequest("/connection-status", {
+    request("/connection-status", {
       headers: { "x-academia-email": academiaEmail },
     }),
 
   logout: (username) =>
-    sessionRequest("/logout", {
+    request("/logout", {
       method: "POST",
       body: JSON.stringify({ username }),
     }),
 
-  captchaInfo: () => sessionRequest("/captcha-info"),
-
-  // ─── Data routes (placement-gateway Edge Function — reads from cache) ───────
+  status: (username) =>
+    request(`/status`, { headers: getAuthHeaders(username) }),
 
   companies: (username, page = 0, size = 20) =>
-    gatewayRequest("/companies"),
+    request(`/companies?page=${page}&size=${size}`, { headers: getAuthHeaders(username) }),
 
   jobs: (username, page = 0, size = 20) =>
-    gatewayRequest("/jobs"),
+    request(`/jobs?page=${page}&size=${size}`, { headers: getAuthHeaders(username) }),
 
   tracker: (username) =>
-    gatewayRequest("/tracker"),
+    request(`/tracker`, { headers: getAuthHeaders(username) }),
 
   profile: (username) =>
-    gatewayRequest("/profile"),
+    request(`/profile`, { headers: getAuthHeaders(username) }),
 
   notices: (username, page = 0, size = 20) =>
-    gatewayRequest("/notices"),
+    request(`/notices?page=${page}&size=${size}`, { headers: getAuthHeaders(username) }),
 
   policies: (username) =>
-    gatewayRequest("/policies"),
+    request(`/policies`, { headers: getAuthHeaders(username) }),
 
   globalPolicy: (username) =>
-    gatewayRequest("/global-policy"),
+    request(`/global-policy`, { headers: getAuthHeaders(username) }),
 
   calendar: (username) =>
-    gatewayRequest("/calendar"),
+    request(`/calendar`, { headers: getAuthHeaders(username) }),
 
   insights: (username) =>
-    gatewayRequest("/insights"),
+    request(`/insights`, { headers: getAuthHeaders(username) }),
 
   studentStats: (username) =>
-    gatewayRequest("/student-stats"),
+    request(`/student-stats`, { headers: getAuthHeaders(username) }),
+
+  placementCycles: (username) =>
+    request(`/placement-cycles`, { headers: getAuthHeaders(username) }),
 
   socialMedia: (username) =>
-    gatewayRequest("/social-media"),
+    request(`/social-media`, { headers: getAuthHeaders(username) }),
 
-  syncStatus: () =>
-    gatewayRequest("/sync-status"),
+  all: (username) =>
+    request(`/all`, { headers: getAuthHeaders(username) }),
 
-  // ─── Authenticated actions (placement-session — live Haveloc session) ───────
-
-  /** No-op in cache architecture — data is refreshed every 5 min by sync */
   refresh: (username, section) =>
-    sessionRequest("/captcha-info").then(() => ({ success: true })),
-
-  /** Fetch student documents (resumes) — requires live session */
-  getResumes: (username) =>
-    sessionRequest("/resumes"),
-
-  /** Apply for a job — requires live session */
-  applyForJob: (username, jobUuid, jobId, answers, resumeName) =>
-    sessionRequest("/apply", {
+    request("/refresh", {
       method: "POST",
-      body: JSON.stringify({ academiaEmail: _academiaEmail, jobUuid, jobId, answers, resumeName }),
+      headers: getAuthHeaders(username),
+      body: JSON.stringify({ section }),
     }),
 
-  /** Fetch job view with questions — requires live session, caches result */
-  jobView: (username, jobUuid) =>
-    sessionRequest("/job-view", {
+  captchaInfo: () => request("/captcha-info"),
+
+  getResumes: (username) =>
+    request("/resumes", { headers: getAuthHeaders(username) }),
+
+  applyForJob: (username, jobUuid, jobId, answers, resumeName) =>
+    request("/apply", {
       method: "POST",
-      body: JSON.stringify({ academiaEmail: _academiaEmail, jobUuid }),
+      headers: getAuthHeaders(username),
+      body: JSON.stringify({ jobUuid, jobId, answers, resumeName }),
     }),
 };

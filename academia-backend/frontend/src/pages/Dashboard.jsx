@@ -139,7 +139,9 @@ export default function Dashboard() {
           }
           if (
             errorMsg.includes("backend running") ||
-            errorMsg.includes("Empty response")
+            errorMsg.includes("Empty response") ||
+            errorMsg.includes("unauthorized") ||
+            errorMsg.includes("not logged in")
           ) {
             logout();
             navigate("/login", { replace: true });

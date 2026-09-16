@@ -2,7 +2,8 @@
   "buildCommand": "npm run build",
   "outputDirectory": "academia-backend/frontend/dist",
   "rewrites": [
-    { "source": "/assets/(.*)", "destination": "/assets/$1" },
-    { "source": "/((?!assets/).*)", "destination": "/index.html" }
+    { "source": "/api/:path*", "destination": "https://academia-backend-5h12.onrender.com/:path*" },
+    { "source": "/placement-api/:path*", "destination": "https://placement-backend-xpub.onrender.com/:path*" },
+    { "source": "/(.*)", "destination": "/index.html" }
   ]
 }

@@ -114,31 +114,32 @@ export default function Attendance() {
             } catch (spErr) {
               if (!cancelled) {
                 const spMsg = spErr.message || "";
-                // Show SP login prompt for any SP-related failure (not migrated, no session, etc.)
-                setShowSpLogin(true);
-                setSpLoading(false);
-                setLoading(false);
-                setSpError("Student Portal login required. Your SP password may be different from your academia password.");
+                if (spMsg.includes("No student portal session") || spMsg.includes("Please login")) {
+                  // SP login hasn't completed or failed — show login prompt
+                  setShowSpLogin(true);
+                  setSpLoading(false);
+                  setLoading(false);
+                  setSpError("Student Portal login required. Your SP password may be different from your academia password.");
+                } else {
+                  setSpLoading(false);
+                  setLoading(false);
+                  setSpError(spMsg || "Failed to fetch from Student Portal.");
+                }
               }
             }
           }, 5000);
           return;
         }
 
-        // If server is down, redirect to login
+        // If server is down or other auth error, redirect to login
         if (
           errorMsg.includes("backend running") ||
-          errorMsg.includes("Empty response")
+          errorMsg.includes("Empty response") ||
+          errorMsg.includes("unauthorized") ||
+          errorMsg.includes("not logged in")
         ) {
           logout();
           navigate("/login", { replace: true });
-          return;
-        }
-        // If no attendance data found (404), show fallback UI instead of error
-        if (errorMsg.includes("No attendance data found") || errorMsg.includes("not found")) {
-          setRecords([]);
-          setSpError("No attendance data available yet. Try fetching from the Student Portal, or check back after the next sync.");
-          setLoading(false);
           return;
         }
         setError(err.message);
@@ -171,9 +172,6 @@ export default function Attendance() {
     setSpError("");
     try {
       const data = await api.spAttendance(user.email);
-      if (!data.success) {
-        throw new Error(data.error || "SP fetch failed");
-      }
       if (data.attendance && data.attendance.length > 0) {
         setRecords(data.attendance);
         setSpSource(true);
@@ -183,9 +181,13 @@ export default function Attendance() {
         setSpError("Student portal returned no attendance data.");
       }
     } catch (err) {
-      // Show SP login prompt for any SP fetch failure
-      setShowSpLogin(true);
-      setSpError("Student Portal login required. Your SP password may be different from your academia password.");
+      const msg = err.message || "Failed to fetch from student portal";
+      if (msg.includes("No student portal session") || msg.includes("Please login")) {
+        setShowSpLogin(true);
+        setSpError("Student Portal login required. Your SP password may be different from your academia password.");
+      } else {
+        setSpError(msg);
+      }
     } finally {
       setSpLoading(false);
     }
@@ -200,10 +202,15 @@ export default function Attendance() {
     setSpLoginError("");
     try {
       const result = await api.spLogin(user.email, spPwd);
-      // spLogin stores the SP password — attendance will be fetched on next sync
-      setShowSpLogin(false);
-      setSpPwd("");
-      setSpError("Student Portal password saved. Attendance will be available after the next sync (within 2 hours). You can refresh this page later.");
+      if (result.attendance && result.attendance.length > 0) {
+        setRecords(result.attendance);
+        setSpSource(true);
+        setShowSpLogin(false);
+        setSpError("");
+        setSpPwd("");
+      } else {
+        setSpLoginError("Login successful but no attendance data found. Try refreshing.");
+      }
     } catch (err) {
       setSpLoginError(err.message || "Student Portal login failed. Check your password.");
     } finally {

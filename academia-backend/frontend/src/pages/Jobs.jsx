@@ -128,7 +128,7 @@ export default function Jobs() {
   };
 
   const jobs = useMemo(() => {
-    const list = data?.jobs?._embedded?.entityModels || data?._embedded?.entityModels || [];
+    const list = data?._embedded?.entityModels || [];
     let filtered = list;
     if (filter === "eligible") filtered = list.filter((j) => j.isEligible);
     else if (filter === "applied") filtered = list.filter((j) => j.isApplied);
@@ -191,7 +191,7 @@ export default function Jobs() {
     );
   }
 
-  const allJobs = data?.jobs?._embedded?.entityModels || data?._embedded?.entityModels || [];
+  const allJobs = data?._embedded?.entityModels || [];
   const counts = {
     all: allJobs.length,
     eligible: allJobs.filter((j) => j.isEligible).length,
