@@ -59,3 +59,4 @@ frontend/node_modules/.vite/
 supabase/.branches
 supabase/.temp
 .vercel/
+tracked=pydeps/
