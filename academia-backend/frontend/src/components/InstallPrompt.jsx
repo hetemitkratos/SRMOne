@@ -90,23 +90,25 @@ export default function InstallPrompt() {
         transform: "translateX(-50%)",
         bottom: "max(16px, env(safe-area-inset-bottom))",
         zIndex: 9999,
-        maxWidth: "min(92vw, 420px)",
+        width: "min(94vw, 400px)",
       }}
     >
-      <div className="flex items-center gap-3 rounded-2xl bg-[#111827] text-white shadow-2xl border border-white/10 px-4 py-3">
-        <img src="/icon-192.png" alt="SRM One" className="w-9 h-9 rounded-lg" />
+      <div className="flex items-center gap-3 rounded-2xl bg-[#111827] text-white shadow-2xl border border-white/10 px-3.5 py-3">
+        <img
+          src="/icon-192.png"
+          alt="SRM One"
+          className="w-10 h-10 rounded-xl shrink-0"
+        />
         <div className="flex-1 min-w-0">
           <p className="text-sm font-bold leading-tight">Install SRM One</p>
-          <p className="text-[11px] text-white/60 leading-snug">
-            {iosHint
-              ? "Tap Share, then “Add to Home Screen”."
-              : "Add it to your home screen — opens like an app, works offline."}
+          <p className="text-[11px] text-white/60 leading-snug truncate">
+            {iosHint ? "Share → Add to Home Screen" : "Opens like an app"}
           </p>
         </div>
         {!iosHint && (
           <button
             onClick={install}
-            className="inline-flex items-center gap-1.5 rounded-full bg-white text-[#111827] text-xs font-bold px-3.5 py-2 hover:bg-white/90 transition-colors whitespace-nowrap"
+            className="shrink-0 inline-flex items-center gap-1.5 rounded-full bg-white text-[#111827] text-xs font-bold px-3.5 py-2 hover:bg-white/90 transition-colors whitespace-nowrap"
           >
             <Download size={14} /> Install
           </button>
@@ -114,9 +116,9 @@ export default function InstallPrompt() {
         <button
           onClick={dismiss}
           aria-label="Dismiss"
-          className="text-white/50 hover:text-white transition-colors"
+          className="shrink-0 text-white/50 hover:text-white transition-colors p-0.5"
         >
-          <X size={16} />
+          <X size={18} />
         </button>
       </div>
     </div>
