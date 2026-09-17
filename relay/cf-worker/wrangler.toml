@@ -1,0 +1,7 @@
+name = "sp-relay"
+main = "src/index.js"
+compatibility_date = "2026-09-01"
+
+# SP_RELAY_SECRET is a secret binding — set it with:
+#   wrangler secret put SP_RELAY_SECRET
+# (same value as on Render / Vercel)
