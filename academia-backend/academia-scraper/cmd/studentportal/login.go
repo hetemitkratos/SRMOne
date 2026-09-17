@@ -90,6 +90,7 @@ func spLogin(client *SPClient, email, password, captchaAPIKey, captchaAPIURL str
 // does not consume a login attempt.
 func spPrepareLogin(client *SPClient) (*spLoginContext, error) {
 	// Step 1: GET login page to establish session cookies
+	logEgressIP("before login page GET")
 	loginPageResp, err := client.DoRequest("GET", spLoginURL, nil, "", nil, true)
 	if err != nil {
 		return nil, fmt.Errorf("could not fetch login page: %w", err)
@@ -135,6 +136,7 @@ func spPrepareLogin(client *SPClient) (*spLoginContext, error) {
 	}
 	domainProof := base64.StdEncoding.EncodeToString([]byte(config.Nonce + ":sp.srmist.edu.in"))
 	fmt.Fprintf(os.Stderr, "[spLogin] fetching captcha image from %s (nonce=%s)\n", captchaImgURL, config.Nonce)
+	logEgressIP("before captcha GET")
 	captchaImgResp, err := client.DoRequest("GET", captchaImgURL, nil, "", map[string]string{
 		"Referer":        spLoginURL,
 		"Accept":         "image/png, image/jpeg, image/svg+xml, image/*",
@@ -226,6 +228,8 @@ func spSubmitLogin(client *SPClient, ctx *spLoginContext, email, password, solve
 
 	fmt.Fprintf(os.Stderr, "[spLogin] posting to %s with %d fields\n", spLoginPostURL, len(formParts))
 	fmt.Fprintf(os.Stderr, "[spLogin] cookies: %s\n", client.jar.CookieHeader())
+	sessionBefore := client.jar.GetCookie("JSESSIONID")
+	logEgressIP("before login POST")
 
 	loginResp, err := client.DoRequest("POST", spLoginPostURL, body, "application/x-www-form-urlencoded", map[string]string{
 		"Referer":                   spLoginURL,
@@ -244,6 +248,11 @@ func spSubmitLogin(client *SPClient, ctx *spLoginContext, email, password, solve
 
 	fmt.Fprintf(os.Stderr, "[spLogin] post-login URL=%s status=%d hasJSESSIONID=%v bodyLen=%d\n",
 		loginResp.URL, loginResp.StatusCode, client.jar.HasCookie("JSESSIONID"), len(loginResp.Body))
+	// A new JSESSIONID after the POST means the portal did not recognise the
+	// session that generated the captcha — the answer can't have matched.
+	if after := client.jar.GetCookie("JSESSIONID"); after != sessionBefore {
+		fmt.Fprintf(os.Stderr, "[spLogin] WARNING: JSESSIONID changed during login POST (%s -> %s)\n", sessionBefore, after)
+	}
 
 	// Debug: log first 500 chars of response body to diagnose failure
 	bodyPreview := string(loginResp.Body)

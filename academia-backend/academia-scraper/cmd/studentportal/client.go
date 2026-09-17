@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"net/url"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -228,6 +229,26 @@ func (c *SPClient) DoRequest(method, rawURL string, body []byte, contentType str
 	}
 
 	return SPRequestSnapshot{}, fmt.Errorf("too many redirects for %s", rawURL)
+}
+
+// logEgressIP prints the public IP this process is currently egressing from.
+// Enabled with SP_DIAG_IP=1. Each call opens a fresh connection, so it shows
+// whether the host's NAT rotates source IPs between requests.
+func logEgressIP(label string) {
+	if os.Getenv("SP_DIAG_IP") == "" {
+		return
+	}
+	req := fasthttp.AcquireRequest()
+	resp := fasthttp.AcquireResponse()
+	defer fasthttp.ReleaseRequest(req)
+	defer fasthttp.ReleaseResponse(resp)
+	req.SetRequestURI("https://api.ipify.org?format=text")
+	req.Header.Set("Connection", "close")
+	if err := fasthttp.DoTimeout(req, resp, 10*time.Second); err != nil {
+		fmt.Fprintf(os.Stderr, "[spDiag] %s egress IP lookup failed: %v\n", label, err)
+		return
+	}
+	fmt.Fprintf(os.Stderr, "[spDiag] %s egress IP=%s\n", label, strings.TrimSpace(string(resp.Body())))
 }
 
 func isSPRedirect(status int) bool {
