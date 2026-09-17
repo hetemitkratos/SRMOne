@@ -23,11 +23,12 @@ echo "=== Installing Node dependencies ==="
 cd academia-backend
 npm install --omit=dev
 
-echo "=== Building academia scraper binary ==="
+echo "=== Building academia scraper binaries ==="
 cd academia-scraper
 go mod download
 go build -o loginprobe ./cmd/loginprobe
-echo "Acadia scraper binary built"
+go build -o studentportal ./cmd/studentportal
+echo "Academia scraper binaries built"
 
 echo "=== Building faculty scraper binary ==="
 cd ../faculty-scraper
