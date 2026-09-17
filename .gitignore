@@ -39,6 +39,9 @@ jd_*.txt
 
 # Images (not part of source)
 *.png
+# ...except the shipped frontend brand assets
+!academia-backend/frontend/public/assets/logo.png
+!academia-backend/frontend/public/favicon.png
 
 # IDE / OS
 .DS_Store

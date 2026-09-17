@@ -148,7 +148,7 @@ function MarginCalculator({ records }) {
       {/* Target selector — dark hero card matching app style */}
       <div className="bg-[#1A1A1A] rounded-[32px] p-6 md:p-8 relative overflow-hidden">
         <div className="absolute inset-y-0 right-0 h-full w-[40%] opacity-80 mix-blend-screen pointer-events-none p-4 hidden sm:flex items-center justify-end">
-          <img src="/assets/target-achieved_o5y5.svg" alt="Target" className="h-full w-full object-contain object-right" />
+          <img src="/assets/target_d6hf.svg" alt="Target" className="h-full w-full object-contain object-right" />
         </div>
         <div className="relative z-10 w-full md:w-auto">
           <div className="flex items-center gap-2 mb-4">
