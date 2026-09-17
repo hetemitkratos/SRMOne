@@ -248,24 +248,18 @@ func spSubmitLogin(client *SPClient, ctx *spLoginContext, email, password, solve
 
 	fmt.Fprintf(os.Stderr, "[spLogin] post-login URL=%s status=%d hasJSESSIONID=%v bodyLen=%d\n",
 		loginResp.URL, loginResp.StatusCode, client.jar.HasCookie("JSESSIONID"), len(loginResp.Body))
-	// A new JSESSIONID after the POST means the portal did not recognise the
-	// session that generated the captcha — the answer can't have matched.
-	if after := client.jar.GetCookie("JSESSIONID"); after != sessionBefore {
-		fmt.Fprintf(os.Stderr, "[spLogin] WARNING: JSESSIONID changed during login POST (%s -> %s)\n", sessionBefore, after)
-	}
-
-	// Debug: log first 500 chars of response body to diagnose failure
-	bodyPreview := string(loginResp.Body)
-	if len(bodyPreview) > 500 {
-		bodyPreview = bodyPreview[:500]
-	}
-	fmt.Fprintf(os.Stderr, "[spLogin] response preview: %s\n", bodyPreview)
 	_ = os.WriteFile("sp_login_response.html", loginResp.Body, 0644)
 
 	if isSPLoginFailed(loginResp.Body, loginResp.URL) {
 		portalErr := extractSPAlertText(loginResp.Body)
 		if portalErr != "" {
 			fmt.Fprintf(os.Stderr, "[spLogin] portal error: %s\n", portalErr)
+		}
+		// The portal rotates JSESSIONID on success (session fixation guard);
+		// a rotation on failure means the captcha-bearing session was not
+		// recognised, so the answer could never have matched.
+		if after := client.jar.GetCookie("JSESSIONID"); after != sessionBefore {
+			fmt.Fprintf(os.Stderr, "[spLogin] WARNING: JSESSIONID changed on failed login POST (%s -> %s)\n", sessionBefore, after)
 		}
 		return loginResp, fmt.Errorf("login failed: invalid credentials or captcha")
 	}

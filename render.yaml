@@ -39,3 +39,7 @@ services:
         sync: false  # API key for captcha solving service (SP login)
       - key: CAPTCHA_SOLVE_API_URL
         sync: false  # URL for captcha solving API (SP login)
+      - key: SP_RELAY_URL
+        sync: false  # https://srmone.in/api/sp-relay — Mumbai relay; the portal rejects logins from Render's US IP
+      - key: SP_RELAY_SECRET
+        sync: false  # shared secret, must match SP_RELAY_SECRET on the Vercel frontend project

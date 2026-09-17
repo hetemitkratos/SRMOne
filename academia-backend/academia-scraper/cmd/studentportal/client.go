@@ -1,7 +1,12 @@
 package main
 
 import (
+	"bytes"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"net/url"
 	"os"
 	"strings"
@@ -100,7 +105,7 @@ func (j *SPCookieJar) GetCookie(name string) string {
 type SPClient struct {
 	jar       *SPCookieJar
 	userAgent string
-	client    *fasthttp.Client
+	relay     *spRelay // non-nil when SP_RELAY_URL is set
 }
 
 const spHost = "sp.srmist.edu.in"
@@ -108,17 +113,14 @@ const spBaseURL = "https://sp.srmist.edu.in"
 const spUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
 
 func NewSPClient() *SPClient {
+	relay := newSPRelayFromEnv()
+	if relay != nil {
+		fmt.Fprintf(os.Stderr, "[spClient] routing portal traffic via relay %s\n", relay.url)
+	}
 	return &SPClient{
 		jar:       NewSPCookieJar(),
 		userAgent: spUserAgent,
-		client: &fasthttp.Client{
-			MaxConnsPerHost:        64,
-			MaxIdleConnDuration:    90 * time.Second,
-			ReadTimeout:            30 * time.Second,
-			WriteTimeout:           30 * time.Second,
-			MaxConnWaitTimeout:     10 * time.Second,
-			DisablePathNormalizing: true,
-		},
+		relay:     relay,
 	}
 }
 
@@ -136,80 +138,52 @@ func (c *SPClient) DoRequest(method, rawURL string, body []byte, contentType str
 	currentBody := append([]byte(nil), body...)
 
 	for redirects := 0; redirects < 10; redirects++ {
-		req := fasthttp.AcquireRequest()
-		resp := fasthttp.AcquireResponse()
-
-		req.SetRequestURI(currentURL)
-		req.Header.SetMethod(currentMethod)
-		req.Header.Set("User-Agent", c.userAgent)
-		req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
-		req.Header.Set("Accept-Language", "en-US,en;q=0.9")
-		req.Header.Set("Connection", "close") // Disable keep-alive to prevent server dropped connection errors
-
+		headers := map[string]string{
+			"User-Agent":      c.userAgent,
+			"Accept":          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+			"Accept-Language": "en-US,en;q=0.9",
+		}
 		if contentType != "" {
-			req.Header.Set("Content-Type", contentType)
+			headers["Content-Type"] = contentType
 		}
-
 		if cookieStr := c.jar.CookieHeader(); cookieStr != "" {
-			req.Header.Set("Cookie", cookieStr)
+			headers["Cookie"] = cookieStr
 		}
-
 		for key, val := range extraHeaders {
-			req.Header.Set(key, val)
+			headers[key] = val
 		}
 
-		if len(currentBody) > 0 {
-			req.SetBody(currentBody)
-		}
-
+		var raw rawResponse
 		var err error
-		for attempt := 0; attempt < 3; attempt++ {
-			err = fasthttp.Do(req, resp)
-			if err == nil {
-				break
-			}
-			if strings.Contains(err.Error(), "the server closed connection") {
-				time.Sleep(200 * time.Millisecond)
-				continue
-			}
-			break
+		if c.relay != nil {
+			raw, err = c.relay.send(currentMethod, currentURL, headers, currentBody)
+		} else {
+			raw, err = sendDirect(currentMethod, currentURL, headers, currentBody)
 		}
-
 		if err != nil {
-			fasthttp.ReleaseRequest(req)
-			fasthttp.ReleaseResponse(resp)
 			return SPRequestSnapshot{}, fmt.Errorf("request to %s failed: %w", currentURL, err)
 		}
 
-		var setCookies []string
-		resp.Header.VisitAll(func(key, value []byte) {
-			if strings.EqualFold(string(key), "Set-Cookie") {
-				setCookies = append(setCookies, string(value))
-			}
-		})
-		if len(setCookies) > 0 {
-			c.jar.SetCookies(setCookies)
+		if len(raw.setCookies) > 0 {
+			c.jar.SetCookies(raw.setCookies)
 		}
 
-		statusCode := resp.StatusCode()
-		location := string(resp.Header.Peek("Location"))
-		respBody := append([]byte(nil), resp.Body()...)
-
-		headers := make(map[string]string)
-		resp.Header.VisitAll(func(key, value []byte) {
-			headers[string(key)] = string(value)
-		})
+		statusCode := raw.status
+		location := ""
+		for k, v := range raw.headers {
+			if strings.EqualFold(k, "Location") {
+				location = v
+				break
+			}
+		}
 
 		snap := SPRequestSnapshot{
 			StatusCode: statusCode,
 			URL:        currentURL,
 			Location:   location,
-			Body:       respBody,
-			Headers:    headers,
+			Body:       raw.body,
+			Headers:    raw.headers,
 		}
-
-		fasthttp.ReleaseRequest(req)
-		fasthttp.ReleaseResponse(resp)
 
 		if followRedirects && isSPRedirect(statusCode) && location != "" {
 			nextURL, err := resolveSPURL(currentURL, location)
@@ -231,11 +205,166 @@ func (c *SPClient) DoRequest(method, rawURL string, body []byte, contentType str
 	return SPRequestSnapshot{}, fmt.Errorf("too many redirects for %s", rawURL)
 }
 
+// rawResponse is what a transport returns for one HTTP hop (no redirect
+// following, no cookie handling — DoRequest does both).
+type rawResponse struct {
+	status     int
+	headers    map[string]string
+	setCookies []string
+	body       []byte
+}
+
+// sendDirect performs the request from this process with fasthttp.
+func sendDirect(method, rawURL string, headers map[string]string, body []byte) (rawResponse, error) {
+	req := fasthttp.AcquireRequest()
+	resp := fasthttp.AcquireResponse()
+	defer fasthttp.ReleaseRequest(req)
+	defer fasthttp.ReleaseResponse(resp)
+
+	req.SetRequestURI(rawURL)
+	req.Header.SetMethod(method)
+	req.Header.Set("Connection", "close") // Disable keep-alive to prevent server dropped connection errors
+	for key, val := range headers {
+		req.Header.Set(key, val)
+	}
+	if len(body) > 0 {
+		req.SetBody(body)
+	}
+
+	var err error
+	for attempt := 0; attempt < 3; attempt++ {
+		err = fasthttp.Do(req, resp)
+		if err == nil {
+			break
+		}
+		if strings.Contains(err.Error(), "the server closed connection") {
+			time.Sleep(200 * time.Millisecond)
+			continue
+		}
+		break
+	}
+	if err != nil {
+		return rawResponse{}, err
+	}
+
+	out := rawResponse{
+		status:  resp.StatusCode(),
+		headers: make(map[string]string),
+		body:    append([]byte(nil), resp.Body()...),
+	}
+	resp.Header.VisitAll(func(key, value []byte) {
+		if strings.EqualFold(string(key), "Set-Cookie") {
+			out.setCookies = append(out.setCookies, string(value))
+			return
+		}
+		out.headers[string(key)] = string(value)
+	})
+	return out, nil
+}
+
+// spRelay forwards each hop through the Vercel function at
+// academia-backend/frontend/api/sp-relay.js, which runs in Mumbai.
+// sp.srmist.edu.in answers login POSTs from Render's US egress IP with a
+// generic "Invalid credentials" page regardless of the captcha/password,
+// so production must reach the portal from an Indian IP.
+type spRelay struct {
+	url    string
+	secret string
+	client *http.Client
+}
+
+func newSPRelayFromEnv() *spRelay {
+	relayURL := strings.TrimSpace(os.Getenv("SP_RELAY_URL"))
+	if relayURL == "" {
+		return nil
+	}
+	return &spRelay{
+		url:    relayURL,
+		secret: strings.TrimSpace(os.Getenv("SP_RELAY_SECRET")),
+		client: &http.Client{Timeout: 60 * time.Second},
+	}
+}
+
+type relayRequest struct {
+	Method  string            `json:"method"`
+	URL     string            `json:"url"`
+	Headers map[string]string `json:"headers"`
+	Body    string            `json:"body,omitempty"`
+}
+
+type relayResponse struct {
+	Status    int               `json:"status"`
+	Headers   map[string]string `json:"headers"`
+	SetCookie []string          `json:"setCookie"`
+	Body      string            `json:"body"`
+	Error     string            `json:"error,omitempty"`
+}
+
+func (r *spRelay) send(method, rawURL string, headers map[string]string, body []byte) (rawResponse, error) {
+	payload, err := json.Marshal(relayRequest{
+		Method:  method,
+		URL:     rawURL,
+		Headers: headers,
+		Body:    base64.StdEncoding.EncodeToString(body),
+	})
+	if err != nil {
+		return rawResponse{}, fmt.Errorf("relay encode: %w", err)
+	}
+
+	req, err := http.NewRequest("POST", r.url, bytes.NewReader(payload))
+	if err != nil {
+		return rawResponse{}, fmt.Errorf("relay request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Relay-Secret", r.secret)
+
+	resp, err := r.client.Do(req)
+	if err != nil {
+		return rawResponse{}, fmt.Errorf("relay transport: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return rawResponse{}, fmt.Errorf("relay read: %w", err)
+	}
+
+	var rr relayResponse
+	if err := json.Unmarshal(respBytes, &rr); err != nil {
+		preview := string(respBytes)
+		if len(preview) > 200 {
+			preview = preview[:200]
+		}
+		return rawResponse{}, fmt.Errorf("relay returned non-JSON (HTTP %d): %s", resp.StatusCode, preview)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return rawResponse{}, fmt.Errorf("relay error (HTTP %d): %s", resp.StatusCode, rr.Error)
+	}
+
+	decoded, err := base64.StdEncoding.DecodeString(rr.Body)
+	if err != nil {
+		return rawResponse{}, fmt.Errorf("relay body decode: %w", err)
+	}
+	if rr.Headers == nil {
+		rr.Headers = map[string]string{}
+	}
+	return rawResponse{
+		status:     rr.Status,
+		headers:    rr.Headers,
+		setCookies: rr.SetCookie,
+		body:       decoded,
+	}, nil
+}
+
 // logEgressIP prints the public IP this process is currently egressing from.
 // Enabled with SP_DIAG_IP=1. Each call opens a fresh connection, so it shows
 // whether the host's NAT rotates source IPs between requests.
 func logEgressIP(label string) {
 	if os.Getenv("SP_DIAG_IP") == "" {
+		return
+	}
+	if os.Getenv("SP_RELAY_URL") != "" {
+		fmt.Fprintf(os.Stderr, "[spDiag] %s: portal traffic goes via relay, local egress IP not relevant\n", label)
 		return
 	}
 	req := fasthttp.AcquireRequest()

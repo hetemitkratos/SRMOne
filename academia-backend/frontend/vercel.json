@@ -2,6 +2,7 @@
   "buildCommand": "npm install && npm run build",
   "outputDirectory": "dist",
   "framework": "vite",
+  "regions": ["bom1"],
   "crons": [
     {
       "path": "/api/health",
