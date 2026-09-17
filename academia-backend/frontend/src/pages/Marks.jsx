@@ -14,6 +14,8 @@ export default function Marks() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [expanded, setExpanded] = useState({});
+  const [spSource, setSpSource] = useState(false);
+  const [spNeedsReconnect, setSpNeedsReconnect] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -41,8 +43,53 @@ export default function Marks() {
             courseTitle: titleMap[m.courseCode] || m.courseTitle
           }));
 
-          setMarks(enrichedMarks);
-          setLoading(false);
+          // Academia no longer exposes marks for many students — fall back to
+          // the Student Portal internal marks (course totals) when empty.
+          if (enrichedMarks.length === 0) {
+            try {
+              const spRes = await api.spMarks(user.email);
+              if (spRes.captchaRequired) {
+                if (!cancelled) {
+                  setSpNeedsReconnect(true);
+                  setMarks([]);
+                  setLoading(false);
+                }
+                return;
+              }
+              const spMarks = (spRes.marks || []).map((m) => {
+                const obtained = parseFloat(m.obtained);
+                const max = parseFloat(m.maxMark);
+                const pct = max > 0 && !isNaN(obtained) ? ((obtained / max) * 100).toFixed(1) : null;
+                return {
+                  courseCode: m.courseCode,
+                  courseTitle: titleMap[m.courseCode] || m.courseTitle || m.courseCode,
+                  courseType: "Internal",
+                  source: "student_portal",
+                  tests: [
+                    {
+                      testName: "Total (Internal)",
+                      marksObtained: m.obtained,
+                      maxMarks: m.maxMark,
+                      percentage: pct,
+                    },
+                  ],
+                };
+              });
+              if (!cancelled) {
+                setMarks(spMarks);
+                setSpSource(spMarks.length > 0);
+                setLoading(false);
+              }
+              return;
+            } catch {
+              /* fall through to showing academia's empty result */
+            }
+          }
+
+          if (!cancelled) {
+            setMarks(enrichedMarks);
+            setLoading(false);
+          }
         }
       } catch (err) {
         if (!cancelled) {
@@ -99,7 +146,29 @@ export default function Marks() {
         </div>
       </div>
 
-      {marks.length === 0 ? (
+      {spSource && marks.length > 0 && (
+        <div className="flex items-center gap-2 text-xs font-semibold text-slate-500 -mt-2">
+          <span className="w-2 h-2 rounded-full bg-mint" />
+          Internal marks from Student Portal
+        </div>
+      )}
+
+      {spNeedsReconnect ? (
+        <div className="bg-white rounded-[32px] p-10 text-center border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.02)]">
+          <FileText className="w-12 h-12 text-slate-300 mx-auto mb-3" />
+          <p className="text-slate-700 font-bold mb-1">Reconnect the Student Portal</p>
+          <p className="text-slate-500 text-sm mb-4">
+            Marks come from the SRM Student Portal. Open the Attendance tab and solve the
+            captcha once to reconnect — marks will then load here automatically.
+          </p>
+          <button
+            onClick={() => navigate("/dashboard/attendance")}
+            className="inline-flex items-center gap-2 px-5 py-3 bg-[#1A1A1A] text-white text-sm font-bold rounded-full hover:bg-[#333] transition-colors"
+          >
+            Go to Attendance
+          </button>
+        </div>
+      ) : marks.length === 0 ? (
         <div className="bg-white rounded-[32px] p-12 text-center border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.02)]">
           <FileText className="w-12 h-12 text-slate-300 mx-auto mb-3" />
           <p className="text-slate-500 font-medium">No marks data available</p>

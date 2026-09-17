@@ -126,6 +126,8 @@ export const api = {
     }),
   spAttendance: (email) =>
     request(`/sp/attendance?email=${encodeURIComponent(email)}`),
+  spMarks: (email) =>
+    request(`/sp/marks?email=${encodeURIComponent(email)}`),
   spStudent: (email) =>
     request(`/sp/student?email=${encodeURIComponent(email)}`),
 };

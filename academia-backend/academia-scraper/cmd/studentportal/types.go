@@ -58,6 +58,13 @@ type SPAttendanceRecord struct {
 	AttendancePct  string `json:"attendancePct"`
 }
 
+type SPMarkRecord struct {
+	CourseCode  string `json:"courseCode"`
+	CourseTitle string `json:"courseTitle"`
+	Obtained    string `json:"obtained"`
+	MaxMark     string `json:"maxMark"`
+}
+
 type SPStudentInfo struct {
 	Name      string `json:"name,omitempty"`
 	RegNumber string `json:"regNumber,omitempty"`
@@ -81,5 +88,6 @@ type SPResponse struct {
 	LoginState     *SPPendingLogin      `json:"loginState,omitempty"`
 	StudentInfo    SPStudentInfo        `json:"studentInfo,omitempty"`
 	Attendance     []SPAttendanceRecord `json:"attendance,omitempty"`
+	Marks          []SPMarkRecord       `json:"marks,omitempty"`
 	Error          string               `json:"error,omitempty"`
 }

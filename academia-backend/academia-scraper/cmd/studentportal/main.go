@@ -101,6 +101,9 @@ func spRun(req SPRequest, mode string) SPResponse {
 			resp.Error = err.Error()
 			return resp
 		}
+		if marks, mErr := spFetchInternalMarks(client); mErr == nil {
+			resp.Marks = marks
+		}
 		resp.Success = true
 		resp.Classification = spClassAuthenticated
 		resp.Attendance = attendance
@@ -172,9 +175,13 @@ func spRun(req SPRequest, mode string) SPResponse {
 		return resp
 	}
 
+	if marks, mErr := spFetchInternalMarks(client); mErr == nil {
+		resp.Marks = marks
+	}
 	resp.Success = true
 	resp.Attendance = attendance
 	resp.StudentInfo = studentInfo
 	resp.Cookies = client.jar.Serialized()
+
 	return resp
 }

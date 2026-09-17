@@ -92,6 +92,7 @@ function storeSPSessionResult(email, parsed) {
     cookies: parsed.cookies || [],
     lastActive: Date.now(),
     attendance: parsed.attendance || [],
+    marks: parsed.marks || [],
     studentInfo: parsed.studentInfo || {},
   };
   const session = sessions[email];
@@ -103,6 +104,7 @@ function storeSPSessionResult(email, parsed) {
       spLoginAt: Date.now(),
     };
     if (parsed.attendance?.length) session.cache.spAttendance = parsed.attendance;
+    if (parsed.marks?.length) session.cache.spMarks = parsed.marks;
     if (parsed.studentInfo?.name) session.cache.spStudentInfo = parsed.studentInfo;
   }
   persistSPSession(email);
@@ -1254,7 +1256,7 @@ app.use(express.json({ limit: "10kb" }));
 const RESTORE_PATHS = new Set([
   "/attendance", "/marks", "/timetable", "/student", "/calendar", "/init",
   "/summary", "/all", "/schedule", "/faculty-photo", "/student-photo",
-  "/sp/attendance", "/sp/student",
+  "/sp/attendance", "/sp/marks", "/sp/student",
 ]);
 app.use(async (req, _res, next) => {
   if (req.method !== "GET" || !RESTORE_PATHS.has(req.path)) return next();
@@ -3156,6 +3158,10 @@ app.get("/sp/attendance", async (req, res) => {
       if (parsed?.success && parsed.attendance?.length) {
         if (spSess) { spSess.attendance = parsed.attendance; spSess.lastActive = Date.now(); }
         if (session) session.cache.spAttendance = parsed.attendance;
+        if (parsed.marks?.length) {
+          if (spSess) spSess.marks = parsed.marks;
+          if (session) session.cache.spMarks = parsed.marks;
+        }
         return res.ok({ attendance: parsed.attendance });
       }
       log("SP_ATTENDANCE", `SP cookies for ${email} rejected (${parsed?.error || "no data"}) — re-logging in`);
@@ -3178,6 +3184,65 @@ app.get("/sp/attendance", async (req, res) => {
     return res.fail(r.status, r.body.error || "Failed to fetch attendance from student portal");
   } catch (err) {
     log("SP_ATTENDANCE", `Error for ${email}: ${err.message}`);
+    return res.fail(500, err.message);
+  }
+});
+
+/**
+ * GET /sp/marks?email=
+ * Internal marks from the SRM Student Portal (academia no longer exposes
+ * them). Cache-first; on a cold/expired SP session, re-login with the
+ * stored SP password (captcha only if auto-solve fails).
+ */
+app.get("/sp/marks", async (req, res) => {
+  const { email } = req.query;
+  if (!email) return res.fail(400, "email query param is required");
+
+  try {
+    await restoreSPSession(email).catch(() => false);
+    const spSess = spSessions[email];
+    const session = sessions[email];
+    const spCookies = spSess?.cookies || session?.spCookies || [];
+
+    const cachedMarks = spSess?.marks?.length ? spSess.marks : session?.cache?.spMarks;
+    if (cachedMarks?.length) {
+      if (spSess) spSess.lastActive = Date.now();
+      return res.ok({ marks: cachedMarks, fromCache: true });
+    }
+
+    if (spCookies.length) {
+      const { parsed } = await runStudentPortalScraper({ mode: "fetch", email, cookies: spCookies });
+      if (parsed?.success) {
+        if (parsed.attendance?.length) {
+          if (spSess) spSess.attendance = parsed.attendance;
+          if (session) session.cache.spAttendance = parsed.attendance;
+        }
+        if (parsed.marks?.length) {
+          if (spSess) { spSess.marks = parsed.marks; spSess.lastActive = Date.now(); }
+          if (session) session.cache.spMarks = parsed.marks;
+          return res.ok({ marks: parsed.marks });
+        }
+        return res.ok({ marks: [] });
+      }
+      log("SP_MARKS", `SP cookies for ${email} rejected (${parsed?.error || "no data"}) — re-logging in`);
+      delete spSessions[email];
+      if (session) session.spCookies = [];
+    }
+
+    const r = await spAutoLogin(email);
+    if (r.status === 200 && r.body.captchaRequired) {
+      return res.ok({ marks: [], captchaRequired: true, captchaImage: r.body.captchaImage, message: r.body.message });
+    }
+    if (r.status === 200) {
+      const marks = spSessions[email]?.marks || session?.cache?.spMarks || [];
+      return res.ok({ marks });
+    }
+    if (r.status === 404) {
+      return res.fail(401, "No student portal session. Please login via /sp/login first.");
+    }
+    return res.fail(r.status, r.body.error || "Failed to fetch marks from student portal");
+  } catch (err) {
+    log("SP_MARKS", `Error for ${email}: ${err.message}`);
     return res.fail(500, err.message);
   }
 });
