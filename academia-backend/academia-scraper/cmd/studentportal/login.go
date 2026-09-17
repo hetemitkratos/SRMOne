@@ -224,7 +224,6 @@ func spSubmitLogin(client *SPClient, ctx *spLoginContext, email, password, solve
 
 	body := []byte(strings.Join(formParts, "&"))
 
-	fmt.Fprintf(os.Stderr, "[spLogin] form body: %s\n", redactFormSecrets(string(body)))
 	fmt.Fprintf(os.Stderr, "[spLogin] posting to %s with %d fields\n", spLoginPostURL, len(formParts))
 	fmt.Fprintf(os.Stderr, "[spLogin] cookies: %s\n", client.jar.CookieHeader())
 
@@ -255,10 +254,32 @@ func spSubmitLogin(client *SPClient, ctx *spLoginContext, email, password, solve
 	_ = os.WriteFile("sp_login_response.html", loginResp.Body, 0644)
 
 	if isSPLoginFailed(loginResp.Body, loginResp.URL) {
+		portalErr := extractSPAlertText(loginResp.Body)
+		if portalErr != "" {
+			fmt.Fprintf(os.Stderr, "[spLogin] portal error: %s\n", portalErr)
+		}
 		return loginResp, fmt.Errorf("login failed: invalid credentials or captcha")
 	}
 
 	return loginResp, nil
+}
+
+// extractSPAlertText pulls the alert-danger message text from a failed
+// login response so logs show the portal's exact rejection reason.
+func extractSPAlertText(body []byte) string {
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(string(body)))
+	if err != nil {
+		return ""
+	}
+	selection := doc.Find("div.alert-danger")
+	if selection.Length() == 0 {
+		return ""
+	}
+	text := strings.Join(strings.Fields(selection.Text()), " ")
+	if len(text) > 300 {
+		text = text[:300]
+	}
+	return text
 }
 
 func parseSPSecureConfig(html string) spSecureConfig {
@@ -295,24 +316,26 @@ func reverseString(s string) string {
 	return string(runes)
 }
 
-// redactFormSecrets masks the password and captcha values in a form body
-// before logging, so credentials never land in Render logs.
-func redactFormSecrets(body string) string {
-	mask := func(re *regexp.Regexp, s string) string {
-		return re.ReplaceAllString(s, "$1<redacted>")
-	}
-	s := regexp.MustCompile(`(password=)[^&]*`).ReplaceAllString(body, "$1<redacted>")
-	s = mask(regexp.MustCompile(`(captcha=)[^&]*`), s)
-	return s
-}
-
 // ---------------------------------------------------------------------------
 // Login validation
 // ---------------------------------------------------------------------------
 
 func isSPLoginFailed(body []byte, finalURL string) bool {
-	lower := strings.ToLower(string(body))
 	location := strings.ToLower(finalURL)
+
+	// Success always lands on the dashboard frameset after the redirect.
+	// Checking the final URL is the reliable signal — the portal does NOT
+	// always include the alert-danger error on failed logins (it can
+	// return a plain login page, which previously masqueraded as success).
+	if strings.Contains(location, "hrdsystem") {
+		return false
+	}
+	if strings.Contains(location, "loginservlet") || strings.Contains(location, "youlogin.jsp") {
+		return true
+	}
+
+	// Unknown landing page — fall back to the explicit error alert check
+	lower := strings.ToLower(string(body))
 
 	// Check for explicit error alert div — server returns login page on both success and failure,
 	// but only includes the alert-danger div when credentials/captcha are wrong
