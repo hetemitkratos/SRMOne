@@ -8,6 +8,7 @@ const (
 	spModeLogin         = "login"
 	spModeFetch         = "fetch"
 	spModeLoginAndFetch = "login_and_fetch"
+	spModePrepare       = "prepare_only"
 )
 
 const (
@@ -24,8 +25,20 @@ type SPRequest struct {
 	Password      string               `json:"password"`
 	CaptchaAPIKey string               `json:"captchaApiKey,omitempty"`
 	CaptchaAPIURL string               `json:"captchaApiUrl,omitempty"`
+	CaptchaAnswer string               `json:"captchaAnswer,omitempty"`
+	LoginState    *SPPendingLogin      `json:"loginState,omitempty"`
 	Cookies       []SPSerializedCookie `json:"cookies,omitempty"`
 	Sections      []string             `json:"sections,omitempty"`
+}
+
+// SPPendingLogin is the serialized state needed to resume a login after the
+// user solves the captcha manually. It round-trips through the backend.
+type SPPendingLogin struct {
+	CaptchaFieldName string   `json:"captchaFieldName"`
+	DomainFieldName  string   `json:"domainFieldName"`
+	RandomDelimiter  string   `json:"randomDelimiter"`
+	PageLoadMs       int64    `json:"pageLoadMs"`
+	HoneypotNames    []string `json:"honeypotNames"`
 }
 
 type SPSerializedCookie struct {
@@ -65,6 +78,7 @@ type SPResponse struct {
 	Classification string               `json:"classification"`
 	Cookies        []SPSerializedCookie `json:"cookies,omitempty"`
 	CaptchaImage   string               `json:"captchaImage,omitempty"`
+	LoginState     *SPPendingLogin      `json:"loginState,omitempty"`
 	StudentInfo    SPStudentInfo        `json:"studentInfo,omitempty"`
 	Attendance     []SPAttendanceRecord `json:"attendance,omitempty"`
 	Error          string               `json:"error,omitempty"`

@@ -179,6 +179,8 @@ function LoginForm() {
   const [spPromptPassword, setSpPromptPassword] = useState("");
   const [spPromptLoading, setSpPromptLoading] = useState(false);
   const [spPromptError, setSpPromptError] = useState("");
+  const [spPromptCaptchaImg, setSpPromptCaptchaImg] = useState("");
+  const [spPromptCaptcha, setSpPromptCaptcha] = useState("");
   const [loggedInEmail, setLoggedInEmail] = useState("");
 
   const usernamePlaceholders = [
@@ -243,11 +245,47 @@ function LoginForm() {
     setSpPromptLoading(true);
     setSpPromptError("");
     try {
-      await api.spLogin(loggedInEmail, spPromptPassword);
-      setShowSpPrompt(false);
-      setSpPromptPassword("");
+      const result = await api.spLogin(loggedInEmail, spPromptPassword);
+      if (result.captchaRequired) {
+        setSpPromptCaptchaImg(result.captchaImage);
+        setSpPromptCaptcha("");
+      } else {
+        setShowSpPrompt(false);
+        setSpPromptPassword("");
+        setSpPromptCaptchaImg("");
+        setSpPromptCaptcha("");
+      }
     } catch (err) {
       setSpPromptError(err.message || "Student Portal login failed. Check your SP password.");
+    } finally {
+      setSpPromptLoading(false);
+    }
+  };
+
+  const handleSpPromptCaptcha = async (e) => {
+    e.preventDefault();
+    if (!spPromptCaptcha.trim()) {
+      setSpPromptError("Please type the captcha text.");
+      return;
+    }
+    setSpPromptLoading(true);
+    setSpPromptError("");
+    try {
+      const result = await api.spSolveCaptcha(loggedInEmail, spPromptCaptcha.trim());
+      if (result.captchaRequired) {
+        setSpPromptCaptchaImg(result.captchaImage);
+        setSpPromptCaptcha("");
+        setSpPromptError(result.message || "Solve the new captcha to continue.");
+      } else {
+        setShowSpPrompt(false);
+        setSpPromptPassword("");
+        setSpPromptCaptchaImg("");
+        setSpPromptCaptcha("");
+      }
+    } catch (err) {
+      setSpPromptCaptchaImg("");
+      setSpPromptCaptcha("");
+      setSpPromptError(err.message || "Captcha verification failed.");
     } finally {
       setSpPromptLoading(false);
     }
@@ -449,7 +487,7 @@ function LoginForm() {
                 </div>
               )}
 
-              <form onSubmit={handleSpPromptLogin}>
+              <form onSubmit={spPromptCaptchaImg ? handleSpPromptCaptcha : handleSpPromptLogin}>
                 <input
                   type="password"
                   value={spPromptPassword}
@@ -458,6 +496,28 @@ function LoginForm() {
                   autoFocus
                   className="w-full px-5 py-3.5 rounded-full text-[14px] font-medium outline-none transition-all border border-slate-200 bg-white shadow-[0_2px_10px_rgba(0,0,0,0.02)] text-slate-900 placeholder:text-slate-400 focus:border-slate-300 focus:ring-4 focus:ring-slate-100/50 mb-4"
                 />
+                {spPromptCaptchaImg && (
+                  <div className="mb-4">
+                    <p className="text-[12px] text-slate-500 font-medium mb-2">
+                      Auto-solve failed — type the text in this image:
+                    </p>
+                    <img
+                      src={spPromptCaptchaImg}
+                      alt="Student Portal captcha"
+                      className="h-14 rounded-xl border border-slate-200 bg-white mb-3"
+                    />
+                    <input
+                      type="text"
+                      value={spPromptCaptcha}
+                      onChange={(e) => setSpPromptCaptcha(e.target.value)}
+                      placeholder="Captcha text"
+                      autoCapitalize="none"
+                      autoCorrect="off"
+                      autoFocus
+                      className="w-full px-5 py-3.5 rounded-full text-[14px] font-medium outline-none transition-all border border-slate-200 bg-white shadow-[0_2px_10px_rgba(0,0,0,0.02)] text-slate-900 placeholder:text-slate-400 focus:border-slate-300 focus:ring-4 focus:ring-slate-100/50"
+                    />
+                  </div>
+                )}
                 <div className="flex gap-3">
                   <button
                     type="button"

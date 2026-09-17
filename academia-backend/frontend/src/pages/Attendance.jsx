@@ -27,6 +27,8 @@ export default function Attendance() {
   const [spLoginLoading, setSpLoginLoading] = useState(false);
   const [spLoginError, setSpLoginError] = useState("");
   const [showSpPwd, setShowSpPwd] = useState(false);
+  const [spCaptchaImage, setSpCaptchaImage] = useState("");
+  const [spCaptchaAnswer, setSpCaptchaAnswer] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -202,7 +204,11 @@ export default function Attendance() {
     setSpLoginError("");
     try {
       const result = await api.spLogin(user.email, spPwd);
-      if (result.attendance && result.attendance.length > 0) {
+      if (result.captchaRequired) {
+        setSpCaptchaImage(result.captchaImage);
+        setSpCaptchaAnswer("");
+        setSpLoginError("");
+      } else if (result.attendance && result.attendance.length > 0) {
         setRecords(result.attendance);
         setSpSource(true);
         setShowSpLogin(false);
@@ -213,6 +219,40 @@ export default function Attendance() {
       }
     } catch (err) {
       setSpLoginError(err.message || "Student Portal login failed. Check your password.");
+    } finally {
+      setSpLoginLoading(false);
+    }
+  };
+
+  const handleSpCaptchaSubmit = async () => {
+    if (!spCaptchaAnswer.trim()) {
+      setSpLoginError("Please type the captcha text.");
+      return;
+    }
+    setSpLoginLoading(true);
+    setSpLoginError("");
+    try {
+      const result = await api.spSolveCaptcha(user.email, spCaptchaAnswer.trim());
+      if (result.captchaRequired) {
+        // Previous answer (or password) was wrong — a fresh captcha was issued
+        setSpCaptchaImage(result.captchaImage);
+        setSpCaptchaAnswer("");
+        setSpLoginError(result.message || "Solve the new captcha to continue.");
+      } else if (result.attendance && result.attendance.length > 0) {
+        setRecords(result.attendance);
+        setSpSource(true);
+        setShowSpLogin(false);
+        setSpError("");
+        setSpPwd("");
+        setSpCaptchaImage("");
+        setSpCaptchaAnswer("");
+      } else {
+        setSpLoginError("Login successful but no attendance data found. Try refreshing.");
+      }
+    } catch (err) {
+      setSpCaptchaImage("");
+      setSpCaptchaAnswer("");
+      setSpLoginError(err.message || "Captcha verification failed.");
     } finally {
       setSpLoginLoading(false);
     }
@@ -421,8 +461,40 @@ export default function Attendance() {
               {spLoginLoading ? "Logging in…" : "Login & Fetch"}
             </button>
           </div>
+          {spCaptchaImage && (
+            <div className="mt-4">
+              <p className="text-slate-500 text-xs font-medium mb-2">
+                Auto-solve failed — type the text in this image:
+              </p>
+              <img
+                src={spCaptchaImage}
+                alt="Student Portal captcha"
+                className="h-14 rounded-xl border border-slate-200 bg-white mb-3"
+              />
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={spCaptchaAnswer}
+                  onChange={(e) => setSpCaptchaAnswer(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && handleSpCaptchaSubmit()}
+                  placeholder="Captcha text"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  className="flex-1 px-4 py-3 rounded-full text-sm font-medium outline-none border border-slate-200 bg-white text-slate-900 placeholder:text-slate-400 focus:border-slate-300 focus:ring-4 focus:ring-slate-100/50"
+                />
+                <button
+                  onClick={handleSpCaptchaSubmit}
+                  disabled={spLoginLoading || !spCaptchaAnswer.trim()}
+                  className="inline-flex items-center gap-2 px-5 py-3 bg-[#1A1A1A] text-white text-sm font-bold rounded-full hover:bg-[#333] transition-colors disabled:opacity-50 whitespace-nowrap"
+                >
+                  {spLoginLoading ? <Loader2 size={16} className="animate-spin" /> : null}
+                  {spLoginLoading ? "Verifying…" : "Submit Captcha"}
+                </button>
+              </div>
+            </div>
+          )}
           <button
-            onClick={() => { setShowSpLogin(false); setSpError(""); setSpLoginError(""); }}
+            onClick={() => { setShowSpLogin(false); setSpError(""); setSpLoginError(""); setSpCaptchaImage(""); setSpCaptchaAnswer(""); }}
             className="text-slate-400 text-xs font-medium mt-3 hover:text-slate-600"
           >
             Cancel

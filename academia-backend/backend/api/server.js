@@ -81,6 +81,32 @@ const sessions = {};
 // so SP attendance data survives academia session expiry
 const spSessions = {};
 
+// Pending SP captcha challenges — when the scraper can't solve the captcha
+// automatically it returns the image + resumable login state, stored here
+// until the user submits an answer via /sp/captcha.
+const pendingSPCaptcha = {};
+const SP_CAPTCHA_TTL_MS = 5 * 60 * 1000;
+
+function storeSPSessionResult(email, parsed) {
+  spSessions[email] = {
+    cookies: parsed.cookies || [],
+    lastActive: Date.now(),
+    attendance: parsed.attendance || [],
+    studentInfo: parsed.studentInfo || {},
+  };
+  const session = sessions[email];
+  if (session) {
+    session.spCookies = parsed.cookies || [];
+    session.meta = {
+      ...session.meta,
+      spClassification: parsed.classification,
+      spLoginAt: Date.now(),
+    };
+    if (parsed.attendance?.length) session.cache.spAttendance = parsed.attendance;
+    if (parsed.studentInfo?.name) session.cache.spStudentInfo = parsed.studentInfo;
+  }
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function log(tag, msg) {
@@ -858,6 +884,12 @@ setInterval(async () => {
     if (now - spSessions[email].lastActive > SESSION_TTL_MS) {
       log("SP_SESSION", `SP session for ${email} expired (inactive > ${SESSION_TTL_MS / 60000}m)`);
       delete spSessions[email];
+    }
+  }
+  // Clean up stale pending captcha challenges
+  for (const email of Object.keys(pendingSPCaptcha)) {
+    if (now - pendingSPCaptcha[email].createdAt > SP_CAPTCHA_TTL_MS) {
+      delete pendingSPCaptcha[email];
     }
   }
 }, CLEANUP_INTERVAL_MS);
@@ -2820,8 +2852,20 @@ app.post("/sp/login", loginLimiter, async (req, res) => {
     log("SP_LOGIN", `${email} success=${parsed.success} classification=${parsed.classification}${parsed.error ? ` error=${parsed.error}` : ""}`);
 
     if (!parsed.success) {
-      if (parsed.classification === "captcha_needed") {
-        return res.fail(400, "Captcha could not be solved automatically. Set CAPTCHA_SOLVE_API_KEY environment variable with an OpenAI API key.");
+      // Captcha couldn't be auto-solved — hand the image to the user.
+      // The pending state lets /sp/captcha resume without re-POSTing.
+      if (parsed.classification === "captcha_needed" && parsed.captchaImage) {
+        pendingSPCaptcha[email] = {
+          password,
+          loginState: parsed.loginState || null,
+          cookies: parsed.cookies || [],
+          createdAt: Date.now(),
+        };
+        return res.ok({
+          captchaRequired: true,
+          captchaImage: parsed.captchaImage,
+          message: "Enter the captcha shown below to finish logging in.",
+        });
       }
       if (parsed.classification === "invalid_credentials") {
         return res.fail(401, parsed.error || "Invalid credentials");
@@ -2830,29 +2874,7 @@ app.post("/sp/login", loginLimiter, async (req, res) => {
     }
 
     // Store in persistent spSessions (survives academia session death)
-    spSessions[email] = {
-      cookies: parsed.cookies || [],
-      lastActive: Date.now(),
-      attendance: parsed.attendance || [],
-      studentInfo: parsed.studentInfo || {},
-    };
-
-    // Also merge into academia session if it exists
-    const session = sessions[email];
-    if (session) {
-      session.spCookies = parsed.cookies || [];
-      session.meta = {
-        ...session.meta,
-        spClassification: parsed.classification,
-        spLoginAt: Date.now(),
-      };
-      if (parsed.attendance && parsed.attendance.length) {
-        session.cache.spAttendance = parsed.attendance;
-      }
-      if (parsed.studentInfo && parsed.studentInfo.name) {
-        session.cache.spStudentInfo = parsed.studentInfo;
-      }
-    }
+    storeSPSessionResult(email, parsed);
 
     return res.ok({
       message: "Student portal login successful",
@@ -2861,6 +2883,78 @@ app.post("/sp/login", loginLimiter, async (req, res) => {
     });
   } catch (err) {
     log("SP_LOGIN", `Error for ${email}: ${err.message}`);
+    return res.fail(500, err.message);
+  }
+});
+
+/**
+ * POST /sp/captcha
+ * Body: { email, captchaAnswer }
+ * Resumes a pending SP login using the user's manually-solved captcha.
+ * On failure, re-issues a fresh captcha (GET-only prepare — no login
+ * attempt is consumed).
+ */
+app.post("/sp/captcha", loginLimiter, async (req, res) => {
+  const { email, captchaAnswer } = req.body;
+  if (!email || !captchaAnswer)
+    return res.fail(400, "email and captchaAnswer are required");
+
+  const pending = pendingSPCaptcha[email];
+  if (!pending || !pending.loginState || Date.now() - pending.createdAt > SP_CAPTCHA_TTL_MS) {
+    delete pendingSPCaptcha[email];
+    return res.fail(400, "Captcha challenge expired — please start the Student Portal login again.");
+  }
+
+  try {
+    const { parsed, stderr } = await runStudentPortalScraper({
+      mode: "login_and_fetch",
+      email,
+      password: pending.password,
+      captchaAnswer: String(captchaAnswer).trim(),
+      loginState: pending.loginState,
+      cookies: pending.cookies,
+    });
+
+    if (stderr?.trim()) {
+      log("SP_CAPTCHA", `stderr for ${email}: ${stderr.trim().slice(0, 1000)}`);
+    }
+
+    if (parsed?.success) {
+      delete pendingSPCaptcha[email];
+      storeSPSessionResult(email, parsed);
+      return res.ok({
+        message: "Student portal login successful",
+        attendance: parsed.attendance || [],
+        studentInfo: parsed.studentInfo || {},
+      });
+    }
+
+    // Submit failed (wrong captcha or password — one attempt consumed).
+    // Issue a fresh captcha via prepare_only — GETs only, no attempt burned.
+    log("SP_CAPTCHA", `Captcha submit failed for ${email}: ${parsed?.error || "unknown"} — re-issuing captcha`);
+    const { parsed: fresh } = await runStudentPortalScraper({
+      mode: "prepare_only",
+      email,
+    }).catch(() => ({ parsed: null }));
+
+    if (fresh?.classification === "captcha_needed" && fresh.captchaImage) {
+      pendingSPCaptcha[email] = {
+        password: pending.password,
+        loginState: fresh.loginState || null,
+        cookies: fresh.cookies || [],
+        createdAt: Date.now(),
+      };
+      return res.ok({
+        captchaRequired: true,
+        captchaImage: fresh.captchaImage,
+        message: "That didn't work — check your password and solve the new captcha.",
+      });
+    }
+
+    delete pendingSPCaptcha[email];
+    return res.fail(401, parsed?.error || "Student portal login failed — check your password and try again.");
+  } catch (err) {
+    log("SP_CAPTCHA", `Error for ${email}: ${err.message}`);
     return res.fail(500, err.message);
   }
 });

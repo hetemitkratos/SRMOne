@@ -45,44 +45,54 @@ var (
 	reNonce        = regexp.MustCompile(`nonce\s*:\s*'([^']+)'`)
 )
 
-func spLogin(client *SPClient, email, password, captchaAPIKey, captchaAPIURL string) (SPRequestSnapshot, error) {
-	maxAttempts := 1
-	var lastResp SPRequestSnapshot
-	var lastErr error
-
-	for attempt := 0; attempt < maxAttempts; attempt++ {
-		if attempt > 0 {
-			fmt.Fprintf(os.Stderr, "[spLogin] retry %d/%d — starting fresh session\n", attempt+1, maxAttempts)
-			// Reset cookies for fresh session
-			client.jar = NewSPCookieJar()
-			time.Sleep(2 * time.Second)
-		}
-
-		resp, err := spLoginAttempt(client, email, password, captchaAPIKey, captchaAPIURL)
-		lastResp = resp
-		lastErr = err
-
-		if err == nil {
-			return resp, nil
-		}
-
-		// Only retry on captcha failures, not on other errors
-		errMsg := strings.ToLower(err.Error())
-		if !strings.Contains(errMsg, "captcha") {
-			return resp, err
-		}
-
-		fmt.Fprintf(os.Stderr, "[spLogin] attempt %d failed: %s\n", attempt+1, err)
-	}
-
-	return lastResp, lastErr
+// spLoginContext carries everything needed to submit the login form: the
+// parsed SECURE_CONFIG, honeypot field names, when the page was fetched, and
+// the raw captcha image. It is what gets returned to the backend (as
+// SPPendingLogin) when the user has to solve the captcha manually.
+type spLoginContext struct {
+	Config        spSecureConfig
+	HoneypotNames []string
+	PageLoadMs    int64
+	CaptchaImage  []byte
 }
 
-func spLoginAttempt(client *SPClient, email, password, captchaAPIKey, captchaAPIURL string) (SPRequestSnapshot, error) {
+func (c *spLoginContext) pending() *SPPendingLogin {
+	return &SPPendingLogin{
+		CaptchaFieldName: c.Config.CaptchaFieldName,
+		DomainFieldName:  c.Config.DomainFieldName,
+		RandomDelimiter:  c.Config.RandomDelimiter,
+		PageLoadMs:       c.PageLoadMs,
+		HoneypotNames:    c.HoneypotNames,
+	}
+}
+
+// spLogin runs the automatic login flow. When the captcha image is fetched but
+// cannot be solved automatically, it returns the context so the caller can
+// surface a captcha_needed response for manual solving.
+func spLogin(client *SPClient, email, password, captchaAPIKey, captchaAPIURL string) (SPRequestSnapshot, *spLoginContext, error) {
+	ctx, err := spPrepareLogin(client)
+	if err != nil {
+		return SPRequestSnapshot{}, nil, err
+	}
+
+	solvedCaptcha, err := solveCaptcha2Captcha(captchaAPIKey, captchaAPIURL, ctx.CaptchaImage)
+	if err != nil {
+		return SPRequestSnapshot{}, ctx, fmt.Errorf("captcha solve failed: %w", err)
+	}
+	fmt.Fprintf(os.Stderr, "[spLogin] captcha solved: %s\n", solvedCaptcha)
+
+	snap, err := spSubmitLogin(client, ctx, email, password, solvedCaptcha)
+	return snap, nil, err
+}
+
+// spPrepareLogin fetches the login page, parses SECURE_CONFIG + honeypot
+// fields, and downloads the captcha image. No form POST is made, so this
+// does not consume a login attempt.
+func spPrepareLogin(client *SPClient) (*spLoginContext, error) {
 	// Step 1: GET login page to establish session cookies
 	loginPageResp, err := client.DoRequest("GET", spLoginURL, nil, "", nil, true)
 	if err != nil {
-		return SPRequestSnapshot{}, fmt.Errorf("could not fetch login page: %w", err)
+		return nil, fmt.Errorf("could not fetch login page: %w", err)
 	}
 
 	html := string(loginPageResp.Body)
@@ -91,7 +101,7 @@ func spLoginAttempt(client *SPClient, email, password, captchaAPIKey, captchaAPI
 	// Step 2: Extract SECURE_CONFIG values from the HTML
 	config := parseSPSecureConfig(html)
 	if config.CaptchaText == "" {
-		return SPRequestSnapshot{}, fmt.Errorf("could not extract captchaText from login page")
+		return nil, fmt.Errorf("could not extract captchaText from login page")
 	}
 
 	fmt.Fprintf(os.Stderr, "[spLogin] captchaText=%s captchaField=%s domainField=%s delimiter=%s\n",
@@ -100,43 +110,56 @@ func spLoginAttempt(client *SPClient, email, password, captchaAPIKey, captchaAPI
 	// Step 2.5: Parse HTML with goquery for honeypot fields and captcha image src
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
 	if err != nil {
-		return SPRequestSnapshot{}, fmt.Errorf("could not parse login page HTML: %w", err)
+		return nil, fmt.Errorf("could not parse login page HTML: %w", err)
 	}
+
+	var honeypotNames []string
+	doc.Find("input[name^=ph_]").Each(func(_ int, s *goquery.Selection) {
+		if name, ok := s.Attr("name"); ok {
+			honeypotNames = append(honeypotNames, name)
+		}
+	})
 
 	// Step 2.6: Fetch captcha image from SCaptchaServlet with X-Domain-Proof header.
 	// captchaText in SECURE_CONFIG is a DECOY — only used when domain is unsafe (phishing).
 	// When domain is safe, guardlogin.js fetches the real captcha from SCaptchaServlet.
 	// The user must read the image and type the answer. We solve it via 2Captcha or manual fallback.
 	captchaImgSrc, _ := doc.Find("img#secure_captcha").Attr("data-src")
-	var solvedCaptcha string
-	if captchaImgSrc != "" {
-		captchaImgURL := captchaImgSrc
-		if strings.HasPrefix(captchaImgSrc, "/") {
-			captchaImgURL = spBaseURL + captchaImgSrc
-		}
-		domainProof := base64.StdEncoding.EncodeToString([]byte(config.Nonce + ":sp.srmist.edu.in"))
-		fmt.Fprintf(os.Stderr, "[spLogin] fetching captcha image from %s (nonce=%s)\n", captchaImgURL, config.Nonce)
-		captchaImgResp, err := client.DoRequest("GET", captchaImgURL, nil, "", map[string]string{
-			"Referer":        spLoginURL,
-			"Accept":         "image/png, image/jpeg, image/svg+xml, image/*",
-			"X-Domain-Proof": domainProof,
-		}, false)
-		if err != nil {
-			return SPRequestSnapshot{}, fmt.Errorf("captcha image fetch failed: %w", err)
-		}
-		fmt.Fprintf(os.Stderr, "[spLogin] captcha image fetched: status=%d bytes=%d\n",
-			captchaImgResp.StatusCode, len(captchaImgResp.Body))
-		_ = os.WriteFile("sp_captcha.png", captchaImgResp.Body, 0644)
-
-		// Step 2.7: Solve captcha via 2Captcha API (or manual fallback)
-		solvedCaptcha, err = solveCaptcha2Captcha(captchaAPIKey, captchaAPIURL, captchaImgResp.Body)
-		if err != nil {
-			return SPRequestSnapshot{}, fmt.Errorf("captcha solve failed: %w", err)
-		}
-		fmt.Fprintf(os.Stderr, "[spLogin] captcha solved: %s\n", solvedCaptcha)
-	} else {
-		return SPRequestSnapshot{}, fmt.Errorf("no captcha image data-src found on login page")
+	if captchaImgSrc == "" {
+		return nil, fmt.Errorf("no captcha image data-src found on login page")
 	}
+
+	captchaImgURL := captchaImgSrc
+	if strings.HasPrefix(captchaImgSrc, "/") {
+		captchaImgURL = spBaseURL + captchaImgSrc
+	}
+	domainProof := base64.StdEncoding.EncodeToString([]byte(config.Nonce + ":sp.srmist.edu.in"))
+	fmt.Fprintf(os.Stderr, "[spLogin] fetching captcha image from %s (nonce=%s)\n", captchaImgURL, config.Nonce)
+	captchaImgResp, err := client.DoRequest("GET", captchaImgURL, nil, "", map[string]string{
+		"Referer":        spLoginURL,
+		"Accept":         "image/png, image/jpeg, image/svg+xml, image/*",
+		"X-Domain-Proof": domainProof,
+	}, false)
+	if err != nil {
+		return nil, fmt.Errorf("captcha image fetch failed: %w", err)
+	}
+	fmt.Fprintf(os.Stderr, "[spLogin] captcha image fetched: status=%d bytes=%d\n",
+		captchaImgResp.StatusCode, len(captchaImgResp.Body))
+	_ = os.WriteFile("sp_captcha.png", captchaImgResp.Body, 0644)
+
+	return &spLoginContext{
+		Config:        config,
+		HoneypotNames: honeypotNames,
+		PageLoadMs:    pageLoadTime.UnixMilli(),
+		CaptchaImage:  captchaImgResp.Body,
+	}, nil
+}
+
+// spSubmitLogin POSTs the login form with a known captcha answer. This is the
+// only step that consumes a login attempt.
+func spSubmitLogin(client *SPClient, ctx *spLoginContext, email, password, solvedCaptcha string) (SPRequestSnapshot, error) {
+	config := ctx.Config
+	pageLoadTime := time.UnixMilli(ctx.PageLoadMs)
 
 	// Step 4: Build form payload
 	netID := strings.TrimSpace(email)
@@ -167,11 +190,9 @@ func spLoginAttempt(client *SPClient, email, password, captchaAPIKey, captchaAPI
 	formParts = append(formParts, "password="+url.QueryEscape(password))
 
 	// Honeypot fields — must be empty
-	doc.Find("input[name^=ph_]").Each(func(_ int, s *goquery.Selection) {
-		if name, ok := s.Attr("name"); ok {
-			formParts = append(formParts, url.QueryEscape(name)+"=")
-		}
-	})
+	for _, name := range ctx.HoneypotNames {
+		formParts = append(formParts, url.QueryEscape(name)+"=")
+	}
 
 	formParts = append(formParts, "captcha="+url.QueryEscape(solvedCaptcha))
 	formParts = append(formParts, "fpPayload="+url.QueryEscape(fpPayload))
