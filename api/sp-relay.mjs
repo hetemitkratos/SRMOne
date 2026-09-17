@@ -1,5 +1,5 @@
 // Student Portal relay — forwards a single HTTP request to sp.srmist.edu.in
-// from Vercel's Mumbai region (see "regions" in vercel.json).
+// from Vercel's Mumbai region (see "regions" in the repo-root vercel.json).
 //
 // Why: sp.srmist.edu.in rejects login POSTs that originate from Render's
 // US egress IP with a generic "Invalid credentials" page, even when the

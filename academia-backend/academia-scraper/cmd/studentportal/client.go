@@ -263,7 +263,7 @@ func sendDirect(method, rawURL string, headers map[string]string, body []byte) (
 }
 
 // spRelay forwards each hop through the Vercel function at
-// academia-backend/frontend/api/sp-relay.js, which runs in Mumbai.
+// api/sp-relay.mjs (repo root), which runs in Mumbai.
 // sp.srmist.edu.in answers login POSTs from Render's US egress IP with a
 // generic "Invalid credentials" page regardless of the captcha/password,
 // so production must reach the portal from an Indian IP.
