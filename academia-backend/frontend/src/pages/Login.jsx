@@ -498,13 +498,30 @@ function LoginForm() {
                 />
                 {spPromptCaptchaImg && (
                   <div className="mb-4">
-                    <p className="text-[12px] text-slate-500 font-medium mb-2">
-                      Auto-solve failed — type the text in this image:
-                    </p>
+                    <div className="flex items-center justify-between mb-2">
+                      <p className="text-[12px] text-slate-500 font-medium">
+                        Type the text in this image — <span className="font-bold">case-sensitive</span>
+                      </p>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          try {
+                            const r = await api.spRefreshCaptcha(loggedInEmail);
+                            if (r.captchaRequired) {
+                              setSpPromptCaptchaImg(r.captchaImage);
+                              setSpPromptCaptcha("");
+                            }
+                          } catch { /* keep current captcha */ }
+                        }}
+                        className="text-slate-500 text-[12px] font-bold hover:text-slate-800"
+                      >
+                        New image
+                      </button>
+                    </div>
                     <img
                       src={spPromptCaptchaImg}
                       alt="Student Portal captcha"
-                      className="h-14 rounded-xl border border-slate-200 bg-white mb-3"
+                      className="h-16 rounded-xl border border-slate-200 bg-white mb-3"
                     />
                     <input
                       type="text"
@@ -513,8 +530,8 @@ function LoginForm() {
                       placeholder="Captcha text"
                       autoCapitalize="none"
                       autoCorrect="off"
-                      autoFocus
-                      className="w-full px-5 py-3.5 rounded-full text-[14px] font-medium outline-none transition-all border border-slate-200 bg-white shadow-[0_2px_10px_rgba(0,0,0,0.02)] text-slate-900 placeholder:text-slate-400 focus:border-slate-300 focus:ring-4 focus:ring-slate-100/50"
+                      spellCheck={false}
+                      className="w-full px-5 py-3.5 rounded-full text-[16px] tracking-widest font-mono font-medium outline-none transition-all border border-slate-200 bg-white shadow-[0_2px_10px_rgba(0,0,0,0.02)] text-slate-900 placeholder:text-slate-400 placeholder:tracking-normal placeholder:font-sans placeholder:text-[14px] focus:border-slate-300 focus:ring-4 focus:ring-slate-100/50"
                     />
                   </div>
                 )}

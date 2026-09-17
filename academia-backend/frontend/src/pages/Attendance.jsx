@@ -463,13 +463,30 @@ export default function Attendance() {
           </div>
           {spCaptchaImage && (
             <div className="mt-4">
-              <p className="text-slate-500 text-xs font-medium mb-2">
-                Auto-solve failed — type the text in this image:
-              </p>
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-slate-500 text-xs font-medium">
+                  Type the text in this image — <span className="font-bold">case-sensitive</span>
+                </p>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      const r = await api.spRefreshCaptcha(user.email);
+                      if (r.captchaRequired) {
+                        setSpCaptchaImage(r.captchaImage);
+                        setSpCaptchaAnswer("");
+                      }
+                    } catch { /* keep current captcha */ }
+                  }}
+                  className="inline-flex items-center gap-1.5 text-slate-500 text-xs font-bold hover:text-slate-800"
+                >
+                  <RefreshCw size={13} /> New image
+                </button>
+              </div>
               <img
                 src={spCaptchaImage}
                 alt="Student Portal captcha"
-                className="h-14 rounded-xl border border-slate-200 bg-white mb-3"
+                className="h-16 rounded-xl border border-slate-200 bg-white mb-3"
               />
               <div className="flex gap-2">
                 <input
@@ -480,7 +497,8 @@ export default function Attendance() {
                   placeholder="Captcha text"
                   autoCapitalize="none"
                   autoCorrect="off"
-                  className="flex-1 px-4 py-3 rounded-full text-sm font-medium outline-none border border-slate-200 bg-white text-slate-900 placeholder:text-slate-400 focus:border-slate-300 focus:ring-4 focus:ring-slate-100/50"
+                  spellCheck={false}
+                  className="flex-1 px-4 py-3 rounded-full text-lg tracking-widest font-mono font-medium outline-none border border-slate-200 bg-white text-slate-900 placeholder:text-slate-400 placeholder:tracking-normal placeholder:font-sans placeholder:text-sm focus:border-slate-300 focus:ring-4 focus:ring-slate-100/50"
                 />
                 <button
                   onClick={handleSpCaptchaSubmit}

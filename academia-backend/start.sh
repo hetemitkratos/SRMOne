@@ -3,6 +3,9 @@
 # Go binaries are pre-built during build phase
 export NODE_ENV=production
 
+# ddddocr (captcha auto-solve) is pip-installed into academia-scraper/pydeps at build time
+export PYTHONPATH="$PWD/academia-backend/academia-scraper/pydeps${PYTHONPATH:+:$PYTHONPATH}"
+
 cd academia-backend
 
 # Start faculty scraper in background on port 8080

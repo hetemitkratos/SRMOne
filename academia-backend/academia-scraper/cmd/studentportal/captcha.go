@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -124,16 +125,32 @@ func solveCaptchaLocal(imageBytes []byte) (string, error) {
 		scriptPath = filepath.Join("..", scriptPath)
 	}
 
-	// Run python solve_captcha.py
-	cmd := exec.Command("python", scriptPath, imgPath)
-	output, err := cmd.Output()
-	if err != nil {
-		return "", fmt.Errorf("python solve_captcha.py failed: %w", err)
+	// Try python3 first (Render/Linux), then python (Windows)
+	var output []byte
+	var lastErr error
+	for _, py := range []string{"python3", "python"} {
+		var errBuf bytes.Buffer
+		cmd := exec.Command(py, scriptPath, imgPath)
+		cmd.Stderr = &errBuf
+		out, err := cmd.Output()
+		if err == nil {
+			output = out
+			lastErr = nil
+			break
+		}
+		lastErr = fmt.Errorf("%s solve_captcha.py failed: %w (stderr: %s)", py, err, strings.TrimSpace(errBuf.String()))
+		// Script missing or python unavailable — no point trying again
+		if ee, ok := err.(*exec.ExitError); !ok || ee.ExitCode() == 2 {
+			continue
+		}
+	}
+	if lastErr != nil {
+		return "", lastErr
 	}
 
 	// Clean up the result: strip whitespace and newlines
 	result := strings.TrimSpace(string(output))
-	
+
 	if result == "" {
 		return "", fmt.Errorf("local OCR result was empty")
 	}

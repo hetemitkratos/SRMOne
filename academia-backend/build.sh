@@ -30,6 +30,15 @@ go build -o loginprobe ./cmd/loginprobe
 go build -o studentportal ./cmd/studentportal
 echo "Academia scraper binaries built"
 
+echo "=== Installing ddddocr for captcha auto-solve ==="
+# Student Portal captchas are auto-solved by the local ddddocr OCR
+# (solve_captcha.py). Installed into the repo dir so it survives to runtime.
+if python3 -m pip install --quiet --target "$PWD/pydeps" ddddocr 2>/dev/null; then
+  echo "ddddocr installed to $PWD/pydeps"
+else
+  echo "WARNING: ddddocr install failed — SP logins will fall back to manual captcha"
+fi
+
 echo "=== Building faculty scraper binary ==="
 cd ../faculty-scraper
 go mod download

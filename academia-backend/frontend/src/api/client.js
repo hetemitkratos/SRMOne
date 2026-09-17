@@ -125,6 +125,11 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ email, captchaAnswer }),
     }),
+  spRefreshCaptcha: (email) =>
+    request("/sp/captcha/refresh", {
+      method: "POST",
+      body: JSON.stringify({ email }),
+    }),
   spAttendance: (email) =>
     request(`/sp/attendance?email=${encodeURIComponent(email)}`),
   spStudent: (email) =>

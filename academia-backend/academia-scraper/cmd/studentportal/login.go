@@ -224,7 +224,7 @@ func spSubmitLogin(client *SPClient, ctx *spLoginContext, email, password, solve
 
 	body := []byte(strings.Join(formParts, "&"))
 
-	fmt.Fprintf(os.Stderr, "[spLogin] form body: %s\n", string(body))
+	fmt.Fprintf(os.Stderr, "[spLogin] form body: %s\n", redactFormSecrets(string(body)))
 	fmt.Fprintf(os.Stderr, "[spLogin] posting to %s with %d fields\n", spLoginPostURL, len(formParts))
 	fmt.Fprintf(os.Stderr, "[spLogin] cookies: %s\n", client.jar.CookieHeader())
 
@@ -293,6 +293,17 @@ func reverseString(s string) string {
 		runes[i], runes[j] = runes[j], runes[i]
 	}
 	return string(runes)
+}
+
+// redactFormSecrets masks the password and captcha values in a form body
+// before logging, so credentials never land in Render logs.
+func redactFormSecrets(body string) string {
+	mask := func(re *regexp.Regexp, s string) string {
+		return re.ReplaceAllString(s, "$1<redacted>")
+	}
+	s := regexp.MustCompile(`(password=)[^&]*`).ReplaceAllString(body, "$1<redacted>")
+	s = mask(regexp.MustCompile(`(captcha=)[^&]*`), s)
+	return s
 }
 
 // ---------------------------------------------------------------------------

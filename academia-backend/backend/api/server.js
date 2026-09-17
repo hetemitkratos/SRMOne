@@ -2960,6 +2960,41 @@ app.post("/sp/captcha", loginLimiter, async (req, res) => {
 });
 
 /**
+ * POST /sp/captcha/refresh
+ * Body: { email }
+ * Issues a fresh captcha for a pending SP login (GET-only — no login
+ * attempt consumed). Uses the password already stored in the pending
+ * challenge, so the user doesn't need to retype it.
+ */
+app.post("/sp/captcha/refresh", loginLimiter, async (req, res) => {
+  const { email } = req.body;
+  if (!email) return res.fail(400, "email is required");
+
+  const pending = pendingSPCaptcha[email];
+  if (!pending || !pending.loginState || Date.now() - pending.createdAt > SP_CAPTCHA_TTL_MS) {
+    delete pendingSPCaptcha[email];
+    return res.fail(400, "No pending captcha — please start the Student Portal login again.");
+  }
+
+  try {
+    const { parsed } = await runStudentPortalScraper({ mode: "prepare_only", email });
+    if (parsed?.classification === "captcha_needed" && parsed.captchaImage) {
+      pendingSPCaptcha[email] = {
+        password: pending.password,
+        loginState: parsed.loginState || null,
+        cookies: parsed.cookies || [],
+        createdAt: Date.now(),
+      };
+      return res.ok({ captchaRequired: true, captchaImage: parsed.captchaImage });
+    }
+    return res.fail(500, parsed?.error || "Could not fetch a new captcha.");
+  } catch (err) {
+    log("SP_CAPTCHA", `Refresh error for ${email}: ${err.message}`);
+    return res.fail(500, err.message);
+  }
+});
+
+/**
  * GET /sp/attendance?email=
  * Fetches attendance from the SRM Student Portal.
  * Requires a prior /sp/login or existing academia session (will try to
