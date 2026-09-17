@@ -59,4 +59,6 @@ frontend/node_modules/.vite/
 supabase/.branches
 supabase/.temp
 .vercel/
-tracked=pydeps/
+
+# pip build output for SP captcha auto-solve (installed by build.sh)
+academia-backend/academia-scraper/pydeps/

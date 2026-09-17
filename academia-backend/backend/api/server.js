@@ -2867,6 +2867,28 @@ app.post("/sp/login", loginLimiter, async (req, res) => {
           message: "Enter the captcha shown below to finish logging in.",
         });
       }
+      // Auto-solve got the captcha wrong (login POST failed). Re-issue a
+      // fresh captcha for the user to solve manually instead of erroring —
+      // prepare_only is GET-only, so no extra login attempt is consumed.
+      if (parsed.classification === "captcha_failed") {
+        const { parsed: fresh } = await runStudentPortalScraper({
+          mode: "prepare_only",
+          email,
+        }).catch(() => ({ parsed: null }));
+        if (fresh?.classification === "captcha_needed" && fresh.captchaImage) {
+          pendingSPCaptcha[email] = {
+            password,
+            loginState: fresh.loginState || null,
+            cookies: fresh.cookies || [],
+            createdAt: Date.now(),
+          };
+          return res.ok({
+            captchaRequired: true,
+            captchaImage: fresh.captchaImage,
+            message: "Auto-solve read that one wrong — please type the new captcha below.",
+          });
+        }
+      }
       if (parsed.classification === "invalid_credentials") {
         return res.fail(401, parsed.error || "Invalid credentials");
       }
