@@ -42,6 +42,10 @@ jd_*.txt
 # ...except the shipped frontend brand assets
 !academia-backend/frontend/public/assets/logo.png
 !academia-backend/frontend/public/favicon.png
+!academia-backend/frontend/public/icon-192.png
+!academia-backend/frontend/public/icon-512.png
+!academia-backend/frontend/public/icon-maskable-512.png
+!academia-backend/frontend/public/apple-touch-icon.png
 
 # IDE / OS
 .DS_Store

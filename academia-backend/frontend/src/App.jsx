@@ -4,6 +4,7 @@ import Dashboard from "./pages/Dashboard.jsx";
 import Terms from "./pages/Terms.jsx";
 import Privacy from "./pages/Privacy.jsx";
 import { AuthProvider, useAuth } from "./hooks/useAuth.jsx";
+import InstallPrompt from "./components/InstallPrompt.jsx";
 
 function ProtectedRoute({ children }) {
   const { user } = useAuth();
@@ -14,6 +15,7 @@ function ProtectedRoute({ children }) {
 export default function App() {
   return (
     <AuthProvider>
+      <InstallPrompt />
       <HashRouter>
         <Routes>
           <Route path="/login" element={<Login />} />
