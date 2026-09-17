@@ -38,12 +38,6 @@ export const api = {
       body: JSON.stringify({ email }),
     }),
 
-  spLogin: (email, spPassword) =>
-    request("/sp-login", {
-      method: "POST",
-      body: JSON.stringify({ email, spPassword }),
-    }),
-
   logout: (email) =>
     request("/logout", {
       method: "POST",

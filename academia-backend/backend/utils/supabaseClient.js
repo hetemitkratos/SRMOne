@@ -383,6 +383,56 @@ export async function deleteAcademiaCredentials(email) {
   if (error) console.error("[supabase] deleteAcademiaCredentials:", error.message);
 }
 
+// ─── Persisted portal sessions (encrypted cookies) ────────────────────────────
+
+/**
+ * Upsert encrypted cookie blobs for a user. Pass only the side that changed:
+ * { academia: "<enc>", academiaMeta: {...} } and/or { sp: "<enc>" }.
+ * Pass null for a side to clear it.
+ */
+export async function saveSessionCookies(email, { academia, academiaMeta, sp } = {}) {
+  if (!supabase) return null;
+  const now = new Date().toISOString();
+  const patch = { academia_email: email, updated_at: now };
+  if (academia !== undefined) {
+    patch.encrypted_academia_cookies = academia;
+    patch.academia_saved_at = academia ? now : null;
+    if (academiaMeta !== undefined) patch.academia_meta = academiaMeta;
+  }
+  if (sp !== undefined) {
+    patch.encrypted_sp_cookies = sp;
+    patch.sp_saved_at = sp ? now : null;
+  }
+  const { error } = await supabase
+    .from("academia_sessions")
+    .upsert(patch, { onConflict: "academia_email" });
+  if (error) console.error("[supabase] saveSessionCookies:", error.message);
+  return !error;
+}
+
+export async function getSessionCookies(email) {
+  if (!supabase) return null;
+  const { data, error } = await supabase
+    .from("academia_sessions")
+    .select("*")
+    .eq("academia_email", email)
+    .maybeSingle();
+  if (error) {
+    console.error("[supabase] getSessionCookies:", error.message);
+    return null;
+  }
+  return data;
+}
+
+export async function clearSessionCookies(email) {
+  if (!supabase) return;
+  const { error } = await supabase
+    .from("academia_sessions")
+    .delete()
+    .eq("academia_email", email);
+  if (error) console.error("[supabase] clearSessionCookies:", error.message);
+}
+
 // ─── Timetable Cache ──────────────────────────────────────────────────────────
 
 export async function getCachedTimetable(email) {

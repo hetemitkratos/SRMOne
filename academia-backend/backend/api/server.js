@@ -105,6 +105,313 @@ function storeSPSessionResult(email, parsed) {
     if (parsed.attendance?.length) session.cache.spAttendance = parsed.attendance;
     if (parsed.studentInfo?.name) session.cache.spStudentInfo = parsed.studentInfo;
   }
+  persistSPSession(email);
+}
+
+// ─── Session persistence (Supabase, encrypted) ────────────────────────────────
+//
+// In-memory sessions die on every Render restart / idle spin-down and after
+// SESSION_TTL_MS. Cookies are therefore mirrored to academia_sessions so a
+// user who already logged in once is silently restored: cookies first (no
+// portal login at all), then stored credentials (academia: plain re-login;
+// SP: auto-solved captcha via the relay, manual captcha only as last resort).
+
+function encryptJSON(value) {
+  try {
+    return encryptPassword(JSON.stringify(value));
+  } catch (err) {
+    log("SESSION", `encrypt failed: ${err.message}`);
+    return null;
+  }
+}
+
+function decryptJSON(blob) {
+  if (!blob) return null;
+  try {
+    return JSON.parse(decryptPassword(blob));
+  } catch (err) {
+    log("SESSION", `decrypt failed: ${err.message}`);
+    return null;
+  }
+}
+
+function persistAcademiaSession(email) {
+  const s = sessions[email];
+  if (!s?.cookies?.length) return;
+  const enc = encryptJSON(s.cookies);
+  if (!enc) return;
+  const meta = {
+    classification: s.meta?.classification || null,
+    cookieNames: s.meta?.cookieNames || s.cookies.map((c) => c.name).filter(Boolean),
+  };
+  supabaseClient.saveSessionCookies(email, { academia: enc, academiaMeta: meta })
+    .catch((err) => log("SESSION", `persist academia cookies failed for ${email}: ${err.message}`));
+}
+
+function persistSPSession(email) {
+  const sp = spSessions[email];
+  if (!sp?.cookies?.length) return;
+  const enc = encryptJSON(sp.cookies);
+  if (!enc) return;
+  supabaseClient.saveSessionCookies(email, { sp: enc })
+    .catch((err) => log("SESSION", `persist SP cookies failed for ${email}: ${err.message}`));
+}
+
+function persistSPPassword(email, password) {
+  if (!password) return;
+  setImmediate(async () => {
+    try {
+      await supabaseClient.saveAcademiaCredentials(email, undefined, encryptPassword(password));
+      log("SP_LOGIN", `SP credentials saved for ${email}`);
+    } catch (err) {
+      log("SP_LOGIN", `Failed to save SP credentials for ${email}: ${err.message}`);
+    }
+  });
+}
+
+async function loadStoredPasswords(email) {
+  const creds = await supabaseClient.getAcademiaCredentials(email);
+  if (!creds) return { password: null, spPassword: null };
+  let password = null;
+  let spPassword = null;
+  try {
+    if (creds.encrypted_password) password = decryptPassword(creds.encrypted_password);
+    if (creds.encrypted_sp_password) spPassword = decryptPassword(creds.encrypted_sp_password);
+  } catch (err) {
+    log("SESSION", `credential decrypt failed for ${email}: ${err.message}`);
+  }
+  return { password, spPassword };
+}
+
+function createAcademiaSession(email, parsed) {
+  sessions[email] = {
+    cookies: parsed.cookies || [],
+    lastActive: Date.now(),
+    backend: "go",
+    cache: {},
+    meta: {
+      email,
+      classification: parsed.classification,
+      cookieNames: parsed.cookieNames || [],
+      finalUrl: parsed.finalUrl || "",
+    },
+  };
+  mergeGoDataIntoCache(sessions[email], parsed.data);
+  persistAcademiaSession(email);
+  return sessions[email];
+}
+
+/**
+ * Re-login to academia with the stored (encrypted) password.
+ * Returns { ok, status, error }.
+ */
+async function autoLoginWithStoredCreds(email, tag = "auto-login") {
+  const { password } = await loadStoredPasswords(email);
+  if (!password) return { ok: false, status: 404, error: "No stored credentials. Please login manually." };
+
+  log("AUTO_LOGIN", `Re-authenticating ${email} via stored credentials (${tag})`);
+  const { parsed } = await runGoPayload(email, {
+    mode: "login_and_fetch",
+    email,
+    password,
+    sections: ["studentInfo", "attendance", "marks", "timetable"],
+    calendarSems: ["odd", "even"],
+  }, tag);
+
+  const cookieCount = Array.isArray(parsed.cookies)
+    ? parsed.cookies.length
+    : (parsed.cookieNames?.length ?? 0);
+  if (!(parsed.success && parsed.classification === GO_CLASS_AUTHENTICATED && cookieCount > 0)) {
+    log("AUTO_LOGIN", `Re-login failed for ${email}: ${parsed.error || parsed.classification}`);
+    return { ok: false, status: 401, error: parsed.error || "Auto-login failed. Please login manually." };
+  }
+
+  createAcademiaSession(email, parsed);
+  supabaseClient.updateAutoLoginTimestamp(email).catch(() => {});
+  warmTimetableFacultyPhotoUrls(email, "AUTO_LOGIN");
+  if (sessions[email]?.cache?.timetable) warmFacultyCache(sessions[email].cache.timetable);
+  return { ok: true, status: 200 };
+}
+
+const restoringAcademia = {};
+
+/**
+ * Make sure sessions[email] exists: reuse memory, else persisted cookies
+ * (validated with a cheap studentInfo fetch), else stored credentials.
+ * Returns { ok, status, error, via }.
+ */
+function restoreAcademiaSession(email) {
+  if (sessions[email]) return Promise.resolve({ ok: true, status: 200, via: "memory" });
+  if (restoringAcademia[email]) return restoringAcademia[email];
+
+  restoringAcademia[email] = (async () => {
+    try {
+      if (Object.keys(sessions).length >= MAX_USERS) {
+        return { ok: false, status: 503, error: "Max users reached. Try again later." };
+      }
+
+      const row = await supabaseClient.getSessionCookies(email);
+      const cookies = decryptJSON(row?.encrypted_academia_cookies);
+      if (Array.isArray(cookies) && cookies.length) {
+        try {
+          const { parsed } = await runGoPayload(email, {
+            mode: "fetch",
+            email,
+            cookies,
+            sections: ["studentInfo"],
+          }, "restore-session");
+          if (parsed.success && parsed.classification === GO_CLASS_AUTHENTICATED && !goResultLooksExpired(parsed)) {
+            createAcademiaSession(email, {
+              ...parsed,
+              cookies: Array.isArray(parsed.cookies) && parsed.cookies.length ? parsed.cookies : cookies,
+              cookieNames: row?.academia_meta?.cookieNames || [],
+            });
+            log("SESSION", `Restored academia session for ${email} from persisted cookies`);
+            // Fill the rest of the cache in the background.
+            setImmediate(() => warmAcademiaSession(email));
+            return { ok: true, status: 200, via: "cookies" };
+          }
+          log("SESSION", `Persisted academia cookies for ${email} no longer valid — falling back to credentials`);
+        } catch (err) {
+          log("SESSION", `Cookie restore failed for ${email}: ${err.message}`);
+        }
+      }
+
+      const result = await autoLoginWithStoredCreds(email, "restore-session");
+      return { ...result, via: "credentials" };
+    } finally {
+      delete restoringAcademia[email];
+    }
+  })();
+  return restoringAcademia[email];
+}
+
+/** Load persisted SP cookies into spSessions (validity is checked on use). */
+async function restoreSPSession(email) {
+  if (spSessions[email]?.cookies?.length) return true;
+  const row = await supabaseClient.getSessionCookies(email);
+  const cookies = decryptJSON(row?.encrypted_sp_cookies);
+  if (!Array.isArray(cookies) || !cookies.length) return false;
+  spSessions[email] = {
+    cookies,
+    lastActive: Date.now(),
+    attendance: spSessions[email]?.attendance || [],
+    studentInfo: spSessions[email]?.studentInfo || {},
+  };
+  if (sessions[email]) sessions[email].spCookies = cookies;
+  log("SP_SESSION", `Restored SP cookies for ${email} from Supabase`);
+  return true;
+}
+
+/**
+ * Run the SP login scraper with a password and translate the result into an
+ * HTTP-shaped outcome: { status, body }. Stores the session on success and
+ * parks a pending captcha (with the password) when the user has to solve it.
+ */
+async function spLoginWithPassword(email, password, { tag = "SP_LOGIN", captchaApiKey } = {}) {
+  const { parsed, stderr, runtime } = await runStudentPortalScraper({
+    mode: "login_and_fetch",
+    email,
+    password,
+    captchaApiKey: captchaApiKey || process.env.CAPTCHA_SOLVE_API_KEY || "",
+    captchaApiUrl: process.env.CAPTCHA_SOLVE_API_URL || "",
+  });
+
+  if (stderr?.trim()) {
+    log(tag, `stderr for ${email} (${runtime}): ${stderr.trim().slice(0, 2000)}`);
+  }
+  if (!parsed) {
+    return { status: 500, body: { error: "Student portal scraper returned no JSON" } };
+  }
+
+  log(tag, `${email} success=${parsed.success} classification=${parsed.classification}${parsed.error ? ` error=${parsed.error}` : ""}`);
+
+  if (parsed.success) {
+    storeSPSessionResult(email, parsed);
+    persistSPPassword(email, password);
+    return {
+      status: 200,
+      body: {
+        message: "Student portal login successful",
+        attendance: parsed.attendance || [],
+        studentInfo: parsed.studentInfo || {},
+      },
+    };
+  }
+
+  // Captcha couldn't be auto-solved — hand the image to the user. The
+  // pending state lets /sp/captcha resume without re-POSTing.
+  if (parsed.classification === "captcha_needed" && parsed.captchaImage) {
+    pendingSPCaptcha[email] = {
+      password,
+      loginState: parsed.loginState || null,
+      cookies: parsed.cookies || [],
+      createdAt: Date.now(),
+    };
+    return {
+      status: 200,
+      body: {
+        captchaRequired: true,
+        captchaImage: parsed.captchaImage,
+        message: "Enter the captcha shown below to finish logging in.",
+      },
+    };
+  }
+
+  // Auto-solve got the captcha wrong (login POST failed). Re-issue a fresh
+  // captcha for the user to solve manually — prepare_only is GET-only, so
+  // no extra login attempt is consumed.
+  if (parsed.classification === "captcha_failed") {
+    const { parsed: fresh } = await runStudentPortalScraper({ mode: "prepare_only", email })
+      .catch(() => ({ parsed: null }));
+    if (fresh?.classification === "captcha_needed" && fresh.captchaImage) {
+      pendingSPCaptcha[email] = {
+        password,
+        loginState: fresh.loginState || null,
+        cookies: fresh.cookies || [],
+        createdAt: Date.now(),
+      };
+      return {
+        status: 200,
+        body: {
+          captchaRequired: true,
+          captchaImage: fresh.captchaImage,
+          message: "Auto-solve read that one wrong — please type the new captcha below.",
+        },
+      };
+    }
+  }
+
+  if (parsed.classification === "invalid_credentials") {
+    return { status: 401, body: { error: parsed.error || "Invalid credentials" } };
+  }
+  return { status: 500, body: { error: parsed.error || "Student portal login failed" } };
+}
+
+const spAutoLogins = {};
+
+/**
+ * Log in to the Student Portal with the stored SP password (no user input).
+ * Returns the same { status, body } shape as spLoginWithPassword, or
+ * { status: 404 } when no SP password is stored.
+ */
+function spAutoLogin(email) {
+  if (spAutoLogins[email]) return spAutoLogins[email];
+  spAutoLogins[email] = (async () => {
+    try {
+      const { spPassword } = await loadStoredPasswords(email);
+      if (!spPassword) {
+        return { status: 404, body: { error: "No student portal session. Please login via /sp/login first." } };
+      }
+      log("SP_SESSION", `Auto re-login to Student Portal for ${email} with stored password`);
+      return await spLoginWithPassword(email, spPassword, { tag: "SP_AUTO" });
+    } catch (err) {
+      return { status: 500, body: { error: err.message } };
+    } finally {
+      delete spAutoLogins[email];
+    }
+  })();
+  return spAutoLogins[email];
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -718,7 +1025,9 @@ async function hydrateGoSession(email, { sections = [], calendarSems = [], softF
       if (!currentSession) throw Object.assign(new Error("No session"), { expired: true });
 
       if (Array.isArray(parsed.cookies) && parsed.cookies.length) {
+        const changed = JSON.stringify(parsed.cookies) !== JSON.stringify(currentSession.cookies);
         currentSession.cookies = parsed.cookies;
+        if (changed) persistAcademiaSession(email);
       }
       mergeGoDataIntoCache(currentSession, parsed.data);
       currentSession.meta = {
@@ -879,13 +1188,8 @@ setInterval(async () => {
       await destroySession(email, `expired (inactive > ${SESSION_TTL_MS / 60000}m)`);
     }
   }
-  // Clean up expired SP sessions too
-  for (const email of Object.keys(spSessions)) {
-    if (now - spSessions[email].lastActive > SESSION_TTL_MS) {
-      log("SP_SESSION", `SP session for ${email} expired (inactive > ${SESSION_TTL_MS / 60000}m)`);
-      delete spSessions[email];
-    }
-  }
+  // SP sessions are not expired on inactivity: the cookies are persisted and
+  // validated on use, with an automatic re-login when the portal rejects them.
   // Clean up stale pending captcha challenges
   for (const email of Object.keys(pendingSPCaptcha)) {
     if (now - pendingSPCaptcha[email].createdAt > SP_CAPTCHA_TTL_MS) {
@@ -943,6 +1247,30 @@ const loginLimiter = rateLimit({
 });
 
 app.use(express.json({ limit: "10kb" }));
+
+// Transparent session restore: any data route hit without an in-memory
+// academia session first tries persisted cookies, then stored credentials.
+// Best-effort — the route's own "No active session" handling still applies.
+const RESTORE_PATHS = new Set([
+  "/attendance", "/marks", "/timetable", "/student", "/calendar", "/init",
+  "/summary", "/all", "/schedule", "/faculty-photo", "/student-photo",
+  "/sp/attendance", "/sp/student",
+]);
+app.use(async (req, _res, next) => {
+  if (req.method !== "GET" || !RESTORE_PATHS.has(req.path)) return next();
+  const email = typeof req.query.email === "string" ? req.query.email.trim() : "";
+  if (!email) return next();
+  if (!sessions[email]) {
+    try {
+      const result = await restoreAcademiaSession(email);
+      if (!result.ok) log("SESSION", `Restore on ${req.path} for ${email}: ${result.error}`);
+    } catch (err) {
+      log("SESSION", `Restore on ${req.path} for ${email} threw: ${err.message}`);
+    }
+  }
+  if (!spSessions[email]) await restoreSPSession(email).catch(() => false);
+  next();
+});
 
 // ── Middleware: JSON error wrapper ─────────────────────────────────────────────
 app.use((req, res, next) => {
@@ -1070,19 +1398,7 @@ app.post("/login", loginLimiter, async (req, res) => {
       return res.fail(status, parsed.error || "Login failed");
     }
 
-    sessions[email] = {
-      cookies: parsed.cookies || [],
-      lastActive: Date.now(),
-      backend: "go",
-      cache: {},
-      meta: {
-        email,
-        classification: parsed.classification,
-        cookieNames: parsed.cookieNames || [],
-        finalUrl: parsed.finalUrl || "",
-      },
-    };
-    mergeGoDataIntoCache(sessions[email], parsed.data);
+    createAcademiaSession(email, parsed);
     if (parsed.error) {
       log("LOGIN", `Login ok with partial fetch for ${email}: ${parsed.error}`);
     }
@@ -1107,45 +1423,25 @@ app.post("/login", loginLimiter, async (req, res) => {
     // Only attempt if spPassword was explicitly provided to avoid lockout from wrong password
     if (spPassword) {
       setImmediate(() => {
-        runStudentPortalScraper({
-          mode: "login_and_fetch",
-          email,
-          password: spPassword,
-          captchaApiKey: process.env.CAPTCHA_SOLVE_API_KEY || "",
-          captchaApiUrl: process.env.CAPTCHA_SOLVE_API_URL || "",
-        }).then(({ parsed, stderr }) => {
-          if (stderr?.trim()) {
-            log("SP_LOGIN", `Background stderr for ${email}: ${stderr.trim().slice(0, 2000)}`);
-          }
-          if (parsed?.success) {
-            spSessions[email] = {
-              cookies: parsed.cookies || [],
-              lastActive: Date.now(),
-              attendance: parsed.attendance || [],
-              studentInfo: parsed.studentInfo || {},
-            };
-            const session = sessions[email];
-            if (session) {
-              session.spCookies = parsed.cookies || [];
-              session.meta = {
-                ...session.meta,
-                spClassification: parsed.classification,
-                spLoginAt: Date.now(),
-              };
-              if (parsed.attendance?.length) {
-                session.cache.spAttendance = parsed.attendance;
-              }
-              if (parsed.studentInfo?.name) {
-                session.cache.spStudentInfo = parsed.studentInfo;
-              }
-            }
-            log("SP_LOGIN", `Background SP login for ${email}: cached ${parsed.attendance?.length || 0} attendance records${parsed.error ? ` (error: ${parsed.error})` : ""}`);
+        spLoginWithPassword(email, spPassword, { tag: "SP_LOGIN" }).then((r) => {
+          if (r.status === 200 && !r.body.captchaRequired) {
+            log("SP_LOGIN", `Background SP login for ${email}: cached ${r.body.attendance?.length || 0} attendance records`);
+          } else if (r.body.captchaRequired) {
+            log("SP_LOGIN", `Background SP login for ${email} needs a manual captcha — parked for the attendance page`);
           } else {
-            log("SP_LOGIN", `Background SP login failed for ${email}: ${parsed?.error || parsed?.classification || "unknown"}`);
+            log("SP_LOGIN", `Background SP login failed for ${email}: ${r.body.error || "unknown"}`);
           }
         }).catch((err) => {
           log("SP_LOGIN", `Background SP login error for ${email}: ${err.message}`);
         });
+      });
+    } else {
+      // No SP password given this time — reuse persisted SP cookies / stored
+      // SP password so the attendance page doesn't ask again.
+      setImmediate(() => {
+        restoreSPSession(email).then((restored) => {
+          if (!restored) return spAutoLogin(email);
+        }).catch((err) => log("SP_SESSION", `SP restore after login failed for ${email}: ${err.message}`));
       });
     }
 
@@ -1179,54 +1475,16 @@ app.post("/sp-login", loginLimiter, async (req, res) => {
   if (!email || !spPassword) return res.fail(400, "email and spPassword are required");
 
   try {
-    const { parsed, stderr } = await runStudentPortalScraper({
-      mode: "login_and_fetch",
-      email,
-      password: spPassword,
-      captchaApiKey: process.env.CAPTCHA_SOLVE_API_KEY || "",
-      captchaApiUrl: process.env.CAPTCHA_SOLVE_API_URL || "",
+    const r = await spLoginWithPassword(email, spPassword, { tag: "SP_LOGIN" });
+    if (r.status !== 200) {
+      return res.fail(r.status, r.body.error || "Student Portal login failed — check your SP password and try again");
+    }
+    if (r.body.captchaRequired) return res.ok(r.body);
+    return res.ok({
+      message: "Student Portal login successful",
+      attendanceCount: r.body.attendance?.length || 0,
+      studentInfo: r.body.studentInfo || null,
     });
-
-    if (stderr?.trim()) {
-      log("SP_LOGIN", `stderr for ${email}: ${stderr.trim().slice(0, 1000)}`);
-    }
-
-    if (parsed?.success) {
-      spSessions[email] = {
-        cookies: parsed.cookies || [],
-        lastActive: Date.now(),
-        attendance: parsed.attendance || [],
-        studentInfo: parsed.studentInfo || {},
-      };
-      const session = sessions[email];
-      if (session) {
-        session.spCookies = parsed.cookies || [];
-        session.meta = { ...session.meta, spClassification: parsed.classification, spLoginAt: Date.now() };
-        if (parsed.attendance?.length) session.cache.spAttendance = parsed.attendance;
-        if (parsed.studentInfo?.name) session.cache.spStudentInfo = parsed.studentInfo;
-      }
-
-      // Save SP password to credentials (best-effort)
-      setImmediate(async () => {
-        try {
-          const encSpPwd = encryptPassword(spPassword);
-          await supabaseClient.saveAcademiaCredentials(email, undefined, encSpPwd);
-          log("SP_LOGIN", `SP credentials saved for ${email}`);
-        } catch (err) {
-          log("SP_LOGIN", `Failed to save SP credentials for ${email}: ${err.message}`);
-        }
-      });
-
-      log("SP_LOGIN", `SP login success for ${email}: ${parsed.attendance?.length || 0} attendance records`);
-      return res.ok({
-        message: "Student Portal login successful",
-        attendanceCount: parsed.attendance?.length || 0,
-        studentInfo: parsed.studentInfo || null,
-      });
-    } else {
-      log("SP_LOGIN", `SP login failed for ${email}: ${parsed?.error || parsed?.classification || "unknown"}`);
-      return res.fail(401, parsed?.error || "Student Portal login failed — check your SP password and try again");
-    }
   } catch (err) {
     log("SP_LOGIN", `SP login error for ${email}: ${err.message}`);
     return res.fail(500, err.message);
@@ -1243,109 +1501,28 @@ app.post("/auto-login", async (req, res) => {
   const { email } = req.body;
   if (!email) return res.fail(400, "email is required");
 
-  // If session is still alive, reuse it
-  if (sessions[email]) {
+  // Memory → persisted cookies → stored credentials.
+  const alreadyActive = Boolean(sessions[email]);
+  const result = await restoreAcademiaSession(email);
+  if (!result.ok) {
+    log("AUTO_LOGIN", `Could not restore ${email}: ${result.error}`);
+    return res.fail(result.status || 401, result.error || "Auto-login failed. Please login manually.");
+  }
+  if (alreadyActive) {
     touch(email);
     log("AUTO_LOGIN", `Session still active for ${email} — no re-login needed`);
-    return res.ok({ message: "Session active", reused: true });
+  } else {
+    log("AUTO_LOGIN", `Session restored for ${email} via ${result.via}`);
   }
 
-  if (Object.keys(sessions).length >= MAX_USERS) {
-    log("AUTO_LOGIN", `Max users reached — rejected ${email}`);
-    return res.fail(503, "Max users reached. Try again later.");
-  }
+  // Student Portal: reuse persisted cookies, else stored SP password (async).
+  setImmediate(() => {
+    restoreSPSession(email).then((restored) => {
+      if (!restored) return spAutoLogin(email);
+    }).catch((err) => log("SP_SESSION", `SP restore on auto-login failed for ${email}: ${err.message}`));
+  });
 
-  try {
-    const creds = await supabaseClient.getAcademiaCredentials(email);
-    if (!creds || !creds.encrypted_password) {
-      return res.fail(404, "No stored credentials. Please login manually.");
-    }
-
-    let password, spPassword;
-    try {
-      password = decryptPassword(creds.encrypted_password);
-      if (creds.encrypted_sp_password) {
-        spPassword = decryptPassword(creds.encrypted_sp_password);
-      }
-    } catch (decryptErr) {
-      log("AUTO_LOGIN", `Decryption failed for ${email}: ${decryptErr.message}`);
-      return res.fail(500, "Credential decryption failed. Please login manually.");
-    }
-
-    log("AUTO_LOGIN", `Re-authenticating ${email} via stored credentials`);
-    const { parsed } = await runGoPayload(email, {
-      mode: "login_and_fetch",
-      email,
-      password,
-      sections: ["studentInfo", "attendance", "marks", "timetable"],
-      calendarSems: ["odd", "even"],
-    }, "auto-login");
-
-    const cookieCount = Array.isArray(parsed.cookies)
-      ? parsed.cookies.length
-      : (parsed.cookieNames?.length ?? 0);
-
-    if (!(parsed.success && parsed.classification === GO_CLASS_AUTHENTICATED && cookieCount > 0)) {
-      log("AUTO_LOGIN", `Re-login failed for ${email}: ${parsed.error || parsed.classification}`);
-      return res.fail(401, parsed.error || "Auto-login failed. Please login manually.");
-    }
-
-    sessions[email] = {
-      cookies: parsed.cookies || [],
-      lastActive: Date.now(),
-      backend: "go",
-      cache: {},
-      meta: {
-        email,
-        classification: parsed.classification,
-        cookieNames: parsed.cookieNames || [],
-        finalUrl: parsed.finalUrl || "",
-      },
-    };
-    mergeGoDataIntoCache(sessions[email], parsed.data);
-
-    log("AUTO_LOGIN", `Auto-login success for ${email}`);
-    supabaseClient.updateAutoLoginTimestamp(email).catch(() => {});
-    warmAcademiaSession(email);
-
-    // Background SP login — only if we have a stored SP password
-    if (spPassword) {
-      setImmediate(() => {
-        runStudentPortalScraper({
-          mode: "login_and_fetch",
-          email,
-          password: spPassword,
-          captchaApiKey: process.env.CAPTCHA_SOLVE_API_KEY || "",
-          captchaApiUrl: process.env.CAPTCHA_SOLVE_API_URL || "",
-        }).then(({ parsed: spParsed, stderr }) => {
-          if (stderr?.trim()) {
-            log("SP_LOGIN", `Auto-login SP stderr for ${email}: ${stderr.trim().slice(0, 2000)}`);
-          }
-          if (spParsed?.success) {
-            spSessions[email] = {
-              cookies: spParsed.cookies || [],
-              lastActive: Date.now(),
-              attendance: spParsed.attendance || [],
-              studentInfo: spParsed.studentInfo || {},
-            };
-            const session = sessions[email];
-            if (session) {
-              session.spCookies = spParsed.cookies || [];
-              session.meta = { ...session.meta, spClassification: spParsed.classification, spLoginAt: Date.now() };
-              if (spParsed.attendance?.length) session.cache.spAttendance = spParsed.attendance;
-              if (spParsed.studentInfo?.name) session.cache.spStudentInfo = spParsed.studentInfo;
-            }
-            log("SP_LOGIN", `Auto-login SP cached ${spParsed.attendance?.length || 0} attendance records for ${email}`);
-          }
-        }).catch((err) => log("SP_LOGIN", `Auto-login SP error for ${email}: ${err.message}`));
-      });
-    }
-
-    return res.ok({ message: "Auto-login successful", cookieCount });
-  } catch (err) {
-    log("AUTO_LOGIN", `Error for ${email}: ${err.message}`);
-    return res.fail(500, err.message);
-  }
+  return res.ok({ message: alreadyActive ? "Session active" : "Session restored", reused: alreadyActive, via: result.via });
 });
 
 /**
@@ -1357,6 +1534,8 @@ app.post("/logout", async (req, res) => {
   if (!email) return res.fail(400, "email is required");
   await destroySession(email, "logged out");
   delete spSessions[email];
+  delete pendingSPCaptcha[email];
+  supabaseClient.clearSessionCookies(email).catch(() => {});
   res.ok({ message: "Session destroyed" });
 });
 
@@ -2831,78 +3010,9 @@ app.post("/sp/login", loginLimiter, async (req, res) => {
 
   try {
     log("SP_LOGIN", `Authenticating ${email} via Student Portal scraper`);
-
-    const apiKey = captchaApiKey || process.env.CAPTCHA_SOLVE_API_KEY || "";
-    const { parsed, stderr, runtime } = await runStudentPortalScraper({
-      mode: "login_and_fetch",
-      email,
-      password,
-      captchaApiKey: apiKey,
-      captchaApiUrl: process.env.CAPTCHA_SOLVE_API_URL || "",
-    });
-
-    if (stderr?.trim()) {
-      log("SP_LOGIN", `stderr for ${email} (${runtime}): ${stderr.trim()}`);
-    }
-
-    if (!parsed) {
-      return res.fail(500, "Student portal scraper returned no JSON");
-    }
-
-    log("SP_LOGIN", `${email} success=${parsed.success} classification=${parsed.classification}${parsed.error ? ` error=${parsed.error}` : ""}`);
-
-    if (!parsed.success) {
-      // Captcha couldn't be auto-solved — hand the image to the user.
-      // The pending state lets /sp/captcha resume without re-POSTing.
-      if (parsed.classification === "captcha_needed" && parsed.captchaImage) {
-        pendingSPCaptcha[email] = {
-          password,
-          loginState: parsed.loginState || null,
-          cookies: parsed.cookies || [],
-          createdAt: Date.now(),
-        };
-        return res.ok({
-          captchaRequired: true,
-          captchaImage: parsed.captchaImage,
-          message: "Enter the captcha shown below to finish logging in.",
-        });
-      }
-      // Auto-solve got the captcha wrong (login POST failed). Re-issue a
-      // fresh captcha for the user to solve manually instead of erroring —
-      // prepare_only is GET-only, so no extra login attempt is consumed.
-      if (parsed.classification === "captcha_failed") {
-        const { parsed: fresh } = await runStudentPortalScraper({
-          mode: "prepare_only",
-          email,
-        }).catch(() => ({ parsed: null }));
-        if (fresh?.classification === "captcha_needed" && fresh.captchaImage) {
-          pendingSPCaptcha[email] = {
-            password,
-            loginState: fresh.loginState || null,
-            cookies: fresh.cookies || [],
-            createdAt: Date.now(),
-          };
-          return res.ok({
-            captchaRequired: true,
-            captchaImage: fresh.captchaImage,
-            message: "Auto-solve read that one wrong — please type the new captcha below.",
-          });
-        }
-      }
-      if (parsed.classification === "invalid_credentials") {
-        return res.fail(401, parsed.error || "Invalid credentials");
-      }
-      return res.fail(500, parsed.error || "Student portal login failed");
-    }
-
-    // Store in persistent spSessions (survives academia session death)
-    storeSPSessionResult(email, parsed);
-
-    return res.ok({
-      message: "Student portal login successful",
-      attendance: parsed.attendance || [],
-      studentInfo: parsed.studentInfo || {},
-    });
+    const r = await spLoginWithPassword(email, password, { tag: "SP_LOGIN", captchaApiKey });
+    if (r.status !== 200) return res.fail(r.status, r.body.error);
+    return res.ok(r.body);
   } catch (err) {
     log("SP_LOGIN", `Error for ${email}: ${err.message}`);
     return res.fail(500, err.message);
@@ -2944,6 +3054,7 @@ app.post("/sp/captcha", loginLimiter, async (req, res) => {
     if (parsed?.success) {
       delete pendingSPCaptcha[email];
       storeSPSessionResult(email, parsed);
+      persistSPPassword(email, pending.password);
       return res.ok({
         message: "Student portal login successful",
         attendance: parsed.attendance || [],
@@ -3026,39 +3137,45 @@ app.get("/sp/attendance", async (req, res) => {
   const { email } = req.query;
   if (!email) return res.fail(400, "email query param is required");
 
-  // Try persistent SP session first
-  const spSess = spSessions[email];
-  const session = sessions[email];
-  const spCookies = spSess?.cookies || session?.spCookies || [];
-
-  if (!spCookies.length) {
-    return res.fail(401, "No student portal session. Please login via /sp/login first.");
-  }
-
   try {
-    // Return cached data if available (from spSessions or academia session)
+    await restoreSPSession(email).catch(() => false);
+    const spSess = spSessions[email];
+    const session = sessions[email];
+    const spCookies = spSess?.cookies || session?.spCookies || [];
+
+    // Cached data first (from spSessions or the academia session)
     const cachedAtt = spSess?.attendance?.length ? spSess.attendance : session?.cache?.spAttendance;
     if (cachedAtt?.length) {
+      if (spSess) spSess.lastActive = Date.now();
       return res.ok({ attendance: cachedAtt, fromCache: true });
     }
 
     // Fetch with existing cookies
-    const { parsed } = await runStudentPortalScraper({
-      mode: "fetch",
-      email,
-      cookies: spCookies,
-    });
-
-    if (!parsed || !parsed.success) {
-      return res.fail(500, parsed?.error || "Failed to fetch attendance from student portal");
+    if (spCookies.length) {
+      const { parsed } = await runStudentPortalScraper({ mode: "fetch", email, cookies: spCookies });
+      if (parsed?.success && parsed.attendance?.length) {
+        if (spSess) { spSess.attendance = parsed.attendance; spSess.lastActive = Date.now(); }
+        if (session) session.cache.spAttendance = parsed.attendance;
+        return res.ok({ attendance: parsed.attendance });
+      }
+      log("SP_ATTENDANCE", `SP cookies for ${email} rejected (${parsed?.error || "no data"}) — re-logging in`);
+      delete spSessions[email];
+      if (session) session.spCookies = [];
     }
 
-    if (parsed.attendance && parsed.attendance.length) {
-      if (spSess) spSess.attendance = parsed.attendance;
-      if (session) session.cache.spAttendance = parsed.attendance;
+    // No usable session — log in again with the stored SP password. Only
+    // when auto-solve fails does the user get a captcha to type.
+    const r = await spAutoLogin(email);
+    if (r.status === 200 && r.body.captchaRequired) {
+      return res.ok({ attendance: [], captchaRequired: true, captchaImage: r.body.captchaImage, message: r.body.message });
     }
-
-    return res.ok({ attendance: parsed.attendance || [] });
+    if (r.status === 200) {
+      return res.ok({ attendance: r.body.attendance || [] });
+    }
+    if (r.status === 404) {
+      return res.fail(401, "No student portal session. Please login via /sp/login first.");
+    }
+    return res.fail(r.status, r.body.error || "Failed to fetch attendance from student portal");
   } catch (err) {
     log("SP_ATTENDANCE", `Error for ${email}: ${err.message}`);
     return res.fail(500, err.message);
@@ -3073,6 +3190,7 @@ app.get("/sp/student", async (req, res) => {
   const { email } = req.query;
   if (!email) return res.fail(400, "email query param is required");
 
+  await restoreSPSession(email).catch(() => false);
   const spSess = spSessions[email];
   const session = sessions[email];
   const spCookies = spSess?.cookies || session?.spCookies || [];
@@ -3161,89 +3279,33 @@ async function refreshAllUsers() {
         continue;
       }
 
-      // Session is dead — re-login using stored credentials
-      let password, spPassword;
+      // Session is dead — persisted cookies first, then stored credentials.
+      let spPassword;
       try {
-        password = decryptPassword(row.encrypted_password);
-        if (row.encrypted_sp_password) {
-          spPassword = decryptPassword(row.encrypted_sp_password);
-        }
+        if (row.encrypted_sp_password) spPassword = decryptPassword(row.encrypted_sp_password);
       } catch (decryptErr) {
-        log("REFRESH", `Decryption failed for ${email}: ${decryptErr.message}`);
+        log("REFRESH", `SP password decryption failed for ${email}: ${decryptErr.message}`);
+      }
+
+      const restored = await restoreAcademiaSession(email);
+      if (!restored.ok) {
+        log("REFRESH", `Re-login failed for ${email}: ${restored.error}`);
         continue;
       }
+      log("REFRESH", `Session for ${email} restored via ${restored.via}`);
 
-      if (Object.keys(sessions).length >= MAX_USERS) {
-        log("REFRESH", `Max users reached — skipping re-login for ${email}`);
-        continue;
-      }
-
-      log("REFRESH", `Re-logging in ${email} via stored credentials`);
-      const { parsed } = await runGoPayload(email, {
-        mode: "login_and_fetch",
-        email,
-        password,
-        sections: ["studentInfo", "attendance", "marks", "timetable"],
-        calendarSems: ["odd", "even"],
-      }, `refresh-${email}`);
-
-      const cookieCount = Array.isArray(parsed.cookies)
-        ? parsed.cookies.length
-        : (parsed.cookieNames?.length ?? 0);
-
-      if (!(parsed.success && parsed.classification === GO_CLASS_AUTHENTICATED && cookieCount > 0)) {
-        log("REFRESH", `Re-login failed for ${email}: ${parsed.error || parsed.classification}`);
-        continue;
-      }
-
-      sessions[email] = {
-        cookies: parsed.cookies || [],
-        lastActive: Date.now(),
-        backend: "go",
-        cache: {},
-        meta: {
-          email,
-          classification: parsed.classification,
-          cookieNames: parsed.cookieNames || [],
-          finalUrl: parsed.finalUrl || "",
-        },
-      };
-      mergeGoDataIntoCache(sessions[email], parsed.data);
-      supabaseClient.updateAutoLoginTimestamp(email).catch(() => {});
-      warmTimetableFacultyPhotoUrls(email, "REFRESH");
-      if (sessions[email]?.cache?.timetable) {
-        warmFacultyCache(sessions[email].cache.timetable);
-      }
-      log("REFRESH", `Re-login + refresh success for ${email}`);
-
-      // Background SP login — only if stored SP password exists
-      if (spPassword) {
-        setImmediate(() => {
-          runStudentPortalScraper({
-            mode: "login_and_fetch",
-            email,
-            password: spPassword,
-            captchaApiKey: process.env.CAPTCHA_SOLVE_API_KEY || "",
-            captchaApiUrl: process.env.CAPTCHA_SOLVE_API_URL || "",
-          }).then(({ parsed: spParsed }) => {
-            if (spParsed?.success) {
-              spSessions[email] = {
-                cookies: spParsed.cookies || [],
-                lastActive: Date.now(),
-                attendance: spParsed.attendance || [],
-                studentInfo: spParsed.studentInfo || {},
-              };
-              const session = sessions[email];
-              if (session) {
-                session.spCookies = spParsed.cookies || [];
-                if (spParsed.attendance?.length) session.cache.spAttendance = spParsed.attendance;
-                if (spParsed.studentInfo?.name) session.cache.spStudentInfo = spParsed.studentInfo;
-              }
-              log("REFRESH", `SP refresh cached ${spParsed.attendance?.length || 0} attendance records for ${email}`);
+      // Student Portal: reuse persisted cookies, else stored SP password.
+      setImmediate(() => {
+        restoreSPSession(email).then((restored) => {
+          if (restored) return;
+          if (!spPassword) return;
+          return spLoginWithPassword(email, spPassword, { tag: "REFRESH" }).then((r) => {
+            if (r.status === 200 && !r.body.captchaRequired) {
+              log("REFRESH", `SP refresh cached ${r.body.attendance?.length || 0} attendance records for ${email}`);
             }
-          }).catch((err) => log("REFRESH", `SP refresh error for ${email}: ${err.message}`));
-        });
-      }
+          });
+        }).catch((err) => log("REFRESH", `SP refresh error for ${email}: ${err.message}`));
+      });
     } catch (err) {
       log("REFRESH", `Error refreshing ${email}: ${err.message}`);
     }

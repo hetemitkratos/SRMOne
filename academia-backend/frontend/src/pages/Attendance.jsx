@@ -60,7 +60,13 @@ export default function Attendance() {
           // Attempt SP fetch automatically
           try {
             const spData = await api.spAttendance(user.email);
-            if (!cancelled && spData.attendance && spData.attendance.length > 0) {
+            if (!cancelled && spData.captchaRequired) {
+              // Stored SP password is known, only the captcha needs a human
+              setShowSpLogin(true);
+              setSpCaptchaImage(spData.captchaImage);
+              setSpCaptchaAnswer("");
+              setSpError(spData.message || "Type the captcha to reconnect to the Student Portal.");
+            } else if (!cancelled && spData.attendance && spData.attendance.length > 0) {
               setRecords(spData.attendance);
               setSpSource(true);
               setSpError("");
@@ -103,7 +109,14 @@ export default function Attendance() {
             if (cancelled) return;
             try {
               const spData = await api.spAttendance(user.email);
-              if (!cancelled && spData.attendance && spData.attendance.length > 0) {
+              if (!cancelled && spData.captchaRequired) {
+                setShowSpLogin(true);
+                setSpCaptchaImage(spData.captchaImage);
+                setSpCaptchaAnswer("");
+                setSpLoading(false);
+                setLoading(false);
+                setSpError(spData.message || "Type the captcha to reconnect to the Student Portal.");
+              } else if (!cancelled && spData.attendance && spData.attendance.length > 0) {
                 setRecords(spData.attendance);
                 setSpSource(true);
                 setSpError("");
