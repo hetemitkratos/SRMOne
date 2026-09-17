@@ -262,11 +262,10 @@ func sendDirect(method, rawURL string, headers map[string]string, body []byte) (
 	return out, nil
 }
 
-// spRelay forwards each hop through the Vercel function at
-// api/sp-relay.mjs (repo root), which runs in Mumbai.
-// sp.srmist.edu.in answers login POSTs from Render's US egress IP with a
-// generic "Invalid credentials" page regardless of the captcha/password,
-// so production must reach the portal from an Indian IP.
+// spRelay forwards each hop through the Cloudflare Worker in
+// relay/cf-worker. sp.srmist.edu.in answers login POSTs from Render's (and
+// AWS's) egress IPs with a generic "Invalid credentials" page regardless of
+// the captcha/password; Cloudflare's network is accepted.
 type spRelay struct {
 	url    string
 	secret string
