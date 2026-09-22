@@ -3298,8 +3298,21 @@ app.get("/sp/student", async (req, res) => {
 // Also refreshes faculty photo links.
 
 const REFRESH_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes
+// Users who haven't had an active session or auto-login in this long are treated
+// as dormant and skipped — re-logging them in + pulling all 4 sections every
+// 30 minutes forever (whether or not anyone opens the app) was the single
+// biggest source of Supabase egress. They resume refreshing automatically the
+// next time they actually log in (updateAutoLoginTimestamp bumps last_auto_login).
+const DORMANT_THRESHOLD_MS = 48 * 60 * 60 * 1000; // 48 hours
+// Calendar barely changes term-to-term — only re-pull it once every few cycles
+// instead of on every 30-min refresh (halves the per-user fetch volume).
+const CALENDAR_REFRESH_EVERY_N_CYCLES = 4; // ~every 2 hours
+let refreshCycleCount = 0;
 
 async function refreshAllUsers() {
+  refreshCycleCount++;
+  const refreshCalendar = refreshCycleCount % CALENDAR_REFRESH_EVERY_N_CYCLES === 0;
+
   let emails;
   try {
     emails = await supabaseClient.getAllAutoLoginEmails();
@@ -3313,9 +3326,24 @@ async function refreshAllUsers() {
     return;
   }
 
-  log("REFRESH", `Refreshing data for ${emails.length} user(s): ${emails.map(e => e.academia_email).join(", ")}`);
+  const now = Date.now();
+  const active = emails.filter((row) => {
+    if (sessions[row.academia_email]) return true;
+    if (!row.last_auto_login) return false;
+    return now - new Date(row.last_auto_login).getTime() < DORMANT_THRESHOLD_MS;
+  });
+  const dormantCount = emails.length - active.length;
+  if (dormantCount > 0) {
+    log("REFRESH", `Skipping ${dormantCount} dormant user(s) (no activity in ${DORMANT_THRESHOLD_MS / 3600000}h)`);
+  }
+  if (!active.length) {
+    log("REFRESH", "No active users to refresh");
+    return;
+  }
 
-  for (const row of emails) {
+  log("REFRESH", `Refreshing data for ${active.length} user(s): ${active.map(e => e.academia_email).join(", ")}`);
+
+  for (const row of active) {
     const email = row.academia_email;
     try {
       // If session is still alive, just refresh data
@@ -3325,7 +3353,7 @@ async function refreshAllUsers() {
         try {
           await hydrateGoSession(email, {
             sections: ["studentInfo", "attendance", "marks", "timetable"],
-            calendarSems: ["odd", "even"],
+            ...(refreshCalendar ? { calendarSems: ["odd", "even"] } : {}),
             softFail: true,
           });
           warmTimetableFacultyPhotoUrls(email, "REFRESH");
