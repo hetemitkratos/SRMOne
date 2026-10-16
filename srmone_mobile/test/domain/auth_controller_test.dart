@@ -48,8 +48,15 @@ class _FakeOrchestrator extends SessionSyncOrchestrator {
   Future<SyncResult> syncAll({
     bool forceFreshLogin = false,
     SpCaptchaPrompt? onSpCaptcha,
-  }) async =>
-      result;
+    SyncProgress? onProgress,
+    bool includeStudentPortal = true,
+  }) async {
+    lastIncludedStudentPortal = includeStudentPortal;
+    onProgress?.call(SyncStep.signingIn);
+    return result;
+  }
+
+  bool? lastIncludedStudentPortal;
 }
 
 void main() {
@@ -90,24 +97,31 @@ void main() {
   });
 
   test('successful sign-in keeps the credentials', () async {
-    final controller = AuthController(
-      vault: vault,
-      orchestrator: _FakeOrchestrator(
-        const SyncResult(
-          status: SyncStatus.success,
-          subjectsUpdated: 6,
-          sessionWasRefreshed: true,
-        ),
-        db,
-        vault,
+    final orchestrator = _FakeOrchestrator(
+      const SyncResult(
+        status: SyncStatus.success,
+        subjectsUpdated: 6,
+        sessionWasRefreshed: true,
       ),
+      db,
+      vault,
     );
+    final controller = AuthController(vault: vault, orchestrator: orchestrator);
+    final seen = <AuthState>[];
+    controller.addListener(seen.add, fireImmediately: false);
 
-    final ok = await controller.login(email: 'ab1234', password: 'right');
+    final ok = await controller.login(
+        email: 'ab1234', password: 'right', spPassword: 'sp');
 
     expect(ok, isTrue);
     expect(controller.state, isA<Authenticated>());
     expect(vault.values['email'], 'ab1234@srmist.edu.in');
+    expect(vault.values['sp'], 'sp');
+    // The Student Portal connects afterwards and must not block sign-in.
+    expect(orchestrator.lastIncludedStudentPortal, isFalse);
+    // The step reported by the sync is surfaced to the login screen.
+    expect(seen.whereType<AuthLoading>().map((s) => s.step),
+        contains(SyncStep.signingIn));
   });
 
   test('friendlySyncError hides raw network exceptions', () {

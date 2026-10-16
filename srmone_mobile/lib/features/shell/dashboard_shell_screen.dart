@@ -9,6 +9,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../../main.dart';
 import '../auth/auth_controller.dart';
+import '../auth/student_portal_banner.dart';
 import '../notifications/notification_bell_sheet.dart';
 
 class DashboardShellScreen extends ConsumerWidget {
@@ -97,7 +98,12 @@ class DashboardShellScreen extends ConsumerWidget {
           const SizedBox(width: 8),
         ],
       ),
-      body: navigationShell,
+      body: Column(
+        children: [
+          const StudentPortalBanner(),
+          Expanded(child: navigationShell),
+        ],
+      ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: navigationShell.currentIndex,
         onDestinationSelected: (index) {

@@ -434,8 +434,20 @@ class AppDatabase extends _$AppDatabase {
 
   Future<void> upsertAttendanceSnapshot(
       AttendanceSnapshotsCompanion entry) async {
-    // Use insert with conflict resolution on (academiaEmail, snapshotDate)
-    await into(attendanceSnapshots).insertOnConflictUpdate(entry);
+    // One snapshot per (academiaEmail, snapshotDate). The conflict target must
+    // be that unique key: insertOnConflictUpdate only targets the primary key
+    // (id), so a second sync on the same day failed with
+    // "UNIQUE constraint failed" and aborted the whole save.
+    await into(attendanceSnapshots).insert(
+      entry,
+      onConflict: DoUpdate(
+        (_) => entry,
+        target: [
+          attendanceSnapshots.academiaEmail,
+          attendanceSnapshots.snapshotDate,
+        ],
+      ),
+    );
   }
 
   Stream<List<AttendanceSnapshot>> watchAttendanceSnapshots(

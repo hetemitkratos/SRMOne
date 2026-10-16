@@ -8,6 +8,7 @@ import 'package:go_router/go_router.dart';
 
 import 'core/constants/asset_paths.dart';
 import 'core/database/app_database.dart';
+import 'core/navigation/root_navigator.dart';
 import 'features/attendance/attendance_screen.dart';
 import 'features/auth/auth_controller.dart';
 import 'features/auth/biometric_lock_screen.dart';
@@ -44,6 +45,7 @@ final _routerProvider = Provider<GoRouter>((ref) {
   final authNotifier = _RouterNotifier(ref);
 
   return GoRouter(
+    navigatorKey: rootNavigatorKey,
     initialLocation: '/',
     refreshListenable: authNotifier,
     redirect: (context, state) {

@@ -76,6 +76,52 @@ class SPParsers {
     return names;
   }
 
+  // ─── 2b. CAPTCHA Image URL ──────────────────────────────────────────────────
+
+  /// Absolute URL of the real CAPTCHA image, from `img#secure_captcha`'s
+  /// `data-src` (SCRAPER_SPEC.md §SP step 4). The portal only serves the image
+  /// at this one-time `SCaptchaServlet?ts=…&token=…` URL; the bare servlet
+  /// answers 403 with an empty body. Returns '' when the page has no image.
+  static String extractCaptchaImageUrl(String html, String baseUrl) {
+    final img = html_parser.parse(html).querySelector('img#secure_captcha');
+    final src = (img?.attributes['data-src'] ?? img?.attributes['src'] ?? '')
+        .trim()
+        .replaceAll('&amp;', '&');
+    if (src.isEmpty || src.startsWith('data:')) return '';
+    if (src.startsWith('http')) return src;
+    return Uri.parse(baseUrl).resolve(src).toString();
+  }
+
+  /// Port of Go `isSPLoginFailed`. Success always lands on the HRDSystem
+  /// dashboard; landing back on LoginServlet/youLogin.jsp means the portal
+  /// rejected the attempt, whether or not it rendered an error alert.
+  static bool isLoginFailed(String finalUrl, String body) {
+    final location = finalUrl.toLowerCase();
+    if (location.contains('hrdsystem')) return false;
+    if (location.contains('loginservlet') ||
+        location.contains('youlogin.jsp')) {
+      return true;
+    }
+    final lower = body.toLowerCase();
+    return lower.contains('alert-danger') &&
+        (lower.contains('invalid credentials') ||
+            lower.contains('invalid captcha') ||
+            lower.contains('enter valid captcha') ||
+            lower.contains('login failed') ||
+            lower.contains('incorrect password') ||
+            lower.contains('account locked'));
+  }
+
+  /// Text of the portal's `div.alert-danger` after a failed sign-in, with
+  /// whitespace collapsed. Returns '' when there is no alert.
+  static String extractAlertText(String html) {
+    final alert = html_parser.parse(html).querySelector('div.alert-danger');
+    if (alert == null) return '';
+    final text = alert.text.split(RegExp(r'\s+')).where((w) => w.isNotEmpty);
+    final joined = text.join(' ');
+    return joined.length > 300 ? joined.substring(0, 300) : joined;
+  }
+
   // ─── 3. Student Portal Attendance Parser ───────────────────────────────────
 
   /// Parses attendance records from studentAttendanceDetails.jsp (iden=9).
