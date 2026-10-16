@@ -8,6 +8,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
+import 'package:drift/drift.dart' as drift;
 import 'package:drift/native.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -196,5 +197,18 @@ void main() {
     await orchestrator.syncAll(includeStudentPortal: false, forceDetails: true);
     expect(academia.requests, contains('Unified_Time_Table_2025_batch_2'));
     expect(academia.requests, contains('Academic_Reports'));
+  });
+
+  test('a missing other-semester calendar does not force a download', () async {
+    await db.upsertCalendar(CalendarCacheCompanion(
+      academiaEmail: const drift.Value(_email),
+      semester: drift.Value(semesterFor(DateTime.now())),
+      monthsJson: const drift.Value('[]'),
+      updatedAt: drift.Value(DateTime.now().millisecondsSinceEpoch),
+    ));
+    academia.releaseGrid.complete();
+    await orchestrator.syncAll(includeStudentPortal: false);
+
+    expect(academia.requests, isNot(contains('Academic_Reports')));
   });
 }

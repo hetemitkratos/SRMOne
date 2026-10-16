@@ -641,21 +641,23 @@ class SessionSyncOrchestrator {
     ));
   }
 
-  /// Refreshes the current semester's calendar every sync, and the other
-  /// semester only until it has been cached once.
+  /// Refreshes the current semester's calendar when it is missing, older
+  /// than [SyncTimeouts.detailsMaxAge] or [force]d. The other semester is
+  /// tried alongside it until it has been cached once (it is often not
+  /// published yet, so it must not trigger a download on its own).
   Future<void> _syncCalendars(
       String email, AcademiaClient client, bool force) async {
     final current = semesterFor(DateTime.now());
     final other = current == 'odd' ? 'even' : 'odd';
     final cached = await _db.getCalendar(email, current);
-    final sems = [
-      if (force || cached == null || !_isFresh(cached.updatedAt)) current,
-      if (await _db.getCalendar(email, other) == null) other,
-    ];
-    if (sems.isEmpty) {
+    if (!force && cached != null && _isFresh(cached.updatedAt)) {
       _log('calendar cached, skipping the download');
       return;
     }
+    final sems = [
+      current,
+      if (await _db.getCalendar(email, other) == null) other,
+    ];
     await Future.wait([
       for (final sem in sems)
         client.fetchCalendar(sem).then((raw) async {
