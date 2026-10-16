@@ -8,6 +8,7 @@ import 'package:flutter_svg/flutter_svg.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../../core/constants/asset_paths.dart';
+import '../../domain/services/calendar_day_resolver.dart';
 import '../../domain/services/session_sync_orchestrator.dart';
 import '../auth/auth_controller.dart';
 import '../shared/app_refresher.dart';
@@ -96,21 +97,28 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
                       ],
                     ),
                   )
-                : ListView.builder(
-                    padding: const EdgeInsets.all(16),
-                    itemCount: months.length,
-                    itemBuilder: (context, idx) {
-                      final monthObj = months[idx];
-                      return _buildMonthCard(theme, monthObj);
-                    },
-                  ),
+                : Builder(builder: (context) {
+                    // Open on this month; the others start collapsed. When
+                    // the semester has no current month, show them all.
+                    final current = months.indexWhere(
+                        (m) => isCurrentMonth(m['month']?.toString() ?? ''));
+                    return ListView.builder(
+                      key: PageStorageKey('calendar-$_selectedSemester'),
+                      padding: const EdgeInsets.all(16),
+                      itemCount: months.length,
+                      itemBuilder: (context, idx) => _buildMonthCard(
+                          theme, months[idx],
+                          expanded: current < 0 || idx == current),
+                    );
+                  }),
           );
         },
       ),
     );
   }
 
-  Widget _buildMonthCard(ThemeData theme, Map<String, dynamic> month) {
+  Widget _buildMonthCard(ThemeData theme, Map<String, dynamic> month,
+      {required bool expanded}) {
     final monthName = month['month']?.toString() ?? 'Month';
     final days = (month['days'] as List<dynamic>?) ?? [];
 
@@ -122,7 +130,7 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
         side: BorderSide(color: theme.dividerColor.withAlpha(40)),
       ),
       child: ExpansionTile(
-        initiallyExpanded: true,
+        initiallyExpanded: expanded,
         tilePadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         leading: CircleAvatar(
           backgroundColor: const Color(0xFF2D6A4F).withAlpha(30),
@@ -267,4 +275,14 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
       ),
     );
   }
+}
+
+/// Whether an Academia month header such as "Oct '26" names the current
+/// month.
+bool isCurrentMonth(String header, [DateTime? now]) {
+  final month = CalendarDayResolver.parseMonthName(header);
+  final today = now ?? DateTime.now();
+  return month != null &&
+      month.year == today.year &&
+      month.month == today.month;
 }
