@@ -4,6 +4,7 @@
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import '../../scrapers/faculty/faculty_client.dart';
 import 'faculty_profile_sheet.dart';
 
 class FacultyAvatar extends StatelessWidget {
@@ -12,12 +13,17 @@ class FacultyAvatar extends StatelessWidget {
   final double radius;
   final VoidCallback? onTap;
 
+  /// Whether tapping opens the faculty profile. Turn this off when
+  /// [facultyName] is really a course title standing in for a missing name.
+  final bool showsProfile;
+
   const FacultyAvatar({
     super.key,
     required this.facultyName,
     this.photoUrl,
     this.radius = 20,
     this.onTap,
+    this.showsProfile = true,
   });
 
   String _getInitials(String name) {
@@ -59,17 +65,19 @@ class FacultyAvatar extends StatelessWidget {
 
     return GestureDetector(
       onTap: onTap ??
-          () {
-            showModalBottomSheet(
-              context: context,
-              isScrollControlled: true,
-              backgroundColor: Colors.transparent,
-              builder: (ctx) => FacultyProfileSheet(
-                facultyName: facultyName,
-                initialPhotoUrl: photoUrl,
-              ),
-            );
-          },
+          (!showsProfile
+              ? null
+              : () {
+                  showModalBottomSheet(
+                    context: context,
+                    isScrollControlled: true,
+                    backgroundColor: Colors.transparent,
+                    builder: (ctx) => FacultyProfileSheet(
+                      facultyName: facultyName,
+                      initialPhotoUrl: photoUrl,
+                    ),
+                  );
+                }),
       child: CircleAvatar(
         radius: radius,
         backgroundColor: _getBackgroundColor(facultyName),
@@ -77,6 +85,7 @@ class FacultyAvatar extends StatelessWidget {
             ? ClipOval(
                 child: CachedNetworkImage(
                   imageUrl: photoUrl!,
+                  httpHeaders: FacultyClient.photoHeaders,
                   width: radius * 2,
                   height: radius * 2,
                   fit: BoxFit.cover,

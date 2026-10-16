@@ -601,6 +601,12 @@ class OverviewScreen extends ConsumerWidget {
       );
     }
 
+    final facultyByCode = {
+      for (final c in courses)
+        if ((c['facultyName']?.toString() ?? '').trim().isNotEmpty)
+          c['courseCode']?.toString() ?? '': c['facultyName'].toString().trim(),
+    };
+
     return Column(
       children: slots.map((s) {
         return Card(
@@ -612,8 +618,9 @@ class OverviewScreen extends ConsumerWidget {
           ),
           child: ListTile(
             leading: FacultyAvatar(
-              facultyName:
-                  s.courseTitle.isNotEmpty ? s.courseTitle : s.courseCode,
+              facultyName: facultyByCode[s.courseCode] ??
+                  (s.courseTitle.isNotEmpty ? s.courseTitle : s.courseCode),
+              showsProfile: facultyByCode[s.courseCode] != null,
               radius: 16,
             ),
             title: Text(
