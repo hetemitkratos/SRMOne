@@ -57,5 +57,12 @@
 	<array>
 		<string>in.srmone.mobile.attendanceSync</string>
 	</array>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>SRMOne syncs your academic day orders and class schedule to your Calendar.</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>fetch</string>
+		<string>processing</string>
+	</array>
 </dict>
 </plist>

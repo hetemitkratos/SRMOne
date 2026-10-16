@@ -114,7 +114,7 @@ void main() {
 
     testWidgets('renders chart when 2 or more snapshots exist', (tester) async {
       final snapshots = [
-        AttendanceSnapshot(
+        const AttendanceSnapshot(
           id: 1,
           academiaEmail: 'test@srmist.edu.in',
           snapshotDate: '2026-10-01',
@@ -125,7 +125,7 @@ void main() {
           attendedClasses: 40,
           createdAt: 1727740800,
         ),
-        AttendanceSnapshot(
+        const AttendanceSnapshot(
           id: 2,
           academiaEmail: 'test@srmist.edu.in',
           snapshotDate: '2026-10-02',

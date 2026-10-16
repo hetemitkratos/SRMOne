@@ -102,14 +102,14 @@ void main() {
   group('AttendanceSummary (Bug Fix #3 — Both Metrics)', () {
     test('unweighted mean ≠ weighted when subjects have different loads', () {
       final records = [
-        AttendanceInput(
+        const AttendanceInput(
           courseCode: 'A',
           courseTitle: 'A',
           hoursConducted: 100,
           hoursAbsent: 10,
           attendancePct: 90.0, // 90%
         ),
-        AttendanceInput(
+        const AttendanceInput(
           courseCode: 'B',
           courseTitle: 'B',
           hoursConducted: 10,
@@ -133,19 +133,19 @@ void main() {
 
     test('above75 and below75 counts are correct', () {
       final records = [
-        AttendanceInput(
+        const AttendanceInput(
             courseCode: 'A',
             courseTitle: 'A',
             hoursConducted: 100,
             hoursAbsent: 20,
             attendancePct: 80.0),
-        AttendanceInput(
+        const AttendanceInput(
             courseCode: 'B',
             courseTitle: 'B',
             hoursConducted: 100,
             hoursAbsent: 30,
             attendancePct: 70.0),
-        AttendanceInput(
+        const AttendanceInput(
             courseCode: 'C',
             courseTitle: 'C',
             hoursConducted: 100,
@@ -160,7 +160,7 @@ void main() {
 
   group('SubjectCardMetrics (§2.1)', () {
     test('75% threshold bunkable calculation', () {
-      final rec = AttendanceInput(
+      const rec = AttendanceInput(
         courseCode: 'X',
         courseTitle: 'X',
         hoursConducted: 100,
@@ -175,7 +175,7 @@ void main() {
     });
 
     test('below 75%: needed calculation', () {
-      final rec = AttendanceInput(
+      const rec = AttendanceInput(
         courseCode: 'Y',
         courseTitle: 'Y',
         hoursConducted: 100,
@@ -193,7 +193,7 @@ void main() {
 
   group('PlanHoliday (§2.2 Mode B)', () {
     final records = [
-      AttendanceInput(
+      const AttendanceInput(
         courseCode: 'CS101',
         courseTitle: 'Data Structures',
         hoursConducted: 60,
@@ -203,8 +203,8 @@ void main() {
     ];
 
     final slots = [
-      TimetableSlot(courseCode: 'CS101', day: 'Day 1', hourIndex: 1),
-      TimetableSlot(courseCode: 'CS101', day: 'Day 3', hourIndex: 2),
+      const TimetableSlot(courseCode: 'CS101', day: 'Day 1', hourIndex: 1),
+      const TimetableSlot(courseCode: 'CS101', day: 'Day 3', hourIndex: 2),
     ];
 
     test('single working day with matching slot → 1 missed class', () {
@@ -215,7 +215,7 @@ void main() {
         toDate: from,
         records: records,
         timetableSlots: slots,
-        calendarResolver: (d) => ResolvedDayStatus(
+        calendarResolver: (d) => const ResolvedDayStatus(
           isWorking: true,
           dayLabel: 'Day 1',
         ),
@@ -240,14 +240,14 @@ void main() {
       // Start at 80% (80 present / 100 conducted)
       // 1 slot on Day 1 over 5 Day 1s = 5 missed classes
       // New: 80 / (100 + 5) = 80 / 105 ≈ 76.19% (still >= 75%)
-      final r80 = const AttendanceInput(
+      const r80 = AttendanceInput(
         courseCode: 'MA101',
         courseTitle: 'Maths',
         hoursConducted: 100,
         hoursAbsent: 20,
         attendancePct: 80.0,
       );
-      final singleSlot = const [
+      const singleSlot = [
         TimetableSlot(courseCode: 'MA101', day: 'Day 1', hourIndex: 1),
       ];
 
@@ -267,7 +267,7 @@ void main() {
 
       // Now 2 slots per day: 5 days * 2 slots = 10 missed classes
       // New: 80 / (100 + 10) = 80 / 110 ≈ 72.72% (< 75%)
-      final twoSlots = const [
+      const twoSlots = [
         TimetableSlot(courseCode: 'MA101', day: 'Day 1', hourIndex: 1),
         TimetableSlot(courseCode: 'MA101', day: 'Day 1', hourIndex: 2),
       ];
