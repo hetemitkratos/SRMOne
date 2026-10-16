@@ -9,10 +9,10 @@ import 'package:flutter_svg/flutter_svg.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../../core/constants/asset_paths.dart';
-import '../../core/database/app_database.dart';
 import '../../domain/services/session_sync_orchestrator.dart';
-import '../../main.dart';
 import '../auth/auth_controller.dart';
+import '../shared/app_refresher.dart';
+import '../shared/cached_data_providers.dart';
 
 class CalendarScreen extends ConsumerStatefulWidget {
   const CalendarScreen({super.key});
@@ -29,7 +29,6 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
     final theme = Theme.of(context);
     final authState = ref.watch(authControllerProvider);
     final email = authState is Authenticated ? authState.email : '';
-    final db = ref.watch(appDatabaseProvider);
 
     if (email.isEmpty) {
       return const Scaffold(
@@ -67,16 +66,17 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
           ),
         ),
       ),
-      body: StreamBuilder<CalendarCacheData?>(
-        stream: db.watchCalendar(email, _selectedSemester),
-        builder: (context, snapshot) {
-          final calendarData = snapshot.data;
+      body: Consumer(
+        builder: (context, ref, _) {
+          final snapshot = ref.watch(calendarProvider(_selectedSemester));
+          final calendarData = snapshot.valueOrNull;
           final months = _parseMonths(calendarData?.monthsJson);
 
           return RefreshIndicator(
             onRefresh: () async {
-              final orchestrator = ref.read(sessionSyncOrchestratorProvider);
-              await orchestrator.syncAll();
+              await ref
+                  .read(appRefresherProvider)
+                  .refresh(waitForDetails: true);
             },
             child: months.isEmpty
                 ? Center(

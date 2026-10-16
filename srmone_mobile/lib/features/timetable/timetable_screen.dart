@@ -8,15 +8,15 @@ import 'package:flutter_svg/flutter_svg.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../../core/constants/asset_paths.dart';
-import '../../core/database/app_database.dart';
 import '../../domain/services/calendar_day_resolver.dart';
 import '../../domain/services/current_class_detector.dart';
-import '../../domain/services/session_sync_orchestrator.dart';
 import '../../domain/services/timetable_schedule.dart';
 import '../../main.dart';
 import '../auth/auth_controller.dart';
 import '../faculty/faculty_avatar.dart';
 import 'widgets/exportable_timetable_poster.dart';
+import '../shared/app_refresher.dart';
+import '../shared/cached_data_providers.dart';
 
 class TimetableScreen extends ConsumerStatefulWidget {
   const TimetableScreen({super.key});
@@ -56,17 +56,17 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen>
       );
     }
 
-    return StreamBuilder<TimetableCacheData?>(
-      stream: db.watchTimetable(email),
-      builder: (context, timetableSnap) {
-        final timetable = timetableSnap.data;
+    return Consumer(
+      builder: (context, ref, _) {
+        final timetableSnap = ref.watch(timetableProvider);
+        final timetable = timetableSnap.valueOrNull;
         final rawCourses =
             TimetableSchedule.parseCourses(timetable?.coursesJson);
 
-        return StreamBuilder<CalendarCacheData?>(
-          stream: db.watchCalendar(email, semesterFor(DateTime.now())),
-          builder: (context, calendarSnap) {
-            final calendar = calendarSnap.data;
+        return Consumer(
+          builder: (context, ref, _) {
+            final calendarSnap = ref.watch(calendarProvider(currentSemester()));
+            final calendar = calendarSnap.valueOrNull;
             final calendarMap =
                 TimetableSchedule.parseCalendar(calendar?.monthsJson);
             final todayStatus = CalendarDayResolver.getDayStatus(
@@ -141,9 +141,9 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen>
               ),
               body: RefreshIndicator(
                 onRefresh: () async {
-                  final orchestrator =
-                      ref.read(sessionSyncOrchestratorProvider);
-                  await orchestrator.syncAll();
+                  await ref
+                      .read(appRefresherProvider)
+                      .refresh(waitForDetails: true);
                 },
                 child: rawCourses.isEmpty
                     ? Center(

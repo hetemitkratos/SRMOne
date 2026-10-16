@@ -141,29 +141,50 @@ class SessionSyncOrchestrator {
   final AppDatabase _db;
   final SecureVaultService _vault;
   final NotificationRuleEngine _notifEngine;
+  final Dio? _academiaDio;
 
+  /// [academiaDio] is only for tests (fake HTTP adapter).
   SessionSyncOrchestrator({
     required AppDatabase db,
     required SecureVaultService vault,
     required NotificationRuleEngine notifEngine,
+    Dio? academiaDio,
   })  : _db = db,
         _vault = vault,
-        _notifEngine = notifEngine;
+        _notifEngine = notifEngine,
+        _academiaDio = academiaDio;
+
+  /// The sync currently running, shared by every caller that asks for one
+  /// while it runs (two screens refreshing, or a refresh during sign-in), so
+  /// the portal is never signed in to twice at once.
+  Future<SyncResult>? _inflight;
+
+  /// The details (timetable, calendar) step of the sync in [_inflight].
+  Future<void>? _inflightDetails;
+
+  /// Whether a sync is running right now.
+  bool get isSyncing => _inflight != null;
 
   /// Main sync method.
   ///
   /// 1. Reads stored credentials & cookie jar from Hardware Vault.
   /// 2. Fetches the My_Time_Table page with cache-busting headers.
   /// 3. If Zoho session expired / invalid, triggers silent re-login with vault credentials.
-  /// 4. Parses attendance, profile, marks and the course list from that page,
-  ///    then fetches the unified timetable grid and the academic calendar.
-  /// 5. Optionally reconciles with Student Portal if an SP password or cookies
+  /// 4. Parses attendance, profile, marks and the course list from that page
+  ///    in one background-isolate pass and saves them straight away.
+  /// 5. Fetches the unified timetable grid and the academic calendar in
+  ///    parallel. With [waitForDetails] false the returned future completes
+  ///    as soon as step 4 is saved and this step finishes in the background
+  ///    (the screens update from the database when it lands).
+  /// 6. Optionally reconciles with Student Portal if an SP password or cookies
   ///    exist. [onSpCaptcha] lets a foreground caller ask the user to solve a
   ///    CAPTCHA when on-device OCR fails; background syncs pass null.
   ///    With [includeStudentPortal] false this step is skipped, so the
   ///    caller can run [connectStudentPortal] separately without making the
   ///    Academia sign-in wait for it.
-  /// 6. Persists everything to Drift and runs the notification rules.
+  ///
+  /// A call made while another sync is running joins that sync instead of
+  /// starting a second one, unless [forceFreshLogin] is set.
   ///
   /// [onProgress] is told when each [SyncStep] starts.
   Future<SyncResult> syncAll({
@@ -171,6 +192,65 @@ class SessionSyncOrchestrator {
     SpCaptchaPrompt? onSpCaptcha,
     SyncProgress? onProgress,
     bool includeStudentPortal = true,
+    bool waitForDetails = true,
+  }) async {
+    final running = _inflight;
+    if (running != null && !forceFreshLogin) {
+      _log('joining the sync already in progress');
+      final result = await running;
+      if (waitForDetails) await _inflightDetails;
+      return result;
+    }
+
+    final details = Completer<void>();
+    final run = _runSync(
+      forceFreshLogin: forceFreshLogin,
+      onSpCaptcha: onSpCaptcha,
+      onProgress: onProgress,
+      includeStudentPortal: includeStudentPortal,
+      details: details,
+    );
+    _inflight = run;
+    _inflightDetails = details.future;
+    // The sync counts as running until its background details finish too.
+    unawaited(details.future.whenComplete(() {
+      if (identical(_inflight, run)) {
+        _inflight = null;
+        _inflightDetails = null;
+      }
+    }));
+    final result = await run;
+    if (waitForDetails) await details.future;
+    return result;
+  }
+
+  Future<SyncResult> _runSync({
+    required bool forceFreshLogin,
+    required SpCaptchaPrompt? onSpCaptcha,
+    required SyncProgress? onProgress,
+    required bool includeStudentPortal,
+    required Completer<void> details,
+  }) async {
+    try {
+      return await _sync(
+        forceFreshLogin: forceFreshLogin,
+        onSpCaptcha: onSpCaptcha,
+        onProgress: onProgress,
+        includeStudentPortal: includeStudentPortal,
+        details: details,
+      );
+    } finally {
+      // Error paths return before the details step starts.
+      if (!details.isCompleted) details.complete();
+    }
+  }
+
+  Future<SyncResult> _sync({
+    required bool forceFreshLogin,
+    required SpCaptchaPrompt? onSpCaptcha,
+    required SyncProgress? onProgress,
+    required bool includeStudentPortal,
+    required Completer<void> details,
   }) async {
     final total = Stopwatch()..start();
     void step(SyncStep s) {
@@ -178,8 +258,11 @@ class SessionSyncOrchestrator {
       onProgress?.call(s);
     }
 
-    final email = await _vault.getAcademiaEmail();
-    final password = await _vault.getAcademiaPassword();
+    final (email, password, savedCookiesJson) = await (
+      _vault.getAcademiaEmail(),
+      _vault.getAcademiaPassword(),
+      _vault.getAcademiaCookiesJson(),
+    ).wait;
 
     if (email == null || email.isEmpty) {
       return const SyncResult(
@@ -190,15 +273,17 @@ class SessionSyncOrchestrator {
       );
     }
 
-    // Restore or create cookie jar
-    final savedCookiesJson = await _vault.getAcademiaCookiesJson();
-    final cookieJar = savedCookiesJson != null && savedCookiesJson.isNotEmpty
+    // Restore or create cookie jar. A forced sign-in clears it anyway.
+    final cookieJar = !forceFreshLogin &&
+            savedCookiesJson != null &&
+            savedCookiesJson.isNotEmpty
         ? SimpleCookieJar.fromJson(savedCookiesJson)
         : SimpleCookieJar();
 
-    final academiaClient = AcademiaClient(cookieJar: cookieJar);
+    final academiaClient =
+        AcademiaClient(cookieJar: cookieJar, dio: _academiaDio);
     bool sessionRefreshed = false;
-    String pageHtml;
+    AcademiaPageData page;
 
     Future<bool> signIn() {
       step(SyncStep.signingIn);
@@ -207,24 +292,24 @@ class SessionSyncOrchestrator {
           .timeout(SyncTimeouts.academiaLogin);
     }
 
-    Future<String> fetchPage() {
+    Future<AcademiaPageData> fetchPage() {
       step(SyncStep.fetchingAttendance);
       return academiaClient
-          .fetchAttendancePage()
+          .fetchAttendancePageData()
           .timeout(SyncTimeouts.academiaPage);
     }
 
     try {
-      // Force fresh login requested (first sign-in or pull-to-refresh)
+      // Force fresh login requested (first sign-in)
       if (forceFreshLogin && password != null && password.isNotEmpty) {
         final loginOk = await signIn();
         if (!loginOk) return _error('Incorrect NetID or password.');
-        await _vault.saveAcademiaCookies(cookieJar.toJson());
+        await _saveCookies(cookieJar);
         sessionRefreshed = true;
       }
 
       try {
-        pageHtml = await fetchPage();
+        page = await fetchPage();
       } on SessionExpiredException catch (_) {
         // Layer 3: Silent Background Cookie Rotation
         if (password == null || password.isEmpty) {
@@ -232,10 +317,10 @@ class SessionSyncOrchestrator {
         }
         final reauthOk = await signIn();
         if (!reauthOk) return _error('Incorrect NetID or password.');
-        await _vault.saveAcademiaCookies(cookieJar.toJson());
+        await _saveCookies(cookieJar);
         sessionRefreshed = true;
         try {
-          pageHtml = await fetchPage();
+          page = await fetchPage();
         } on SessionExpiredException catch (_) {
           return _error(
               "Couldn't sign in to SRM Academia. Check your NetID and password.");
@@ -247,29 +332,36 @@ class SessionSyncOrchestrator {
       return _error(friendlySyncError(e));
     }
 
-    List<AttendanceInput> records;
-    try {
-      records = AcademiaParsers.parseAttendance(pageHtml);
-    } catch (e) {
-      return _error(friendlySyncError(e));
-    }
+    var records = page.attendance;
 
     // Save cookie jar state after successful operations
-    await _vault.saveAcademiaCookies(cookieJar.toJson());
+    await _saveCookies(cookieJar);
 
-    // Best-effort sections from the same page and two extra page fetches.
+    // Save everything the page carried first, so the dashboard can open on
+    // it while the timetable grid and calendar download.
+    step(SyncStep.saving);
+    await _guard('profile', () => _syncProfile(email, page.profile));
+    await _guard('marks', () => _syncAcademiaMarks(email, page, records));
+    if (!includeStudentPortal) {
+      await _persistAttendance(email, records);
+      _log('attendance saved in ${total.elapsedMilliseconds} ms');
+    }
+
+    // Best-effort sections that need more page fetches, run in parallel.
     step(SyncStep.syncingDetails);
-    final profile =
-        await _guard('profile', () => _syncProfile(email, pageHtml)) ?? {};
-    await _guard('marks', () => _syncAcademiaMarks(email, pageHtml, records));
-    await _guard(
-        'timetable',
-        () =>
-            _syncTimetable(email, pageHtml, profile['Batch'], academiaClient));
-    await _guard('calendar', () => _syncCalendars(email, academiaClient));
+    final detailsWork = Future.wait([
+      _guard('timetable', () => _syncTimetable(email, page, academiaClient)),
+      _guard('calendar', () => _syncCalendars(email, academiaClient)),
+    ]).then((_) async {
+      await _saveCookies(cookieJar);
+      _log('details done in ${total.elapsedMilliseconds} ms');
+    }).catchError((Object e) {
+      _log('details failed: ${e.runtimeType}');
+    });
 
-    // Layer 4: Dual-Source Reconciliation with Student Portal (if configured)
     if (includeStudentPortal) {
+      // Layer 4: Dual-Source Reconciliation with Student Portal (if
+      // configured), while the details download.
       step(SyncStep.studentPortal);
       final spRecords = await _guard(
           'student portal',
@@ -281,10 +373,9 @@ class SessionSyncOrchestrator {
       if (spRecords != null && spRecords.isNotEmpty) {
         records = reconcileAttendance(records, spRecords);
       }
+      await _persistAttendance(email, records);
     }
-
-    step(SyncStep.saving);
-    await _persistAttendance(email, records);
+    details.complete(detailsWork);
     _log('sync done in ${total.elapsedMilliseconds} ms');
 
     return SyncResult(
@@ -295,12 +386,33 @@ class SessionSyncOrchestrator {
     );
   }
 
+  Future<void> _saveCookies(SimpleCookieJar jar) =>
+      _vault.saveAcademiaCookies(jar.toJson());
+
+  /// Whether the Student Portal has a saved password or session to refresh.
+  Future<bool> isStudentPortalConfigured() async {
+    final (password, cookies) =
+        await (_vault.getSpPassword(), _vault.getSpCookiesJson()).wait;
+    return (password != null && password.isNotEmpty) ||
+        (cookies != null && cookies.isNotEmpty);
+  }
+
+  /// When attendance was last saved for [email], or null if never.
+  Future<DateTime?> lastSyncedAt(String email) async {
+    final ms = await _db.lastAttendanceUpdate(email);
+    return ms == null ? null : DateTime.fromMillisecondsSinceEpoch(ms);
+  }
+
   /// Signs in to the Student Portal (solving its CAPTCHA on-device, asking
   /// [onSpCaptcha] only if that fails), merges its attendance into the cached
   /// Academia records and stores its internal marks. Never throws.
+  ///
+  /// With [required] false a saved Student Portal session is reused even
+  /// when no password is stored.
   Future<SpConnectResult> connectStudentPortal({
     SpCaptchaPrompt? onSpCaptcha,
     SyncProgress? onProgress,
+    bool required = true,
   }) async {
     final sw = Stopwatch()..start();
     onProgress?.call(SyncStep.studentPortal);
@@ -310,11 +422,13 @@ class SessionSyncOrchestrator {
         return const SpConnectResult(false, 'Sign in to Academia first.');
       }
       final spRecords = await _syncStudentPortal(email,
-          onSpCaptcha: onSpCaptcha, onProgress: onProgress, required: true);
+          onSpCaptcha: onSpCaptcha, onProgress: onProgress, required: required);
       if (spRecords == null) {
         return const SpConnectResult(
             false, 'Add your Student Portal password first.');
       }
+      // Merge into the Academia attendance of a sync that is still running.
+      await _inflight?.catchError((Object _) => _error(''));
       final cached = await _db.watchAttendanceRecords(email).first;
       if (cached.isNotEmpty && spRecords.isNotEmpty) {
         final academia = [
@@ -436,9 +550,8 @@ class SessionSyncOrchestrator {
     }
   }
 
-  Future<Map<String, String>> _syncProfile(String email, String html) async {
-    final info = AcademiaParsers.parseStudentProfile(html);
-    if (info.isEmpty) return info;
+  Future<void> _syncProfile(String email, Map<String, String> info) async {
+    if (info.isEmpty) return;
     String v(List<String> keys) {
       for (final k in keys) {
         final value = info[k];
@@ -459,12 +572,11 @@ class SessionSyncOrchestrator {
       rawDataJson: drift.Value(jsonEncode(info)),
       cachedAt: drift.Value(DateTime.now().millisecondsSinceEpoch),
     ));
-    return info;
   }
 
-  Future<void> _syncAcademiaMarks(
-      String email, String html, List<AttendanceInput> attendance) async {
-    final marks = AcademiaParsers.parseMarks(html);
+  Future<void> _syncAcademiaMarks(String email, AcademiaPageData page,
+      List<AttendanceInput> attendance) async {
+    final marks = page.marks;
     if (marks.isEmpty) return;
     final titles = {for (final a in attendance) a.courseCode: a.courseTitle};
     final now = DateTime.now().millisecondsSinceEpoch;
@@ -484,9 +596,10 @@ class SessionSyncOrchestrator {
   }
 
   Future<void> _syncTimetable(
-      String email, String html, String? batch, AcademiaClient client) async {
-    final rawCourses = AcademiaParsers.parseTimetableCourses(html);
+      String email, AcademiaPageData page, AcademiaClient client) async {
+    final rawCourses = page.courses;
     if (rawCourses.isEmpty) return;
+    final batch = page.profile['Batch'];
     final effectiveBatch =
         (batch == null || batch.trim().isEmpty) ? '1' : batch.trim();
     final slotMap = await client.fetchUnifiedSlotMap(effectiveBatch);
@@ -496,8 +609,7 @@ class SessionSyncOrchestrator {
       academiaEmail: drift.Value(email),
       batch: drift.Value(effectiveBatch),
       coursesJson: drift.Value(jsonEncode(courses)),
-      advisorsJson:
-          drift.Value(jsonEncode(AcademiaParsers.parseAdvisors(html))),
+      advisorsJson: drift.Value(jsonEncode(page.advisors)),
       updatedAt: drift.Value(DateTime.now().millisecondsSinceEpoch),
     ));
   }
@@ -511,16 +623,19 @@ class SessionSyncOrchestrator {
       current,
       if (await _db.getCalendar(email, other) == null) other,
     ];
-    for (final sem in sems) {
-      final months = normalizeCalendarMonths(await client.fetchCalendar(sem));
-      if (months.isEmpty) continue;
-      await _db.upsertCalendar(CalendarCacheCompanion(
-        academiaEmail: drift.Value(email),
-        semester: drift.Value(sem),
-        monthsJson: drift.Value(jsonEncode(months)),
-        updatedAt: drift.Value(DateTime.now().millisecondsSinceEpoch),
-      ));
-    }
+    await Future.wait([
+      for (final sem in sems)
+        client.fetchCalendar(sem).then((raw) async {
+          final months = normalizeCalendarMonths(raw);
+          if (months.isEmpty) return;
+          await _db.upsertCalendar(CalendarCacheCompanion(
+            academiaEmail: drift.Value(email),
+            semester: drift.Value(sem),
+            monthsJson: drift.Value(jsonEncode(months)),
+            updatedAt: drift.Value(DateTime.now().millisecondsSinceEpoch),
+          ));
+        }),
+    ]);
   }
 
   /// Signs in to the Student Portal when needed and returns its attendance.

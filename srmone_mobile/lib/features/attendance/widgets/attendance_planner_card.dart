@@ -13,7 +13,7 @@ import '../../../core/constants/asset_paths.dart';
 import '../../../core/database/app_database.dart';
 import '../../../domain/services/attendance_planner_math.dart';
 import '../../../domain/services/calendar_day_resolver.dart';
-import '../../../main.dart';
+import '../../shared/cached_data_providers.dart';
 
 class AttendancePlannerCard extends ConsumerStatefulWidget {
   final String academiaEmail;
@@ -256,18 +256,17 @@ class _AttendancePlannerCardState extends ConsumerState<AttendancePlannerCard>
 
   Widget _buildPlanHolidayTab(ThemeData theme) {
     final dateFormat = DateFormat('MMM d, yyyy');
-    final db = ref.watch(appDatabaseProvider);
 
-    return StreamBuilder<TimetableCacheData?>(
-      stream: db.watchTimetable(widget.academiaEmail),
-      builder: (context, timetableSnap) {
-        final timetableData = timetableSnap.data;
+    return Consumer(
+      builder: (context, ref, _) {
+        final timetableSnap = ref.watch(timetableProvider);
+        final timetableData = timetableSnap.valueOrNull;
         final timetableSlots = _parseSlots(timetableData?.coursesJson);
 
-        return StreamBuilder<CalendarCacheData?>(
-          stream: db.watchCalendar(widget.academiaEmail, 'odd'),
-          builder: (context, calendarSnap) {
-            final calendarData = calendarSnap.data;
+        return Consumer(
+          builder: (context, ref, _) {
+            final calendarSnap = ref.watch(calendarProvider(currentSemester()));
+            final calendarData = calendarSnap.valueOrNull;
             final holidayMap = _parseHolidays(calendarData?.monthsJson);
 
             final results = computePlanHoliday(

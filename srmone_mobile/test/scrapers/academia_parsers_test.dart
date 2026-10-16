@@ -62,6 +62,20 @@ const _calendarPage = '''
 
 void main() {
   group('AcademiaParsers on the My_Time_Table page', () {
+    test('parseAttendancePage reads every section from one parse', () {
+      final page = AcademiaParsers.parseAttendancePage(_timetablePage);
+      expect(
+          page.attendance.map((a) => a.courseCode),
+          AcademiaParsers.parseAttendance(_timetablePage)
+              .map((a) => a.courseCode));
+      expect(page.profile, AcademiaParsers.parseStudentProfile(_timetablePage));
+      expect(page.marks.map((m) => m.courseCode),
+          AcademiaParsers.parseMarks(_timetablePage).map((m) => m.courseCode));
+      expect(
+          page.courses, AcademiaParsers.parseTimetableCourses(_timetablePage));
+      expect(page.advisors, AcademiaParsers.parseAdvisors(_timetablePage));
+    });
+
     test('parseAttendance picks the Attn % table, not the course list', () {
       final records = AcademiaParsers.parseAttendance(_timetablePage);
       expect(records, hasLength(1));

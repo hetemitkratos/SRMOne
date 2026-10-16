@@ -11,8 +11,9 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../../core/constants/asset_paths.dart';
 import '../../core/database/app_database.dart';
-import '../../main.dart';
 import '../auth/auth_controller.dart';
+import '../shared/app_refresher.dart';
+import '../shared/cached_data_providers.dart';
 
 class MarksScreen extends ConsumerStatefulWidget {
   const MarksScreen({super.key});
@@ -42,7 +43,6 @@ class _MarksScreenState extends ConsumerState<MarksScreen>
     final theme = Theme.of(context);
     final authState = ref.watch(authControllerProvider);
     final email = authState is Authenticated ? authState.email : '';
-    final db = ref.watch(appDatabaseProvider);
 
     if (email.isEmpty) {
       return const Scaffold(
@@ -50,10 +50,10 @@ class _MarksScreenState extends ConsumerState<MarksScreen>
       );
     }
 
-    return StreamBuilder<List<MarksCacheData>>(
-      stream: db.watchMarks(email),
-      builder: (context, snapshot) {
-        final allMarks = snapshot.data ?? [];
+    return Consumer(
+      builder: (context, ref, _) {
+        final snapshot = ref.watch(marksProvider);
+        final allMarks = snapshot.valueOrNull ?? [];
         final internalMarks = allMarks
             .where((m) => m.source == 'academia' || m.source.isEmpty)
             .toList();
@@ -79,8 +79,7 @@ class _MarksScreenState extends ConsumerState<MarksScreen>
           ),
           body: RefreshIndicator(
             onRefresh: () async {
-              final orchestrator = ref.read(sessionSyncOrchestratorProvider);
-              await orchestrator.syncAll();
+              await ref.read(appRefresherProvider).refresh();
             },
             child: TabBarView(
               controller: _tabController,

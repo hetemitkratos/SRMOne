@@ -239,6 +239,16 @@ class AppDatabase extends _$AppDatabase {
         .watch();
   }
 
+  /// Epoch ms of the newest cached attendance row for the user, or null.
+  Future<int?> lastAttendanceUpdate(String academiaEmail) async {
+    final newest = attendanceCache.updatedAt.max();
+    final row = await (selectOnly(attendanceCache)
+          ..addColumns([newest])
+          ..where(attendanceCache.academiaEmail.equals(academiaEmail)))
+        .getSingleOrNull();
+    return row?.read(newest);
+  }
+
   Future<void> upsertAttendanceRecords(
       List<AttendanceCacheCompanion> records) async {
     await batch((b) {

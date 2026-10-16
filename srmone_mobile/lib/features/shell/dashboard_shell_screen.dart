@@ -8,9 +8,9 @@ import 'package:go_router/go_router.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../../main.dart';
-import '../auth/auth_controller.dart';
 import '../auth/student_portal_banner.dart';
 import '../notifications/notification_bell_sheet.dart';
+import '../shared/cached_data_providers.dart';
 
 class DashboardShellScreen extends ConsumerWidget {
   final StatefulNavigationShell navigationShell;
@@ -34,9 +34,6 @@ class DashboardShellScreen extends ConsumerWidget {
       );
     }
     final theme = Theme.of(context);
-    final authState = ref.watch(authControllerProvider);
-    final email = authState is Authenticated ? authState.email : '';
-    final db = ref.watch(appDatabaseProvider);
 
     return Scaffold(
       appBar: AppBar(
@@ -73,10 +70,10 @@ class DashboardShellScreen extends ConsumerWidget {
 
           // Settings / Profile Avatar
           IconButton(
-            icon: StreamBuilder(
-              stream: db.watchStudentProfile(email),
-              builder: (context, snapshot) {
-                final name = snapshot.data?.name ?? 'S';
+            icon: Consumer(
+              builder: (context, ref, _) {
+                final name =
+                    ref.watch(studentProfileProvider).valueOrNull?.name ?? 'S';
                 final initial = name.isNotEmpty ? name[0].toUpperCase() : 'S';
                 return CircleAvatar(
                   radius: 14,
