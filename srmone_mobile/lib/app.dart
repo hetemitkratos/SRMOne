@@ -51,8 +51,14 @@ final _routerProvider = Provider<GoRouter>((ref) {
       final isLoggingIn = state.matchedLocation == '/login';
       final isSplash = state.matchedLocation == '/';
 
-      if (authState is AuthInitial || authState is AuthLoading) {
+      if (authState is AuthInitial) {
         return isSplash ? null : '/';
+      }
+
+      // Stay on the login screen while signing in, so the typed NetID and
+      // password survive a failed attempt.
+      if (authState is AuthLoading) {
+        return isSplash ? '/login' : null;
       }
 
       if (authState is Unauthenticated || authState is AuthError) {

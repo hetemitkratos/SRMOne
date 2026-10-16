@@ -19,8 +19,19 @@ class DashboardShellScreen extends ConsumerWidget {
     required this.navigationShell,
   });
 
+  /// Whether this app run has already asked for notification permission.
+  /// Covers users who signed in before the app started asking at sign-in.
+  static bool _askedForNotifications = false;
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    if (!_askedForNotifications) {
+      _askedForNotifications = true;
+      final plugin = ref.read(notificationsPluginProvider);
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => requestNotificationPermission(plugin),
+      );
+    }
     final theme = Theme.of(context);
     final authState = ref.watch(authControllerProvider);
     final email = authState is Authenticated ? authState.email : '';

@@ -47,19 +47,29 @@ class AuthController extends StateNotifier<AuthState> {
   }
 
   Future<void> checkInitialAuth() async {
-    final hasCreds = await _vault.hasStoredCredentials();
-    if (hasCreds) {
-      final email = await _vault.getAcademiaEmail();
-      state = Authenticated(email ?? '');
-    } else {
+    try {
+      final hasCreds = await _vault.hasStoredCredentials();
+      if (hasCreds) {
+        final email = await _vault.getAcademiaEmail();
+        state = Authenticated(email ?? '');
+      } else {
+        state = const Unauthenticated();
+      }
+    } catch (_) {
+      // Unreadable keystore (e.g. restored from a backup): start signed out
+      // rather than hanging on the splash screen.
       state = const Unauthenticated();
     }
   }
 
+  /// Signs in and runs the first full sync. Credentials are only kept in the
+  /// vault if the sync succeeds, so a wrong password never leaves the app
+  /// looking signed in on the next launch.
   Future<bool> login({
     required String email,
     required String password,
     String? spPassword,
+    SpCaptchaPrompt? onSpCaptcha,
   }) async {
     state = const AuthLoading();
     try {
@@ -68,6 +78,9 @@ class AuthController extends StateNotifier<AuthState> {
         cleanEmail = '$cleanEmail@srmist.edu.in';
       }
 
+      // Start from a clean vault so stale cookies from another account or a
+      // previous failed attempt can't leak into this sign-in.
+      await _vault.clearAll();
       await _vault.saveAcademiaCredentials(
         email: cleanEmail,
         password: password,
@@ -77,10 +90,13 @@ class AuthController extends StateNotifier<AuthState> {
         await _vault.saveSpPassword(spPassword);
       }
 
-      final syncResult =
-          await _orchestrator.syncAttendance(forceFreshLogin: true);
+      final syncResult = await _orchestrator.syncAll(
+        forceFreshLogin: true,
+        onSpCaptcha: onSpCaptcha,
+      );
 
       if (syncResult.status == SyncStatus.error) {
+        await _vault.clearAll();
         state = AuthError(syncResult.errorMessage ?? 'Login failed');
         return false;
       }
@@ -88,7 +104,8 @@ class AuthController extends StateNotifier<AuthState> {
       state = Authenticated(cleanEmail);
       return true;
     } catch (e) {
-      state = AuthError('Authentication failed: $e');
+      await _vault.clearAll().catchError((_) {});
+      state = AuthError(friendlySyncError(e));
       return false;
     }
   }

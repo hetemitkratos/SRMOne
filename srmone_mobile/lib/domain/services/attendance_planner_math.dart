@@ -14,6 +14,10 @@ class AttendanceInput {
   final int hoursConducted;
   final int hoursAbsent;
   final double attendancePct;
+  final String category;
+  final String facultyName;
+  final String slot;
+  final String roomNo;
 
   const AttendanceInput({
     required this.courseCode,
@@ -21,6 +25,10 @@ class AttendanceInput {
     required this.hoursConducted,
     required this.hoursAbsent,
     required this.attendancePct,
+    this.category = '',
+    this.facultyName = '',
+    this.slot = '',
+    this.roomNo = '',
   });
 
   int get hoursPresent => hoursConducted - hoursAbsent;

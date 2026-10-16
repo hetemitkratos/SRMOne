@@ -9,22 +9,11 @@ import 'package:workmanager/workmanager.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'core/database/app_database.dart';
 import 'app.dart';
+import 'background/background_sync_worker.dart';
 
 // Global DB instance (passed via ProviderScope override)
 late final AppDatabase appDatabase;
 final flutterLocalNotificationsPlugin = FlutterLocalNotificationsPlugin();
-
-// WorkManager background task names
-const backgroundSyncTask = 'in.srmone.mobile.attendanceSync';
-
-@pragma('vm:entry-point')
-void callbackDispatcher() {
-  Workmanager().executeTask((taskName, inputData) async {
-    // Background sync entry point — handled in background_sync_worker.dart
-    // This is a lightweight dispatcher; actual work runs in the isolate.
-    return Future.value(true);
-  });
-}
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -34,10 +23,11 @@ Future<void> main() async {
 
   // Initialize flutter_local_notifications
   const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
+  // Permissions are requested after sign-in (see requestNotificationPermission).
   const darwinInit = DarwinInitializationSettings(
-    requestAlertPermission: true,
-    requestBadgePermission: true,
-    requestSoundPermission: true,
+    requestAlertPermission: false,
+    requestBadgePermission: false,
+    requestSoundPermission: false,
   );
   await flutterLocalNotificationsPlugin.initialize(
     const InitializationSettings(android: androidInit, iOS: darwinInit),
@@ -45,9 +35,7 @@ Future<void> main() async {
 
   // Initialize WorkManager for background sync (mobile only)
   if (Platform.isAndroid || Platform.isIOS) {
-    await Workmanager().initialize(
-      callbackDispatcher,
-    );
+    await Workmanager().initialize(backgroundSyncCallbackDispatcher);
 
     // Register periodic background sync (every ~6 hours)
     await Workmanager().registerPeriodicTask(
@@ -82,3 +70,20 @@ final notificationsPluginProvider =
     Provider<FlutterLocalNotificationsPlugin>((ref) {
   throw UnimplementedError('Override notificationsPluginProvider in main()');
 });
+
+/// Asks for permission to post notifications (Android 13+ runtime permission,
+/// iOS alert/badge/sound). Safe to call repeatedly: the OS only prompts once.
+Future<void> requestNotificationPermission(
+    FlutterLocalNotificationsPlugin plugin) async {
+  if (Platform.isAndroid) {
+    await plugin
+        .resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin>()
+        ?.requestNotificationsPermission();
+  } else if (Platform.isIOS) {
+    await plugin
+        .resolvePlatformSpecificImplementation<
+            IOSFlutterLocalNotificationsPlugin>()
+        ?.requestPermissions(alert: true, badge: true, sound: true);
+  }
+}

@@ -48,7 +48,7 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> {
           return RefreshIndicator(
             onRefresh: () async {
               final orchestrator = ref.read(sessionSyncOrchestratorProvider);
-              await orchestrator.syncAttendance(forceFreshLogin: true);
+              await orchestrator.syncAll();
             },
             child: CustomScrollView(
               slivers: [
@@ -56,6 +56,9 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> {
                   expandedHeight: 180,
                   pinned: true,
                   flexibleSpace: FlexibleSpaceBar(
+                    centerTitle: false,
+                    titlePadding:
+                        const EdgeInsetsDirectional.only(start: 20, bottom: 14),
                     title: Text(
                       'Attendance',
                       style: TextStyle(
@@ -311,7 +314,7 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> {
                 FacultyAvatar(
                   facultyName: item.facultyName.isNotEmpty
                       ? item.facultyName
-                      : item.courseCode,
+                      : item.courseTitle,
                   radius: 18,
                 ),
                 const SizedBox(width: 12),

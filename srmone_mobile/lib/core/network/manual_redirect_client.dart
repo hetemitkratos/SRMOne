@@ -36,6 +36,7 @@ class ManualRedirectClient {
     Map<String, String>? headers,
     dynamic data,
     String? contentType,
+    ResponseType? responseType,
   }) async {
     String currentMethod = method.toUpperCase();
     String currentUrl = url;
@@ -60,6 +61,7 @@ class ManualRedirectClient {
         method: currentMethod,
         headers: mergedHeaders,
         contentType: currentContentType,
+        responseType: responseType,
         followRedirects: false,
         validateStatus: (status) => status != null && status < 500,
       );

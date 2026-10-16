@@ -18,6 +18,8 @@ class BiometricAuthService {
       return biometrics.isNotEmpty;
     } on PlatformException {
       return false;
+    } on MissingPluginException {
+      return false;
     }
   }
 

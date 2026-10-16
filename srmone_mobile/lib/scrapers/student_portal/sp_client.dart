@@ -4,6 +4,7 @@
 
 import 'dart:convert';
 import 'dart:typed_data';
+import 'package:dio/dio.dart';
 import '../../core/constants/portal_endpoints.dart';
 import '../../core/network/manual_redirect_client.dart';
 import '../../core/network/simple_cookie_jar.dart';
@@ -101,13 +102,13 @@ class SPClient {
         'X-Domain-Proof': domainProof,
         'User-Agent': PortalEndpoints.defaultUserAgent,
       },
+      // Binary image: a text response would corrupt the bytes.
+      responseType: ResponseType.bytes,
     );
 
     Uint8List captchaBytes;
     if (captchaResp.data is List<int>) {
       captchaBytes = Uint8List.fromList(captchaResp.data as List<int>);
-    } else if (captchaResp.data is String) {
-      captchaBytes = Uint8List.fromList((captchaResp.data as String).codeUnits);
     } else {
       throw const FormatException('Invalid CAPTCHA image response format');
     }

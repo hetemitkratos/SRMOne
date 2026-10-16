@@ -217,6 +217,9 @@ class NotificationsTable extends Table {
 class AppDatabase extends _$AppDatabase {
   AppDatabase() : super(_openConnection());
 
+  /// Opens the schema on a caller-supplied executor (in-memory in tests).
+  AppDatabase.forTesting(super.executor);
+
   @override
   int get schemaVersion => 1;
 
@@ -240,6 +243,19 @@ class AppDatabase extends _$AppDatabase {
       List<AttendanceCacheCompanion> records) async {
     await batch((b) {
       b.insertAllOnConflictUpdate(attendanceCache, records);
+    });
+  }
+
+  /// Replaces every attendance row for [academiaEmail] with [records] in one
+  /// transaction, so courses dropped from the portal don't linger.
+  Future<void> replaceAttendanceRecords(
+      String academiaEmail, List<AttendanceCacheCompanion> records) async {
+    await transaction(() async {
+      await (delete(attendanceCache)
+            ..where((t) => t.academiaEmail.equals(academiaEmail)))
+          .go();
+      await batch((b) => b.insertAll(attendanceCache, records,
+          mode: InsertMode.insertOrReplace));
     });
   }
 
@@ -373,6 +389,20 @@ class AppDatabase extends _$AppDatabase {
   Future<void> upsertMarksRecords(List<MarksCacheCompanion> records) async {
     await batch((b) {
       b.insertAllOnConflictUpdate(marksCache, records);
+    });
+  }
+
+  /// Replaces the marks rows from one [source] for [academiaEmail].
+  Future<void> replaceMarksRecords(String academiaEmail, String source,
+      List<MarksCacheCompanion> records) async {
+    await transaction(() async {
+      await (delete(marksCache)
+            ..where((t) =>
+                t.academiaEmail.equals(academiaEmail) &
+                t.source.equals(source)))
+          .go();
+      await batch((b) =>
+          b.insertAll(marksCache, records, mode: InsertMode.insertOrReplace));
     });
   }
 

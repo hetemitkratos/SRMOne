@@ -80,7 +80,7 @@ class _MarksScreenState extends ConsumerState<MarksScreen>
           body: RefreshIndicator(
             onRefresh: () async {
               final orchestrator = ref.read(sessionSyncOrchestratorProvider);
-              await orchestrator.syncAttendance(forceFreshLogin: true);
+              await orchestrator.syncAll();
             },
             child: TabBarView(
               controller: _tabController,

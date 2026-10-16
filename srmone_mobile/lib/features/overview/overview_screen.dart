@@ -2,7 +2,6 @@
 // Dashboard Overview screen with Monday–Friday day-order strip,
 // clock-based Live/Upcoming class detector, quick attendance stats, and today's schedule.
 
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_svg/flutter_svg.dart';
@@ -14,6 +13,8 @@ import '../../core/database/app_database.dart';
 import '../../domain/services/attendance_planner_math.dart';
 import '../../domain/services/calendar_day_resolver.dart';
 import '../../domain/services/current_class_detector.dart';
+import '../../domain/services/session_sync_orchestrator.dart';
+import '../../domain/services/timetable_schedule.dart';
 import '../../main.dart';
 import '../auth/auth_controller.dart';
 import '../faculty/faculty_avatar.dart';
@@ -38,7 +39,7 @@ class OverviewScreen extends ConsumerWidget {
       body: RefreshIndicator(
         onRefresh: () async {
           final orchestrator = ref.read(sessionSyncOrchestratorProvider);
-          await orchestrator.syncAttendance(forceFreshLogin: true);
+          await orchestrator.syncAll();
         },
         child: CustomScrollView(
           slivers: [
@@ -76,9 +77,10 @@ class OverviewScreen extends ConsumerWidget {
               child: Padding(
                 padding: const EdgeInsets.all(16),
                 child: StreamBuilder<CalendarCacheData?>(
-                  stream: db.watchCalendar(email, 'odd'),
+                  stream: db.watchCalendar(email, semesterFor(DateTime.now())),
                   builder: (context, calSnap) {
-                    final calMap = _buildCalendarMap(calSnap.data?.monthsJson);
+                    final calMap = TimetableSchedule.parseCalendar(
+                        calSnap.data?.monthsJson);
                     final now = DateTime.now();
                     final todayStatus =
                         CalendarDayResolver.getDayStatus(calMap, now);
@@ -86,8 +88,8 @@ class OverviewScreen extends ConsumerWidget {
                     return StreamBuilder<TimetableCacheData?>(
                       stream: db.watchTimetable(email),
                       builder: (context, timeSnap) {
-                        final courses =
-                            _parseCourses(timeSnap.data?.coursesJson);
+                        final courses = TimetableSchedule.parseCourses(
+                            timeSnap.data?.coursesJson);
 
                         return Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
@@ -276,7 +278,11 @@ class OverviewScreen extends ConsumerWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      todayStatus.isHoliday ? 'Holiday Today!' : 'Weekend!',
+                      todayStatus.isHoliday
+                          ? 'Holiday Today!'
+                          : todayStatus.isWeekend
+                              ? 'Weekend!'
+                              : 'No day order yet',
                       style: const TextStyle(
                         fontWeight: FontWeight.bold,
                         fontSize: 16,
@@ -286,7 +292,9 @@ class OverviewScreen extends ConsumerWidget {
                     Text(
                       todayStatus.event.isNotEmpty
                           ? todayStatus.event
-                          : 'No classes scheduled today. Relax!',
+                          : todayStatus.type == DayStatusType.unknown
+                              ? "Today's day order isn't in the academic calendar yet."
+                              : 'No classes scheduled today. Relax!',
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: Colors.grey,
                       ),
@@ -300,7 +308,7 @@ class OverviewScreen extends ConsumerWidget {
       );
     }
 
-    final slots = _extractDaySlots(courses, todayStatus.dayLabel);
+    final slots = TimetableSchedule.slotsForDay(courses, todayStatus.dayLabel);
     final classified = CurrentClassDetector.classify(
       slots,
       todayStatus.dayLabel,
@@ -584,7 +592,7 @@ class OverviewScreen extends ConsumerWidget {
       );
     }
 
-    final slots = _extractDaySlots(courses, todayStatus.dayLabel);
+    final slots = TimetableSchedule.slotsForDay(courses, todayStatus.dayLabel);
     if (slots.isEmpty) {
       return Container(
         padding: const EdgeInsets.all(24),
@@ -607,7 +615,8 @@ class OverviewScreen extends ConsumerWidget {
           ),
           child: ListTile(
             leading: FacultyAvatar(
-              facultyName: s.courseCode,
+              facultyName:
+                  s.courseTitle.isNotEmpty ? s.courseTitle : s.courseCode,
               radius: 16,
             ),
             title: Text(
@@ -622,76 +631,5 @@ class OverviewScreen extends ConsumerWidget {
         );
       }).toList(),
     );
-  }
-
-  // ─── Helpers ─────────────────────────────────────────────────────────────────
-
-  List<TimetableSlotWithTiming> _extractDaySlots(
-    List<Map<String, dynamic>> courses,
-    String dayLabel,
-  ) {
-    final slots = <TimetableSlotWithTiming>[];
-    for (final c in courses) {
-      final code =
-          c['course_code']?.toString() ?? c['courseCode']?.toString() ?? '';
-      final title =
-          c['course_title']?.toString() ?? c['courseTitle']?.toString() ?? '';
-      final slotStr = c['slot']?.toString() ?? '';
-
-      final matches =
-          RegExp(r'Day\s*([1-5])', caseSensitive: false).allMatches(slotStr);
-      for (final m in matches) {
-        if ('Day ${m.group(1)}' == dayLabel) {
-          slots.add(TimetableSlotWithTiming(
-            courseCode: code,
-            courseTitle: title,
-            timing: '09:00 - 09:50',
-            hourIndex: slots.length + 1,
-            day: dayLabel,
-          ));
-        }
-      }
-    }
-    return slots;
-  }
-
-  List<Map<String, dynamic>> _parseCourses(String? jsonStr) {
-    if (jsonStr == null || jsonStr.isEmpty) return [];
-    try {
-      final list = jsonDecode(jsonStr) as List<dynamic>;
-      return list.cast<Map<String, dynamic>>();
-    } catch (_) {
-      return [];
-    }
-  }
-
-  Map<String, CalendarEntry> _buildCalendarMap(String? jsonStr) {
-    if (jsonStr == null || jsonStr.isEmpty) return {};
-    try {
-      final list = jsonDecode(jsonStr) as List<dynamic>;
-      final map = <String, CalendarEntry>{};
-      for (final month in list) {
-        if (month is Map<String, dynamic> && month['days'] is List) {
-          for (final day in month['days'] as List<dynamic>) {
-            if (day is Map<String, dynamic>) {
-              final date = day['date']?.toString() ?? '';
-              if (date.isNotEmpty) {
-                map[date] = CalendarEntry(
-                  date: date,
-                  day: day['day']?.toString() ?? '',
-                  dayOrder: day['dayOrder']?.toString() ??
-                      day['day_order']?.toString() ??
-                      '',
-                  event: day['event']?.toString() ?? '',
-                );
-              }
-            }
-          }
-        }
-      }
-      return map;
-    } catch (_) {
-      return {};
-    }
   }
 }

@@ -7,8 +7,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/constants/asset_paths.dart';
+import '../../main.dart';
 import '../settings/legal_markdown_screen.dart';
 import 'auth_controller.dart';
+import 'sp_captcha_bottom_sheet.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});
@@ -26,7 +28,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   bool _obscurePassword = true;
   bool _obscureSpPassword = true;
   bool _showSpField = false;
-  bool _acceptedTerms = true;
+  bool _acceptedTerms = false;
 
   @override
   void dispose() {
@@ -50,10 +52,16 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
           email: _emailController.text,
           password: _passwordController.text,
           spPassword: _showSpField ? _spPasswordController.text : null,
+          onSpCaptcha: (image) async {
+            if (!mounted) return null;
+            return showSpCaptchaSheet(context, image);
+          },
         );
 
     if (success && mounted) {
-      context.go('/dashboard');
+      await requestNotificationPermission(
+          ref.read(notificationsPluginProvider));
+      if (mounted) context.go('/dashboard');
     }
   }
 

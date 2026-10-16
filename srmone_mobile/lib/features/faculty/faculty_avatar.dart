@@ -21,11 +21,17 @@ class FacultyAvatar extends StatelessWidget {
   });
 
   String _getInitials(String name) {
+    // Portal names look like "Dr. Jane Doe (103528)": drop titles and the
+    // staff ID, and only build initials from words that start with a letter.
     final clean = name
         .replaceAll(
             RegExp(r'\b(Dr|Mr|Mrs|Ms|Prof)\.?\s*', caseSensitive: false), '')
+        .replaceAll(RegExp(r'\([^)]*\)'), '')
         .trim();
-    final parts = clean.split(' ').where((p) => p.isNotEmpty).toList();
+    final parts = clean
+        .split(RegExp(r'\s+'))
+        .where((p) => p.isNotEmpty && RegExp(r'^[A-Za-z]').hasMatch(p))
+        .toList();
     if (parts.isEmpty) return 'F';
     if (parts.length == 1) return parts[0][0].toUpperCase();
     return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
