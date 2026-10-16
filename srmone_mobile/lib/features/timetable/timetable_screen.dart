@@ -286,6 +286,7 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen>
               children: [
                 FacultyAvatar(
                   facultyName: faculty.isNotEmpty ? faculty : slot.courseTitle,
+                  showsProfile: faculty.isNotEmpty,
                   radius: 18,
                 ),
                 const SizedBox(width: 12),

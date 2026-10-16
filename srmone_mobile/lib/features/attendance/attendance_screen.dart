@@ -315,6 +315,7 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> {
                   facultyName: item.facultyName.isNotEmpty
                       ? item.facultyName
                       : item.courseTitle,
+                  showsProfile: item.facultyName.isNotEmpty,
                   radius: 18,
                 ),
                 const SizedBox(width: 12),
