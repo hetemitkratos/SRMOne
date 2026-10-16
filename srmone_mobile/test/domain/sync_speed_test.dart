@@ -75,8 +75,11 @@ class _MemoryVault extends SecureVaultService {
   @override
   Future<void> saveAcademiaCookies(String cookiesJson) async =>
       values['cookies'] = cookiesJson;
+  /// Whether the Student Portal counts as set up.
+  bool spConfigured = false;
+
   @override
-  Future<String?> getSpPassword() async => values['spPassword'];
+  Future<String?> getSpPassword() async => spConfigured ? 'x' : null;
   @override
   Future<String?> getSpCookiesJson() async => null;
 }
@@ -216,7 +219,7 @@ void main() {
 
   test('keeps higher Student Portal counts until the portal merge runs',
       () async {
-    vault.values['spPassword'] = 'sp-pw';
+    vault.spConfigured = true;
     await db.replaceAttendanceRecords(_email, [
       AttendanceCacheCompanion(
         academiaEmail: const drift.Value(_email),
