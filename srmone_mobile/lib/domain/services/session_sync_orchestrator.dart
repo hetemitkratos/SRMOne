@@ -82,6 +82,7 @@ List<Map<String, dynamic>> normalizeCalendarMonths(
 
 /// Turns a network or parsing error into a message a student can act on.
 String friendlySyncError(Object e) {
+  if (e is AcademiaLoginException) return e.userMessage;
   if (e is DioException || e is SocketException || e is HandshakeException) {
     return "Couldn't reach SRM Academia. Check your internet connection and try again.";
   }

@@ -12,16 +12,18 @@ class ManualRedirectClient {
   final Dio _dio;
   final SimpleCookieJar cookieJar;
 
-  ManualRedirectClient({required this.cookieJar})
-      : _dio = Dio(
-          BaseOptions(
-            followRedirects: false,
-            validateStatus: (status) => status != null && status < 500,
-            receiveDataWhenStatusError: true,
-            connectTimeout: const Duration(seconds: 30),
-            receiveTimeout: const Duration(seconds: 30),
-          ),
-        );
+  /// [dio] can be injected by tests (for example with a fake adapter).
+  ManualRedirectClient({required this.cookieJar, Dio? dio})
+      : _dio = dio ??
+            Dio(
+              BaseOptions(
+                followRedirects: false,
+                validateStatus: (status) => status != null && status < 500,
+                receiveDataWhenStatusError: true,
+                connectTimeout: const Duration(seconds: 30),
+                receiveTimeout: const Duration(seconds: 30),
+              ),
+            );
 
   /// Execute a request with manual redirect following and automatic cookie management.
   ///
@@ -37,6 +39,7 @@ class ManualRedirectClient {
     dynamic data,
     String? contentType,
     ResponseType? responseType,
+    bool followRedirects = true,
   }) async {
     String currentMethod = method.toUpperCase();
     String currentUrl = url;
@@ -81,11 +84,12 @@ class ManualRedirectClient {
       final statusCode = response.statusCode ?? 0;
 
       // Follow redirects
-      if (statusCode == 301 ||
-          statusCode == 302 ||
-          statusCode == 303 ||
-          statusCode == 307 ||
-          statusCode == 308) {
+      if (followRedirects &&
+          (statusCode == 301 ||
+              statusCode == 302 ||
+              statusCode == 303 ||
+              statusCode == 307 ||
+              statusCode == 308)) {
         final location = response.headers.value('location');
         if (location == null || location.isEmpty) break;
 
@@ -117,8 +121,13 @@ class ManualRedirectClient {
   Future<Response<dynamic>> get(
     String url, {
     Map<String, String>? headers,
+    ResponseType? responseType,
+    bool followRedirects = true,
   }) =>
-      request('GET', url, headers: headers);
+      request('GET', url,
+          headers: headers,
+          responseType: responseType,
+          followRedirects: followRedirects);
 
   /// Convenience POST with url-encoded body
   Future<Response<dynamic>> post(
@@ -126,6 +135,8 @@ class ManualRedirectClient {
     Map<String, String>? headers,
     String? body,
     String contentType = 'application/x-www-form-urlencoded;charset=UTF-8',
+    ResponseType? responseType,
+    bool followRedirects = true,
   }) =>
       request(
         'POST',
@@ -133,5 +144,7 @@ class ManualRedirectClient {
         headers: headers,
         data: body,
         contentType: contentType,
+        responseType: responseType,
+        followRedirects: followRedirects,
       );
 }
