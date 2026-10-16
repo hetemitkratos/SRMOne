@@ -1,0 +1,90 @@
+name: Build SRMOne Mobile (Android APK & iOS IPA)
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'srmone_mobile/**'
+      - '.github/workflows/mobile_build.yml'
+  workflow_dispatch:
+
+jobs:
+  build-android:
+    name: Build Android Release APK
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: srmone_mobile
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Install dependencies & generate Drift/Freezed code
+        run: |
+          flutter pub get
+          dart run build_runner build --delete-conflicting-outputs
+
+      - name: Run Unit Tests
+        run: flutter test
+
+      - name: Build Split APKs
+        run: flutter build apk --release --split-per-abi
+
+      - name: Upload Android APKs
+        uses: actions/upload-artifact@v4
+        with:
+          name: SRMOne-Android-APKs
+          path: srmone_mobile/build/app/outputs/flutter-apk/*.apk
+
+  build-ios:
+    name: Build iOS IPA (macOS Cloud Runner)
+    runs-on: macos-14
+    defaults:
+      run:
+        working-directory: srmone_mobile
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Install dependencies & generate code
+        run: |
+          flutter pub get
+          dart run build_runner build --delete-conflicting-outputs
+
+      - name: Install CocoaPods
+        run: |
+          cd ios
+          pod install
+
+      - name: Build iOS Release (No Codesign)
+        run: flutter build ios --release --no-codesign
+
+      - name: Package Unsigned .ipa for Sideloadly / AltStore
+        run: |
+          mkdir -p build/ios/iphoneos/Payload
+          cp -r build/ios/iphoneos/Runner.app build/ios/iphoneos/Payload/
+          cd build/ios/iphoneos
+          zip -r -y SRMOne-iOS-Unsigned.ipa Payload
+
+      - name: Upload iOS IPA Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SRMOne-iOS-IPA
+          path: srmone_mobile/build/ios/iphoneos/SRMOne-iOS-Unsigned.ipa

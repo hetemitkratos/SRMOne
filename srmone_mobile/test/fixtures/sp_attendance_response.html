@@ -1,0 +1,384 @@
+
+
+
+
+
+
+
+
+
+
+
+ 
+
+<script>
+    function funAbsentDetails(argAttendancemonth, argAttendanceYear) {
+        var applnparameter = [];
+        $("#absentModal").modal('show');
+        applnparameter.push({name: "ids", value: "1"});
+        applnparameter.push({name: "attendanceMonth", value: argAttendancemonth});
+        applnparameter.push({name: "attendanceYear", value: argAttendanceYear});
+        $("#modalbodycontent").html("<img src='../../resources/Image/wait.gif' alt='Loading... Please wait..'>");
+        $.post("../../students/report/studentAttendanceDetailsInner.jsp", applnparameter, function (data, status) {
+            $("#modalbodycontent").html(data);
+        }, "html");
+    }
+</script>
+<!-- Main page content-->
+<div class="container mt-4">
+    
+    
+    <div class="row">
+        <div class="col-xl-8 col-lg-7">
+            <!-- Bar Chart -->
+            <div class="card shadow mb-4">
+                <div class="card-header bg-custom text-white"><i class="fa fa-calculator"></i>
+                    Course Wise Attendance (%)
+                </div>
+                <div class="card-body">
+                    <div class="chart-bar">
+                        <canvas id="myBarChart"></canvas>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+        
+        <!-- Donut Chart -->
+        <div class="col-xl-4 col-lg-5">
+            <div class="card shadow mb-4">
+                <div class="card-header bg-custom text-white"><i class="fa fa-calculator"></i> Attendance Hours
+                </div>
+                <div class="card-body">
+                    <div class="chart-pie">
+                        <canvas id="myPieChart"></canvas>
+                    </div>
+                </div>
+            </div>              
+        </div>
+        
+    </div>
+        
+    
+    
+    
+    
+    <div class="card mb-4">
+        
+         
+        
+        <div class="card-header bg-custom text-white"><i class="fa fa-calculator"></i> COURSE WISE ATTENDANCE
+            
+                - During the Period: <b>21/Jul/2026</b> To <b>18/Aug/2026</b>
+            
+        </div>
+        <div class="card-body p-0">
+            <div class="table-responsive table-billing-history">
+                <table class="table mb-0">
+                    <thead>
+                        <tr>
+                            <th width="10%" scope="col">Code</th>
+                            <th width="32%" scope="col">Description</th>
+                            <th width="8%" scope="col">Max. hours</th>
+                            <th width="8%" scope="col">Att. hours</th>
+                            <th width="8%" scope="col">Absent hours</th>
+                            <th width="8%" scope="col">Total Percentage</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        
+                            
+                            
+                            
+                            
+                            <tr valign="top">
+                                <td>21CSC402P</td>
+                                <td>REPORT WRITING</td>
+                                <td>8</td>
+                                <td>2</td>
+                                <td>6</td>
+                                <td>25.00</td>
+                            </tr>
+                            
+                        
+                            
+                            
+                            
+                            
+                            <tr valign="top">
+                                <td>21CSC406J</td>
+                                <td>NEURAL NETWORKS AND DEEP LEARNING</td>
+                                <td>17</td>
+                                <td>6</td>
+                                <td>11</td>
+                                <td>35.29</td>
+                            </tr>
+                            
+                        
+                            
+                            
+                            
+                            
+                            <tr valign="top">
+                                <td>21CSE412T</td>
+                                <td>MACHINE LEARNING IN DRUG DISCOVERY</td>
+                                <td>11</td>
+                                <td>5</td>
+                                <td>6</td>
+                                <td>45.45</td>
+                            </tr>
+                            
+                        
+                            
+                            
+                            
+                            
+                            <tr valign="top">
+                                <td>21CSE414T</td>
+                                <td>IOT CONCEPTS AND APPLICATIONS</td>
+                                <td>12</td>
+                                <td>2</td>
+                                <td>10</td>
+                                <td>16.67</td>
+                            </tr>
+                            
+                        
+                            
+                            
+                            
+                            
+                            <tr valign="top">
+                                <td>21GNH401TA</td>
+                                <td>BEHAVIORAL PSYCHOLOGY</td>
+                                <td>4</td>
+                                <td>4</td>
+                                <td>0</td>
+                                <td>100.00</td>
+                            </tr>
+                            
+                        
+                            
+                            
+                            
+                            
+                            <tr valign="top">
+                                <td>21MEO106T</td>
+                                <td>INTRODUCTION TO ROBOTICS</td>
+                                <td>12</td>
+                                <td>3</td>
+                                <td>9</td>
+                                <td>25.00</td>
+                            </tr>
+                            
+                        
+                        
+                        
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    
+    
+     
+
+
+<div class="card mb-3">
+    <div class="card-header bg-custom text-white"><i class="fa fa-calculator"></i> Cumulative Attendance (In Hours)</div>
+    <div class="card-body">
+        <div class="table-responsive table-billing-history">
+            <table class="table mb-0">
+                <thead>
+                    <tr>
+                        <th width="15%" scope="col">Month / Year</th>
+                        <th width="15%" scope="col">Present</th>
+                        <th width="15%" scope="col">Absent</th>
+                    </tr>
+                </thead>
+                <tbody>
+                          
+                    
+                        
+                        <tr valign="top">
+                            <td>Jul-2026</td>
+                            <td>5</td>
+                            <td>27</td>
+                        </tr> 
+                    
+                        
+                        <tr valign="top">
+                            <td>Aug-2026</td>
+                            <td>17</td>
+                            <td>15</td>
+                        </tr> 
+                    
+                    
+                </tbody>
+            </table> 
+        </div>
+    </div>
+</div>
+
+
+<div class="modal fade" id="absentModal" tabindex="-1" role="dialog" aria-labelledby="exampleModalLabel"
+     aria-hidden="true">
+    <div class="modal-dialog" role="document">
+        <div class="modal-content">
+            <div class="modal-header bg-custom ">
+                <h5 class="modal-title text-white" id="exampleModalLabel">Absent Details</h5>
+                <button class="close" type="button" data-dismiss="modal" aria-label="Close">
+                    <span class="text-white" aria-hidden="true">×</span>
+                </button>
+            </div>
+            <div class="modal-body" id="modalbodycontent">
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-dark lift" type="button" data-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+<script src="../../resources/js/vendor/Chart.min.js"></script>
+<script>
+                                    var ctx = document.getElementById("myPieChart");
+                                    var myPieChart = new Chart(ctx, {
+                                        type: 'doughnut',
+                                        data: {
+                                            labels: ["Hours Present", "Hours Absent"],
+                                            datasets: [{
+                                                    data: [22,42],
+                                                    backgroundColor: ['#00ba94', '#f4a100'],
+                                                    hoverBackgroundColor: ['#00ba94', '#f4a100'],
+                                                    hoverBorderColor: "rgba(234, 236, 244, 1)",
+                                                }],
+                                        },
+                                        options: {
+                                            maintainAspectRatio: false,
+                                            tooltips: {
+                                                backgroundColor: "rgb(255,255,255)",
+                                                bodyFontColor: "#858796",
+                                                borderColor: '#dddfeb',
+                                                borderWidth: 1,
+                                                xPadding: 15,
+                                                yPadding: 15,
+                                                displayColors: false,
+                                                caretPadding: 10,
+                                            },
+                                            legend: {
+                                                display: true
+                                            },
+                                            cutoutPercentage: 70,
+                                        },
+                                    });
+</script>
+<script>
+    function number_format(number, decimals, dec_point, thousands_sep) {
+        // *     example: number_format(1234.56, 2, ',', ' ');
+        // *     return: '1 234,56'
+        number = (number + '').replace(',', '').replace(' ', '');
+        var n = !isFinite(+number) ? 0 : +number,
+                prec = !isFinite(+decimals) ? 0 : Math.abs(decimals),
+                sep = (typeof thousands_sep === 'undefined') ? ',' : thousands_sep,
+                dec = (typeof dec_point === 'undefined') ? '.' : dec_point,
+                s = '',
+                toFixedFix = function (n, prec) {
+                    var k = Math.pow(10, prec);
+                    return '' + Math.round(n * k) / k;
+                };
+        // Fix for IE parseFloat(0.55).toFixed(0) = 0;
+        s = (prec ? toFixedFix(n, prec) : '' + Math.round(n)).split('.');
+        if (s[0].length > 3) {
+            s[0] = s[0].replace(/\B(?=(?:\d{3})+(?!\d))/g, sep);
+        }
+        if ((s[1] || '').length < prec) {
+            s[1] = s[1] || '';
+            s[1] += new Array(prec - s[1].length + 1).join('0');
+        }
+        return s.join(dec);
+    }
+
+// Bar Chart Example
+    var ctx = document.getElementById("myBarChart");
+    var myBarChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: [ "21CSC402P", "21CSC406J", "21CSE412T", "21CSE414T", "21GNH401TA", "21MEO106T",],
+            datasets: [{
+                    label: "Attendance ",
+                    backgroundColor: "#4e73df",
+                    hoverBackgroundColor: "#2e59d9",
+                    borderColor: "#4e73df",
+                    data: [ 25.00, 35.29, 45.45, 16.67, 100.00, 25.00,],
+                }],
+        },
+        options: {
+            maintainAspectRatio: false,
+            layout: {
+                padding: {
+                    left: 10,
+                    right: 25,
+                    top: 25,
+                    bottom: 0
+                }
+            },
+            scales: {
+                xAxes: [{
+                        time: {
+                            unit: 'month'
+                        },
+                        gridLines: {
+                            display: false,
+                            drawBorder: false
+                        },
+                        ticks: {
+                            autoSkip: false
+                        },
+                        maxBarThickness: 25,
+                    }],
+                yAxes: [{
+                        ticks: {
+                            min: 0,
+                            max: 100,
+                            maxTicksLimit: 5,
+                            padding: 10,
+                            // Include a dollar sign in the ticks
+                            callback: function (value, index, values) {
+                                return number_format(value) + '%';
+                            }
+                        },
+                        gridLines: {
+                            color: "rgb(234, 236, 244)",
+                            zeroLineColor: "rgb(234, 236, 244)",
+                            drawBorder: false,
+                            borderDash: [2],
+                            zeroLineBorderDash: [2]
+                        }
+                    }],
+            },
+            legend: {
+                display: false
+            },
+            tooltips: {
+                titleMarginBottom: 10,
+                titleFontColor: '#6e707e',
+                titleFontSize: 14,
+                backgroundColor: "rgb(255,255,255)",
+                bodyFontColor: "#858796",
+                borderColor: '#dddfeb',
+                borderWidth: 1,
+                xPadding: 15,
+                yPadding: 15,
+                displayColors: false,
+                caretPadding: 10,
+                callbacks: {
+                    label: function (tooltipItem, chart) {
+                        var datasetLabel = chart.datasets[tooltipItem.datasetIndex].label || '';
+                        return datasetLabel + ': ' + number_format(tooltipItem.yLabel) + "%";
+                    }
+                }
+            },
+        }
+    });
+</script>
+
+

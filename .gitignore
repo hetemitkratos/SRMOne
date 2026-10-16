@@ -46,6 +46,7 @@ jd_*.txt
 !academia-backend/frontend/public/icon-512.png
 !academia-backend/frontend/public/icon-maskable-512.png
 !academia-backend/frontend/public/apple-touch-icon.png
+!srmone_mobile/**/*.png
 
 # IDE / OS
 .DS_Store
