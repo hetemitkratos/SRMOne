@@ -285,4 +285,24 @@ void main() {
       expect(resultsBelow[0].recoveryNeeded, greaterThan(0));
     });
   });
+
+  test('timetableSlotsFromCourses yields one slot per scheduled hour', () {
+    final slots = timetableSlotsFromCourses([
+      {
+        'courseCode': '21CSC101T',
+        'slot': 'A',
+        'schedule': [
+          {'day': 'Day 1', 'hourIndex': 1, 'timing': '08:00 - 08:50'},
+          {'day': 'Day 1', 'hourIndex': 2, 'timing': '08:50 - 09:40'},
+          {'day': 'Day 3', 'hourIndex': 4, 'timing': '10:45 - 11:35'},
+        ],
+      },
+      {'courseCode': 'NOSCHED', 'slot': 'B'},
+    ]);
+    expect(slots.map((s) => '${s.courseCode} ${s.day} ${s.hourIndex}'), [
+      '21CSC101T Day 1 1',
+      '21CSC101T Day 1 2',
+      '21CSC101T Day 3 4',
+    ]);
+  });
 }

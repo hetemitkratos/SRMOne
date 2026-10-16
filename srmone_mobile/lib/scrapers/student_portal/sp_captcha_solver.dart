@@ -36,16 +36,21 @@ class SpCaptchaSolver {
   static Future<bool> _load() async {
     final sw = Stopwatch()..start();
     try {
-      final charset = await rootBundle.loadString(AssetPaths.ddddocrCharset);
-      final model = await rootBundle.load(AssetPaths.ddddocrOnnx);
+      // The worker reads the 54 MB model from the asset bundle itself, so it
+      // never passes through this isolate. Without a root token (not a
+      // Flutter root isolate) it is loaded here and handed over.
+      final token = RootIsolateToken.instance;
+      final model = token == null
+          ? TransferableTypedData.fromList([
+              (await rootBundle.load(AssetPaths.ddddocrOnnx))
+                  .buffer
+                  .asUint8List()
+            ])
+          : null;
       final ready = ReceivePort();
       await Isolate.spawn(
         _workerMain,
-        (
-          ready.sendPort,
-          charset,
-          TransferableTypedData.fromList([model.buffer.asUint8List()]),
-        ),
+        (ready.sendPort, token, model),
         debugName: 'sp-captcha',
       );
       final reply = await ready.first;
@@ -86,17 +91,24 @@ class SpCaptchaSolver {
 
   /// Builds the session, reports its [SendPort] (or the error) and then
   /// answers `(replyPort, imageBytes)` requests with the decoded text.
-  static void _workerMain((SendPort, String, TransferableTypedData) args) {
-    final (ready, charsetJson, modelData) = args;
+  static Future<void> _workerMain(
+      (SendPort, RootIsolateToken?, TransferableTypedData?) args) async {
+    final (ready, token, modelData) = args;
     final OrtSession session;
     final List<String> charset;
     try {
+      if (token != null) {
+        BackgroundIsolateBinaryMessenger.ensureInitialized(token);
+      }
+      final model = modelData?.materialize().asUint8List() ??
+          (await rootBundle.load(AssetPaths.ddddocrOnnx)).buffer.asUint8List();
+      charset =
+          (jsonDecode(await rootBundle.loadString(AssetPaths.ddddocrCharset))
+                  as List<dynamic>)
+              .map((e) => e.toString())
+              .toList();
       OrtEnv.instance.init();
-      charset = (jsonDecode(charsetJson) as List<dynamic>)
-          .map((e) => e.toString())
-          .toList();
-      session = OrtSession.fromBuffer(
-          modelData.materialize().asUint8List(), OrtSessionOptions());
+      session = OrtSession.fromBuffer(model, OrtSessionOptions());
     } catch (e) {
       ready.send('$e');
       return;

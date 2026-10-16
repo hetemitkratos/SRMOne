@@ -353,7 +353,13 @@ class SessionSyncOrchestrator {
     await _guard('profile', () => _syncProfile(email, page.profile));
     await _guard('marks', () => _syncAcademiaMarks(email, page, records));
     if (!includeStudentPortal) {
-      await _persistAttendance(email, records);
+      // The Student Portal merge runs after this and often carries more
+      // conducted hours than Academia. Keep those until it does, so the
+      // screens don't flip to Academia's lower counts and back.
+      final early = await isStudentPortalConfigured()
+          ? reconcileAttendance(records, await _cachedAttendance(email))
+          : records;
+      await _persistAttendance(email, early);
       _log('attendance saved in ${total.elapsedMilliseconds} ms');
     }
 
@@ -441,24 +447,9 @@ class SessionSyncOrchestrator {
       }
       // Merge into the Academia attendance of a sync that is still running.
       await _inflight?.catchError((Object _) => _error(''));
-      final cached = await _db.watchAttendanceRecords(email).first;
+      final cached = await _cachedAttendance(email);
       if (cached.isNotEmpty && spRecords.isNotEmpty) {
-        final academia = [
-          for (final c in cached)
-            AttendanceInput(
-              courseCode: c.courseCode,
-              courseTitle: c.courseTitle,
-              hoursConducted: c.hoursConducted,
-              hoursAbsent: c.hoursAbsent,
-              attendancePct: c.attendancePct,
-              category: c.category,
-              facultyName: c.facultyName,
-              slot: c.slot,
-              roomNo: c.roomNo,
-            ),
-        ];
-        await _persistAttendance(
-            email, reconcileAttendance(academia, spRecords));
+        await _persistAttendance(email, reconcileAttendance(cached, spRecords));
       }
       _log('student portal connected in ${sw.elapsedMilliseconds} ms');
       return SpConnectResult(
@@ -480,6 +471,22 @@ class SessionSyncOrchestrator {
           false, "Couldn't connect to the Student Portal. Try again later.");
     }
   }
+
+  /// The saved attendance, as reconcile inputs.
+  Future<List<AttendanceInput>> _cachedAttendance(String email) async => [
+        for (final c in await _db.watchAttendanceRecords(email).first)
+          AttendanceInput(
+            courseCode: c.courseCode,
+            courseTitle: c.courseTitle,
+            hoursConducted: c.hoursConducted,
+            hoursAbsent: c.hoursAbsent,
+            attendancePct: c.attendancePct,
+            category: c.category,
+            facultyName: c.facultyName,
+            slot: c.slot,
+            roomNo: c.roomNo,
+          ),
+      ];
 
   /// Replaces the cached attendance and runs the snapshot and notification
   /// rules for it.

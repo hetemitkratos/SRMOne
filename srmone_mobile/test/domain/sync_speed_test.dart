@@ -76,7 +76,7 @@ class _MemoryVault extends SecureVaultService {
   Future<void> saveAcademiaCookies(String cookiesJson) async =>
       values['cookies'] = cookiesJson;
   @override
-  Future<String?> getSpPassword() async => null;
+  Future<String?> getSpPassword() async => values['spPassword'];
   @override
   Future<String?> getSpCookiesJson() async => null;
 }
@@ -115,14 +115,16 @@ class _FakeAcademia implements HttpClientAdapter {
 void main() {
   late AppDatabase db;
   late _FakeAcademia academia;
+  late _MemoryVault vault;
   late SessionSyncOrchestrator orchestrator;
 
   setUp(() {
     db = AppDatabase.forTesting(NativeDatabase.memory());
     academia = _FakeAcademia();
+    vault = _MemoryVault();
     orchestrator = SessionSyncOrchestrator(
       db: db,
-      vault: _MemoryVault(),
+      vault: vault,
       notifEngine: NotificationRuleEngine(
         db: db,
         notifPlugin: FlutterLocalNotificationsPlugin(),
@@ -210,5 +212,27 @@ void main() {
     await orchestrator.syncAll(includeStudentPortal: false);
 
     expect(academia.requests, isNot(contains('Academic_Reports')));
+  });
+
+  test('keeps higher Student Portal counts until the portal merge runs',
+      () async {
+    vault.values['spPassword'] = 'sp-pw';
+    await db.replaceAttendanceRecords(_email, [
+      AttendanceCacheCompanion(
+        academiaEmail: const drift.Value(_email),
+        courseCode: const drift.Value('21CSC101T'),
+        courseTitle: const drift.Value('Algorithms'),
+        hoursConducted: const drift.Value(24),
+        hoursAbsent: const drift.Value(3),
+        attendancePct: const drift.Value(87.5),
+        updatedAt: drift.Value(DateTime.now().millisecondsSinceEpoch),
+      ),
+    ]);
+    academia.releaseGrid.complete();
+    await orchestrator.syncAll(includeStudentPortal: false);
+
+    final saved = await db.watchAttendanceRecords(_email).first;
+    expect(saved.single.hoursConducted, 24);
+    expect(saved.single.hoursAbsent, 3);
   });
 }
