@@ -4,6 +4,7 @@
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:isolate';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import '../../core/constants/portal_endpoints.dart';
@@ -88,18 +89,21 @@ class SPClient {
 
     final html = pageResp.data.toString();
     final pageLoadMs = DateTime.now().millisecondsSinceEpoch;
-    final config = SPParsers.parseSecureConfig(html);
+    // Parsed off the UI isolate: the login page is large enough to stall
+    // a frame. Only the HTML string crosses over.
+    final (config, honeypotNames, captchaUrl) = await Isolate.run(() => (
+          SPParsers.parseSecureConfig(html),
+          SPParsers.extractHoneypotNames(html),
+          SPParsers.extractCaptchaImageUrl(html, _spLoginUrl),
+        ));
 
     if (config.captchaText.isEmpty) {
       throw const FormatException(
           'Could not extract captchaText from SP login page');
     }
 
-    final honeypotNames = SPParsers.extractHoneypotNames(html);
-
     // The real image lives at the one-time URL in img#secure_captcha's
     // data-src; the bare servlet path answers 403 with an empty body.
-    final captchaUrl = SPParsers.extractCaptchaImageUrl(html, _spLoginUrl);
     if (captchaUrl.isEmpty) {
       throw const FormatException('SP login page has no CAPTCHA image');
     }
@@ -327,7 +331,8 @@ class SPClient {
       },
     ).timeout(stepTimeout);
 
-    return SPParsers.parseAttendance(response.data.toString());
+    final html = response.data.toString();
+    return Isolate.run(() => SPParsers.parseAttendance(html));
   }
 
   /// Fetches internal marks from Student Portal (iden=13). Pass [prime]
@@ -349,6 +354,7 @@ class SPClient {
       },
     ).timeout(stepTimeout);
 
-    return SPParsers.parseInternalMarks(response.data.toString());
+    final html = response.data.toString();
+    return Isolate.run(() => SPParsers.parseInternalMarks(html));
   }
 }

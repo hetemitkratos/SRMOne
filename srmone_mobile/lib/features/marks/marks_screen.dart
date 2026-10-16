@@ -128,7 +128,7 @@ class _MarksScreenState extends ConsumerState<MarksScreen>
       itemCount: internalMarks.length,
       itemBuilder: (context, index) {
         final course = internalMarks[index];
-        final tests = _parseTests(course.testsJson);
+        final tests = _testsFor(course.testsJson);
 
         return Card(
           elevation: 0,
@@ -350,12 +350,18 @@ class _MarksScreenState extends ConsumerState<MarksScreen>
     );
   }
 
-  List<Map<String, dynamic>> _parseTests(String jsonStr) {
-    try {
-      final list = jsonDecode(jsonStr) as List<dynamic>;
-      return list.cast<Map<String, dynamic>>();
-    } catch (_) {
-      return [];
-    }
+  // Decoded tests by their JSON, so scrolling and rebuilds reuse them.
+  static final _testsCache = <String, List<Map<String, dynamic>>>{};
+
+  List<Map<String, dynamic>> _testsFor(String jsonStr) {
+    if (_testsCache.length > 200) _testsCache.clear();
+    return _testsCache[jsonStr] ??= () {
+      try {
+        final list = jsonDecode(jsonStr) as List<dynamic>;
+        return list.cast<Map<String, dynamic>>();
+      } catch (_) {
+        return const <Map<String, dynamic>>[];
+      }
+    }();
   }
 }

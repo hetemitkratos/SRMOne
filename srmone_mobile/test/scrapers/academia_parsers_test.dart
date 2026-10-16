@@ -85,6 +85,22 @@ void main() {
       expect(records.first.facultyName, 'Dr. A B (100001)');
     });
 
+    test('parseAttendance keeps columns aligned past split or empty headers',
+        () {
+      const page = '''
+<table>
+  <tr><th>Course<br>Code</th><th>Course Title</th><th></th>
+      <th>Hours<br>Conducted</th><th>Hours Absent</th><th>Attn<br>%</th></tr>
+  <tr><td>21CSC101T</td><td>Algorithms</td><td>x</td>
+      <td>40</td><td>4</td><td>90.00</td></tr>
+</table>''';
+      final r = AcademiaParsers.parseAttendance(page).single;
+      expect(r.courseCode, '21CSC101T');
+      expect(r.hoursConducted, 40);
+      expect(r.hoursAbsent, 4);
+      expect(r.attendancePct, 90.0);
+    });
+
     test('parseStudentProfile pairs labels with values and skips colons', () {
       final info = AcademiaParsers.parseStudentProfile(_timetablePage);
       expect(info['Registration Number'], 'RA0000000000001');

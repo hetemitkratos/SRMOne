@@ -59,17 +59,13 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen>
 
     return Consumer(
       builder: (context, ref, _) {
-        final timetableSnap = ref.watch(timetableProvider);
-        final timetable = timetableSnap.valueOrNull;
-        final rawCourses =
-            TimetableSchedule.parseCourses(timetable?.coursesJson);
+        final timetable = ref.watch(timetableProvider).valueOrNull;
+        final rawCourses = ref.watch(timetableCoursesProvider);
 
         return Consumer(
           builder: (context, ref, _) {
-            final calendarSnap = ref.watch(calendarProvider(currentSemester()));
-            final calendar = calendarSnap.valueOrNull;
             final calendarMap =
-                TimetableSchedule.parseCalendar(calendar?.monthsJson);
+                ref.watch(calendarMapProvider(currentSemester()));
             final todayStatus = CalendarDayResolver.getDayStatus(
               calendarMap,
               DateTime.now(),

@@ -51,9 +51,11 @@ class AcademiaParsers {
             : <Element>[];
 
         final candidateCells = thList.isNotEmpty ? thList : firstRowCells;
+        // Kept index-aligned with the data cells (an empty header must not
+        // shift later columns), with whitespace collapsed so a header
+        // broken by <br> ("Hours<br>Conducted") still matches.
         final rowHeaders = candidateCells
-            .map((c) => cellText(c))
-            .where((h) => h.isNotEmpty)
+            .map((c) => cellText(c).replaceAll(RegExp(r'\s+'), ' ').trim())
             .toList();
 
         final matches = pass
