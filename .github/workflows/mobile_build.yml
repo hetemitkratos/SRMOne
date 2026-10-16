@@ -38,14 +38,17 @@ jobs:
       - name: Run Unit Tests
         run: flutter test
 
-      - name: Build Split APKs
-        run: flutter build apk --release --split-per-abi
+      # One APK for every real Android phone (32- and 64-bit ARM); x86_64 is emulator-only.
+      - name: Build Android APK
+        run: |
+          flutter build apk --release --target-platform android-arm,android-arm64
+          mv build/app/outputs/flutter-apk/app-release.apk build/app/outputs/flutter-apk/SRMOne.apk
 
-      - name: Upload Android APKs
+      - name: Upload Android APK
         uses: actions/upload-artifact@v4
         with:
-          name: SRMOne-Android-APKs
-          path: srmone_mobile/build/app/outputs/flutter-apk/*.apk
+          name: SRMOne-Android-APK
+          path: srmone_mobile/build/app/outputs/flutter-apk/SRMOne.apk
 
   build-ios:
     name: Build iOS IPA (macOS Cloud Runner)
@@ -103,11 +106,17 @@ jobs:
           path: dist
           merge-multiple: true
 
-      - name: Create release and attach APKs / IPA
+      - name: Create release and attach APK / IPA
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            dist/*.apk
-            dist/*.ipa
+            dist/SRMOne.apk
+            dist/SRMOne-iOS-Unsigned.ipa
+          body: |
+            ## Download
+
+            **Android:** download **SRMOne.apk** below, open it on your phone and allow installing from this source if asked.
+
+            **iPhone:** download **SRMOne-iOS-Unsigned.ipa** and install it with Sideloadly or AltStore (it is not on the App Store).
           generate_release_notes: true
           fail_on_unmatched_files: false
