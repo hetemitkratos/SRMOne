@@ -90,10 +90,25 @@ class _SpCaptchaBottomSheetState extends State<SpCaptchaBottomSheet> {
                   border: Border.all(color: Colors.white24),
                 ),
                 clipBehavior: Clip.antiAlias,
-                child: Image.memory(
-                  widget.captchaImage,
-                  height: 50,
-                  fit: BoxFit.contain,
+                // Fixed box: the CAPTCHA is ~175x45, so a 200x52 frame shows
+                // it at native size. Without a width, an image that fails to
+                // decode collapses to a hairline next to the border.
+                child: Container(
+                  width: 200,
+                  height: 52,
+                  color: Colors.white,
+                  alignment: Alignment.center,
+                  child: Image.memory(
+                    widget.captchaImage,
+                    fit: BoxFit.contain,
+                    gaplessPlayback: true,
+                    semanticLabel: 'CAPTCHA image',
+                    errorBuilder: (_, __, ___) => const Text(
+                      "Couldn't load the image. Tap refresh.",
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: Colors.black54, fontSize: 12),
+                    ),
+                  ),
                 ),
               ),
               if (widget.onRefreshCaptcha != null) ...[

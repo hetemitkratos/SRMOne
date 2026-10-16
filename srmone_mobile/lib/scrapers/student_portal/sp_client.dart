@@ -3,8 +3,8 @@
 // Ported from academia-backend/academia-scraper/cmd/studentportal/client.go & login.go
 
 import 'dart:convert';
-import 'dart:typed_data';
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import '../../core/constants/portal_endpoints.dart';
 import '../../core/network/manual_redirect_client.dart';
 import '../../core/network/simple_cookie_jar.dart';
@@ -65,6 +65,14 @@ class SPClient {
   static const String _spDashboardUrl =
       '$_spBaseUrl/srmiststudentportal/students/template/HRDSystem.jsp';
 
+  /// Upper bound for each Student Portal round trip, so a stalled portal
+  /// surfaces as an error instead of an endless spinner.
+  static const Duration stepTimeout = Duration(seconds: 30);
+
+  /// How many fresh CAPTCHAs [login] tries to solve on-device before asking
+  /// the user. Each rejected answer costs one portal sign-in attempt.
+  static const int autoSolveAttempts = 3;
+
   /// Step 1: Prepares login by fetching the login page, parsing SECURE_CONFIG,
   /// collecting honeypot names, and downloading the CAPTCHA image with X-Domain-Proof.
   Future<SPLoginContext> prepareLogin() async {
@@ -75,7 +83,7 @@ class SPClient {
         'Accept':
             'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
       },
-    );
+    ).timeout(stepTimeout);
 
     final html = pageResp.data.toString();
     final pageLoadMs = DateTime.now().millisecondsSinceEpoch;
@@ -88,29 +96,36 @@ class SPClient {
 
     final honeypotNames = SPParsers.extractHoneypotNames(html);
 
-    // Fetch CAPTCHA image with X-Domain-Proof header
+    // The real image lives at the one-time URL in img#secure_captcha's
+    // data-src; the bare servlet path answers 403 with an empty body.
+    final captchaUrl = SPParsers.extractCaptchaImageUrl(html, _spLoginUrl);
+    if (captchaUrl.isEmpty) {
+      throw const FormatException('SP login page has no CAPTCHA image');
+    }
     final domainProof =
         base64Encode(utf8.encode('${config.nonce}:sp.srmist.edu.in'));
-    const captchaUrl = '$_spBaseUrl/srmiststudentportal/SCaptchaServlet';
 
-    final captchaResp = await _client.request(
-      'GET',
-      captchaUrl,
-      headers: {
-        'Referer': _spLoginUrl,
-        'Accept': 'image/png, image/jpeg, image/svg+xml, image/*',
-        'X-Domain-Proof': domainProof,
-        'User-Agent': PortalEndpoints.defaultUserAgent,
-      },
-      // Binary image: a text response would corrupt the bytes.
-      responseType: ResponseType.bytes,
-    );
+    final captchaResp = await _client
+        .request(
+          'GET',
+          captchaUrl,
+          headers: {
+            'Referer': _spLoginUrl,
+            'Accept': 'image/png, image/jpeg, image/svg+xml, image/*',
+            'X-Domain-Proof': domainProof,
+            'User-Agent': PortalEndpoints.defaultUserAgent,
+          },
+          // Binary image: a text response would corrupt the bytes.
+          responseType: ResponseType.bytes,
+        )
+        .timeout(stepTimeout);
 
-    Uint8List captchaBytes;
-    if (captchaResp.data is List<int>) {
-      captchaBytes = Uint8List.fromList(captchaResp.data as List<int>);
-    } else {
-      throw const FormatException('Invalid CAPTCHA image response format');
+    final data = captchaResp.data;
+    final captchaBytes =
+        data is List<int> ? Uint8List.fromList(data) : Uint8List(0);
+    if (!looksLikeRasterImage(captchaBytes)) {
+      throw FormatException('SP CAPTCHA was not an image '
+          '(HTTP ${captchaResp.statusCode}, ${captchaBytes.length} bytes)');
     }
 
     return SPLoginContext(
@@ -121,18 +136,41 @@ class SPClient {
     );
   }
 
-  /// Automatically attempts login using ONNX CAPTCHA solver.
-  /// Falls back to returning SPCaptchaRequired if ONNX fails or CAPTCHA is rejected.
-  Future<SPLoginResult> login(String netId, String password) async {
-    final ctx = await prepareLogin();
-
-    // Try ONNX CAPTCHA solve
-    final solved = await SpCaptchaSolver.solve(ctx.captchaImage);
-    if (solved == null || solved.length < 4) {
-      return SPCaptchaRequired(ctx.captchaImage, ctx);
+  /// True when [bytes] start with a PNG, JPEG or GIF signature, i.e. something
+  /// both `Image.memory` and the OCR decoder can read.
+  static bool looksLikeRasterImage(Uint8List bytes) {
+    bool startsWith(List<int> sig) {
+      if (bytes.length < sig.length) return false;
+      for (var i = 0; i < sig.length; i++) {
+        if (bytes[i] != sig[i]) return false;
+      }
+      return true;
     }
 
-    return submitLogin(ctx, netId, password, solved);
+    return startsWith(const [0x89, 0x50, 0x4E, 0x47]) || // PNG
+        startsWith(const [0xFF, 0xD8, 0xFF]) || // JPEG
+        startsWith(const [0x47, 0x49, 0x46, 0x38]); // GIF
+  }
+
+  /// Signs in, solving the CAPTCHA on-device. Tries up to [autoSolveAttempts]
+  /// fresh CAPTCHAs; if none is accepted (or OCR is unavailable) returns
+  /// [SPCaptchaRequired] with a fresh CAPTCHA for the user to read.
+  Future<SPLoginResult> login(String netId, String password) async {
+    var ctx = await prepareLogin();
+    for (var attempt = 1; attempt <= autoSolveAttempts; attempt++) {
+      final solved = await SpCaptchaSolver.solve(ctx.captchaImage);
+      _log('OCR attempt $attempt: '
+          '${solved == null ? 'no answer' : '${solved.length} chars'}');
+      if (solved == null) break;
+      final result = await submitLogin(ctx, netId, password, solved);
+      if (result is! SPCaptchaRequired) return result;
+      ctx = result.context;
+    }
+    return SPCaptchaRequired(ctx.captchaImage, ctx);
+  }
+
+  static void _log(String message) {
+    if (kDebugMode) debugPrint('[SP] $message');
   }
 
   /// Submits the login form with a solved CAPTCHA string.
@@ -234,33 +272,47 @@ class SPClient {
         'Referer': _spLoginUrl,
         'Origin': _spBaseUrl,
         'User-Agent': PortalEndpoints.defaultUserAgent,
+        'Accept':
+            'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
         'Upgrade-Insecure-Requests': '1',
       },
-    );
+    ).timeout(stepTimeout);
 
     final respHtml = response.data.toString();
+    final finalUrl = response.realUri.toString();
 
-    // Check for login failure alerts
-    if (respHtml.contains('alert-danger') ||
-        respHtml.contains('Invalid Captcha') ||
-        respHtml.contains('Invalid User') ||
-        respHtml.contains('Login Failed')) {
-      if (respHtml.contains('Invalid Captcha') ||
-          respHtml.contains('alert-danger')) {
-        // Need manual fallback
-        final newCtx = await prepareLogin();
-        return SPCaptchaRequired(newCtx.captchaImage, newCtx);
-      }
-      return const SPLoginFailure('Invalid registration number or password');
+    if (!SPParsers.isLoginFailed(finalUrl, respHtml)) {
+      _log('signed in (HTTP ${response.statusCode})');
+      return SPLoginSuccess(respHtml);
     }
 
-    return SPLoginSuccess(respHtml);
+    final alert = SPParsers.extractAlertText(respHtml);
+    _log('sign-in rejected: ${alert.isEmpty ? '(no alert)' : alert}');
+    if (isCredentialRejection(alert)) {
+      return SPLoginFailure(alert);
+    }
+    // Wrong (or unreadable) CAPTCHA: the old one is spent, fetch a new one.
+    final newCtx = await prepareLogin();
+    return SPCaptchaRequired(newCtx.captchaImage, newCtx);
+  }
+
+  /// Whether the portal's alert text blames the NetID/password rather than
+  /// the CAPTCHA. Retrying a CAPTCHA cannot fix these, and retrying a wrong
+  /// password risks locking the account.
+  static bool isCredentialRejection(String alert) {
+    final a = alert.toLowerCase();
+    if (a.contains('captcha')) return false;
+    return a.contains('password') ||
+        a.contains('credential') ||
+        a.contains('invalid user') ||
+        a.contains('locked');
   }
 
   /// Fetches attendance records from Student Portal (iden=9).
   Future<List<AttendanceInput>> fetchAttendance() async {
     // Prime context
-    await _client.get(_spDashboardUrl, headers: {'Referer': _spLoginUrl});
+    await _client.get(_spDashboardUrl,
+        headers: {'Referer': _spLoginUrl}).timeout(stepTimeout);
 
     const body = 'iden=9&filter=&hdnFormDetails=1&csrfPreventionSalt=';
     final response = await _client.post(
@@ -270,14 +322,15 @@ class SPClient {
         'Referer': _spDashboardUrl,
         'X-Requested-With': 'XMLHttpRequest',
       },
-    );
+    ).timeout(stepTimeout);
 
     return SPParsers.parseAttendance(response.data.toString());
   }
 
   /// Fetches internal marks from Student Portal (iden=13).
   Future<List<SPMarkRecord>> fetchInternalMarks() async {
-    await _client.get(_spDashboardUrl, headers: {'Referer': _spLoginUrl});
+    await _client.get(_spDashboardUrl,
+        headers: {'Referer': _spLoginUrl}).timeout(stepTimeout);
 
     const body = 'iden=13&filter=&hdnFormDetails=1&csrfPreventionSalt=';
     final response = await _client.post(
@@ -287,7 +340,7 @@ class SPClient {
         'Referer': _spDashboardUrl,
         'X-Requested-With': 'XMLHttpRequest',
       },
-    );
+    ).timeout(stepTimeout);
 
     return SPParsers.parseInternalMarks(response.data.toString());
   }

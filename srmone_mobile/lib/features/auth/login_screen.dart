@@ -2,15 +2,16 @@
 // Native login screen with auto-append NetID, optional SP credentials,
 // and terms of service check.
 
+import 'dart:async';
+
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/constants/asset_paths.dart';
-import '../../main.dart';
 import '../settings/legal_markdown_screen.dart';
 import 'auth_controller.dart';
-import 'sp_captcha_bottom_sheet.dart';
+import 'student_portal_connector.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});
@@ -48,21 +49,23 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       return;
     }
 
+    final spPassword = _showSpField ? _spPasswordController.text : '';
+    // Captured before the await: a successful sign-in navigates away and
+    // disposes this screen.
+    final spConnector = ref.read(studentPortalConnectorProvider.notifier);
     final success = await ref.read(authControllerProvider.notifier).login(
           email: _emailController.text,
           password: _passwordController.text,
-          spPassword: _showSpField ? _spPasswordController.text : null,
-          onSpCaptcha: (image) async {
-            if (!mounted) return null;
-            return showSpCaptchaSheet(context, image);
-          },
+          spPassword: spPassword.isEmpty ? null : spPassword,
         );
+    if (!success) return;
 
-    if (success && mounted) {
-      await requestNotificationPermission(
-          ref.read(notificationsPluginProvider));
-      if (mounted) context.go('/dashboard');
-    }
+    // The Student Portal connects in the background; the dashboard shows its
+    // progress and offers the manual CAPTCHA sheet only if OCR fails.
+    if (spPassword.isNotEmpty) unawaited(spConnector.connect());
+    // Notification permission is requested once by the dashboard shell;
+    // asking here too races it (permissionRequestInProgress).
+    if (mounted) context.go('/dashboard');
   }
 
   @override
@@ -333,12 +336,15 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   ),
                   const SizedBox(height: 24),
 
-                  // Submit Button
+                  // Submit Button. The disabled colours match the enabled
+                  // ones so the spinner stays visible while signing in.
                   ElevatedButton(
                     onPressed: isLoading ? null : _submit,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFFBDE3D5),
                       foregroundColor: const Color(0xFF0F0F0F),
+                      disabledBackgroundColor: const Color(0xFF8FB5A7),
+                      disabledForegroundColor: const Color(0xFF0F0F0F),
                       padding: const EdgeInsets.symmetric(vertical: 16),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(14),
@@ -357,6 +363,19 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                 fontWeight: FontWeight.bold, fontSize: 16),
                           ),
                   ),
+                  if (authState is AuthLoading) ...[
+                    const SizedBox(height: 14),
+                    Semantics(
+                      liveRegion: true,
+                      child: Text(
+                        authState.step.label,
+                        key: const ValueKey('login-progress'),
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                            color: Colors.white70, fontSize: 13),
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),

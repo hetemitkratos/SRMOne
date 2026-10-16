@@ -12,12 +12,13 @@
 // and the academic calendar. Attendance is required; the other sections are
 // best-effort so a failure in one never discards the rest.
 
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
 import 'package:drift/drift.dart' as drift;
+import 'package:flutter/foundation.dart';
 import '../../core/database/app_database.dart';
 import '../../core/network/simple_cookie_jar.dart';
 import '../../core/security/secure_vault_service.dart';
@@ -31,6 +32,47 @@ import 'notification_rule_engine.dart';
 /// Asks the user to read a Student Portal CAPTCHA image. Returns the typed
 /// text, or null if the user cancelled.
 typedef SpCaptchaPrompt = Future<String?> Function(Uint8List captchaImage);
+
+/// The user-visible stages of a sync, in the order they run.
+enum SyncStep {
+  signingIn('Signing in to SRM Academia…'),
+  fetchingAttendance('Syncing attendance…'),
+  syncingDetails('Syncing marks, timetable and calendar…'),
+  saving('Saving…'),
+  studentPortal('Connecting to Student Portal…'),
+  solvingCaptcha('Solving Student Portal CAPTCHA…');
+
+  final String label;
+  const SyncStep(this.label);
+}
+
+typedef SyncProgress = void Function(SyncStep step);
+
+/// Outcome of [SessionSyncOrchestrator.connectStudentPortal].
+class SpConnectResult {
+  final bool connected;
+  final String message;
+  const SpConnectResult(this.connected, this.message);
+}
+
+/// A Student Portal problem with a message the user can act on.
+class SpSyncException implements Exception {
+  final String message;
+  const SpSyncException(this.message);
+
+  @override
+  String toString() => 'SpSyncException: $message';
+}
+
+/// Time budgets. Every portal request also has Dio's 30 s connect/receive
+/// timeouts; these bound whole multi-request steps.
+class SyncTimeouts {
+  SyncTimeouts._();
+  static const academiaLogin = Duration(seconds: 90);
+  static const academiaPage = Duration(seconds: 45);
+  static const detailsSection = Duration(seconds: 60);
+  static const studentPortalBackground = Duration(seconds: 90);
+}
 
 enum SyncStatus { idle, syncing, success, reauthenticated, error }
 
@@ -83,6 +125,9 @@ List<Map<String, dynamic>> normalizeCalendarMonths(
 /// Turns a network or parsing error into a message a student can act on.
 String friendlySyncError(Object e) {
   if (e is AcademiaLoginException) return e.userMessage;
+  if (e is TimeoutException) {
+    return 'SRM Academia is taking too long to respond. Try again in a minute.';
+  }
   if (e is DioException || e is SocketException || e is HandshakeException) {
     return "Couldn't reach SRM Academia. Check your internet connection and try again.";
   }
@@ -115,11 +160,24 @@ class SessionSyncOrchestrator {
   /// 5. Optionally reconciles with Student Portal if an SP password or cookies
   ///    exist. [onSpCaptcha] lets a foreground caller ask the user to solve a
   ///    CAPTCHA when on-device OCR fails; background syncs pass null.
+  ///    With [includeStudentPortal] false this step is skipped, so the
+  ///    caller can run [connectStudentPortal] separately without making the
+  ///    Academia sign-in wait for it.
   /// 6. Persists everything to Drift and runs the notification rules.
+  ///
+  /// [onProgress] is told when each [SyncStep] starts.
   Future<SyncResult> syncAll({
     bool forceFreshLogin = false,
     SpCaptchaPrompt? onSpCaptcha,
+    SyncProgress? onProgress,
+    bool includeStudentPortal = true,
   }) async {
+    final total = Stopwatch()..start();
+    void step(SyncStep s) {
+      _log('${s.name} (+${total.elapsedMilliseconds} ms)');
+      onProgress?.call(s);
+    }
+
     final email = await _vault.getAcademiaEmail();
     final password = await _vault.getAcademiaPassword();
 
@@ -142,34 +200,50 @@ class SessionSyncOrchestrator {
     bool sessionRefreshed = false;
     String pageHtml;
 
+    Future<bool> signIn() {
+      step(SyncStep.signingIn);
+      return academiaClient
+          .login(email, password!)
+          .timeout(SyncTimeouts.academiaLogin);
+    }
+
+    Future<String> fetchPage() {
+      step(SyncStep.fetchingAttendance);
+      return academiaClient
+          .fetchAttendancePage()
+          .timeout(SyncTimeouts.academiaPage);
+    }
+
     try {
       // Force fresh login requested (first sign-in or pull-to-refresh)
       if (forceFreshLogin && password != null && password.isNotEmpty) {
-        final loginOk = await academiaClient.login(email, password);
+        final loginOk = await signIn();
         if (!loginOk) return _error('Incorrect NetID or password.');
         await _vault.saveAcademiaCookies(cookieJar.toJson());
         sessionRefreshed = true;
       }
 
       try {
-        pageHtml = await academiaClient.fetchAttendancePage();
+        pageHtml = await fetchPage();
       } on SessionExpiredException catch (_) {
         // Layer 3: Silent Background Cookie Rotation
         if (password == null || password.isEmpty) {
           return _error('Your session expired. Sign in again.');
         }
-        final reauthOk = await academiaClient.login(email, password);
+        final reauthOk = await signIn();
         if (!reauthOk) return _error('Incorrect NetID or password.');
         await _vault.saveAcademiaCookies(cookieJar.toJson());
         sessionRefreshed = true;
         try {
-          pageHtml = await academiaClient.fetchAttendancePage();
+          pageHtml = await fetchPage();
         } on SessionExpiredException catch (_) {
           return _error(
               "Couldn't sign in to SRM Academia. Check your NetID and password.");
         }
       }
     } catch (e) {
+      _log('academia failed after ${total.elapsedMilliseconds} ms: '
+          '${e.runtimeType}');
       return _error(friendlySyncError(e));
     }
 
@@ -184,20 +258,107 @@ class SessionSyncOrchestrator {
     await _vault.saveAcademiaCookies(cookieJar.toJson());
 
     // Best-effort sections from the same page and two extra page fetches.
-    final profile = await _guard(() => _syncProfile(email, pageHtml)) ?? {};
-    await _guard(() => _syncAcademiaMarks(email, pageHtml, records));
-    await _guard(() =>
-        _syncTimetable(email, pageHtml, profile['Batch'], academiaClient));
-    await _guard(() => _syncCalendars(email, academiaClient));
+    step(SyncStep.syncingDetails);
+    final profile =
+        await _guard('profile', () => _syncProfile(email, pageHtml)) ?? {};
+    await _guard('marks', () => _syncAcademiaMarks(email, pageHtml, records));
+    await _guard(
+        'timetable',
+        () =>
+            _syncTimetable(email, pageHtml, profile['Batch'], academiaClient));
+    await _guard('calendar', () => _syncCalendars(email, academiaClient));
 
     // Layer 4: Dual-Source Reconciliation with Student Portal (if configured)
-    final spRecords = await _guard(
-        () => _syncStudentPortal(email, records, onSpCaptcha: onSpCaptcha));
-    if (spRecords != null && spRecords.isNotEmpty) {
-      records = reconcileAttendance(records, spRecords);
+    if (includeStudentPortal) {
+      step(SyncStep.studentPortal);
+      final spRecords = await _guard(
+          'student portal',
+          () => _syncStudentPortal(email,
+              onSpCaptcha: onSpCaptcha, onProgress: onProgress),
+          timeout: onSpCaptcha == null
+              ? SyncTimeouts.studentPortalBackground
+              : null);
+      if (spRecords != null && spRecords.isNotEmpty) {
+        records = reconcileAttendance(records, spRecords);
+      }
     }
 
-    // Persist to SQLite (Drift)
+    step(SyncStep.saving);
+    await _persistAttendance(email, records);
+    _log('sync done in ${total.elapsedMilliseconds} ms');
+
+    return SyncResult(
+      status:
+          sessionRefreshed ? SyncStatus.reauthenticated : SyncStatus.success,
+      subjectsUpdated: records.length,
+      sessionWasRefreshed: sessionRefreshed,
+    );
+  }
+
+  /// Signs in to the Student Portal (solving its CAPTCHA on-device, asking
+  /// [onSpCaptcha] only if that fails), merges its attendance into the cached
+  /// Academia records and stores its internal marks. Never throws.
+  Future<SpConnectResult> connectStudentPortal({
+    SpCaptchaPrompt? onSpCaptcha,
+    SyncProgress? onProgress,
+  }) async {
+    final sw = Stopwatch()..start();
+    onProgress?.call(SyncStep.studentPortal);
+    try {
+      final email = await _vault.getAcademiaEmail();
+      if (email == null || email.isEmpty) {
+        return const SpConnectResult(false, 'Sign in to Academia first.');
+      }
+      final spRecords = await _syncStudentPortal(email,
+          onSpCaptcha: onSpCaptcha, onProgress: onProgress, required: true);
+      if (spRecords == null) {
+        return const SpConnectResult(
+            false, 'Add your Student Portal password first.');
+      }
+      final cached = await _db.watchAttendanceRecords(email).first;
+      if (cached.isNotEmpty && spRecords.isNotEmpty) {
+        final academia = [
+          for (final c in cached)
+            AttendanceInput(
+              courseCode: c.courseCode,
+              courseTitle: c.courseTitle,
+              hoursConducted: c.hoursConducted,
+              hoursAbsent: c.hoursAbsent,
+              attendancePct: c.attendancePct,
+              category: c.category,
+              facultyName: c.facultyName,
+              slot: c.slot,
+              roomNo: c.roomNo,
+            ),
+        ];
+        await _persistAttendance(
+            email, reconcileAttendance(academia, spRecords));
+      }
+      _log('student portal connected in ${sw.elapsedMilliseconds} ms');
+      return SpConnectResult(
+          true, 'Student Portal connected (${spRecords.length} subjects).');
+    } on SpSyncException catch (e) {
+      _log('student portal: ${e.message}');
+      return SpConnectResult(false, e.message);
+    } on TimeoutException {
+      return const SpConnectResult(
+          false, 'Student Portal is taking too long to respond.');
+    } on DioException {
+      return const SpConnectResult(
+          false, "Couldn't reach the Student Portal. Check your connection.");
+    } catch (e) {
+      final detail = e.toString();
+      _log('student portal failed: ${e.runtimeType}: '
+          '${detail.length > 300 ? detail.substring(0, 300) : detail}');
+      return const SpConnectResult(
+          false, "Couldn't connect to the Student Portal. Try again later.");
+    }
+  }
+
+  /// Replaces the cached attendance and runs the snapshot and notification
+  /// rules for it.
+  Future<void> _persistAttendance(
+      String email, List<AttendanceInput> records) async {
     if (records.isNotEmpty) {
       final now = DateTime.now().millisecondsSinceEpoch;
       final companions = records.map((r) {
@@ -219,33 +380,35 @@ class SessionSyncOrchestrator {
 
       await _db.replaceAttendanceRecords(email, companions);
 
-      // Upsert daily snapshot
-      await _notifEngine.upsertDailySnapshot(email, records);
+      // The trend snapshot and notification rules are extras: a failure in
+      // them must not fail the sync (or a first sign-in) after the
+      // attendance itself has been saved.
+      await _guard('daily snapshot',
+          () => _notifEngine.upsertDailySnapshot(email, records));
 
-      // Low attendance alerts: enabled unless the user turned them off; the
-      // threshold is the one the Settings slider writes.
-      final notifSettings = await _db.watchNotificationSettings(email).first;
-      final userSettings = await _db.watchUserSettings(email).first;
-      final alertEnabled = (notifSettings?.attendanceAlertEnabled ?? 1) == 1;
-      final threshold = userSettings?.attendanceThreshold ?? 75.0;
+      await _guard('notification rules', () async {
+        // Low attendance alerts: enabled unless the user turned them off;
+        // the threshold is the one the Settings slider writes.
+        final notifSettings = await _db.watchNotificationSettings(email).first;
+        final userSettings = await _db.watchUserSettings(email).first;
+        final alertEnabled = (notifSettings?.attendanceAlertEnabled ?? 1) == 1;
+        final threshold = userSettings?.attendanceThreshold ?? 75.0;
 
-      await _notifEngine.maybeNotifyLowAttendance(
-        email,
-        records,
-        threshold: threshold,
-        alertEnabled: alertEnabled,
-      );
+        await _notifEngine.maybeNotifyLowAttendance(
+          email,
+          records,
+          threshold: threshold,
+          alertEnabled: alertEnabled,
+        );
 
-      // Check welcome notification rule
-      await _notifEngine.maybeNotifyWelcome(email);
+        // Check welcome notification rule
+        await _notifEngine.maybeNotifyWelcome(email);
+      });
     }
+  }
 
-    return SyncResult(
-      status:
-          sessionRefreshed ? SyncStatus.reauthenticated : SyncStatus.success,
-      subjectsUpdated: records.length,
-      sessionWasRefreshed: sessionRefreshed,
-    );
+  static void _log(String message) {
+    if (kDebugMode) debugPrint('[Sync] $message');
   }
 
   SyncResult _error(String message) => SyncResult(
@@ -255,11 +418,20 @@ class SessionSyncOrchestrator {
         errorMessage: message,
       );
 
-  /// Runs a best-effort section; a failure leaves the cached data untouched.
-  Future<T?> _guard<T>(Future<T> Function() section) async {
+  /// Runs a best-effort section; a failure or a section that overruns
+  /// [timeout] leaves the cached data untouched. A null [timeout] means no
+  /// limit (used when the user may be typing a CAPTCHA).
+  Future<T?> _guard<T>(String name, Future<T> Function() section,
+      {Duration? timeout = SyncTimeouts.detailsSection}) async {
+    final sw = Stopwatch()..start();
     try {
-      return await section();
-    } catch (_) {
+      final future = section();
+      final value = await (timeout == null ? future : future.timeout(timeout));
+      _log('$name ok in ${sw.elapsedMilliseconds} ms');
+      return value;
+    } catch (e) {
+      _log('$name skipped after ${sw.elapsedMilliseconds} ms: '
+          '${e is SpSyncException ? e.message : e.runtimeType}');
       return null;
     }
   }
@@ -353,17 +525,20 @@ class SessionSyncOrchestrator {
 
   /// Signs in to the Student Portal when needed and returns its attendance.
   /// Also stores SP internal marks as a synthetic "Total (Internal)" test
-  /// (Bug Fix #6). Returns null when the Student Portal isn't configured or
-  /// can't be reached.
+  /// (Bug Fix #6). Returns null when the Student Portal isn't configured;
+  /// throws [SpSyncException] with a user-facing reason when sign-in fails.
+  /// With [required] false (background sync) a portal that needs a CAPTCHA
+  /// nobody can type is reported the same way.
   Future<List<AttendanceInput>?> _syncStudentPortal(
-    String email,
-    List<AttendanceInput> academiaRecords, {
+    String email, {
     SpCaptchaPrompt? onSpCaptcha,
+    SyncProgress? onProgress,
+    bool required = false,
   }) async {
     final spPassword = await _vault.getSpPassword();
     final spSavedCookies = await _vault.getSpCookiesJson();
     final hasPassword = spPassword != null && spPassword.isNotEmpty;
-    if (!hasPassword && spSavedCookies == null) return null;
+    if (!hasPassword && (spSavedCookies == null || required)) return null;
 
     final jar = spSavedCookies != null
         ? SimpleCookieJar.fromJson(spSavedCookies)
@@ -382,17 +557,32 @@ class SessionSyncOrchestrator {
     if (spRecords.isEmpty) {
       if (!hasPassword) return null;
       final netId = email.split('@').first;
+      onProgress?.call(SyncStep.solvingCaptcha);
       var result = await client.login(netId, spPassword);
       for (int attempt = 0;
           attempt < 3 && result is SPCaptchaRequired && onSpCaptcha != null;
           attempt++) {
-        final required = result;
-        final typed = await onSpCaptcha(required.captchaImage);
-        if (typed == null || typed.trim().isEmpty) return null;
+        final pending = result;
+        final typed = await onSpCaptcha(pending.captchaImage);
+        if (typed == null || typed.trim().isEmpty) {
+          throw const SpSyncException('Student Portal sign-in was cancelled.');
+        }
+        onProgress?.call(SyncStep.studentPortal);
         result = await client.submitLogin(
-            required.context, netId, spPassword, typed.trim());
+            pending.context, netId, spPassword, typed.trim());
       }
-      if (result is! SPLoginSuccess) return null;
+      switch (result) {
+        case SPLoginSuccess():
+          break;
+        case SPLoginFailure(:final message):
+          throw SpSyncException(message.isEmpty
+              ? 'Student Portal rejected your password.'
+              : 'Student Portal: $message');
+        case SPCaptchaRequired():
+          throw const SpSyncException(
+              "Couldn't solve the Student Portal CAPTCHA. Try again.");
+      }
+      onProgress?.call(SyncStep.studentPortal);
       spRecords = await client.fetchAttendance();
     }
 
