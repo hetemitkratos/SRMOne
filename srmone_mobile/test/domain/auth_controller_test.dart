@@ -50,6 +50,8 @@ class _FakeOrchestrator extends SessionSyncOrchestrator {
     SpCaptchaPrompt? onSpCaptcha,
     SyncProgress? onProgress,
     bool includeStudentPortal = true,
+    bool waitForDetails = true,
+    bool forceDetails = false,
   }) async {
     lastIncludedStudentPortal = includeStudentPortal;
     onProgress?.call(SyncStep.signingIn);

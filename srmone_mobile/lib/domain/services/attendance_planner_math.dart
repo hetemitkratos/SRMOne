@@ -163,6 +163,24 @@ class TimetableSlot {
   });
 }
 
+/// One [TimetableSlot] per class hour in the cached timetable courses
+/// (`TimetableCache.coursesJson`, decoded), from each course's `schedule`.
+List<TimetableSlot> timetableSlotsFromCourses(
+    List<Map<String, dynamic>> courses) {
+  return [
+    for (final c in courses)
+      if (c['schedule'] is List)
+        for (final entry
+            in (c['schedule'] as List).whereType<Map<String, dynamic>>())
+          if ((entry['day']?.toString().trim() ?? '').isNotEmpty)
+            TimetableSlot(
+              courseCode: c['courseCode']?.toString() ?? '',
+              day: entry['day'].toString().trim(),
+              hourIndex: (entry['hourIndex'] as num?)?.toInt() ?? 0,
+            ),
+  ];
+}
+
 /// Result of planning a holiday range for one subject.
 class PlanHolidayResult {
   final String courseCode;

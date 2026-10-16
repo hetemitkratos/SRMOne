@@ -62,6 +62,20 @@ const _calendarPage = '''
 
 void main() {
   group('AcademiaParsers on the My_Time_Table page', () {
+    test('parseAttendancePage reads every section from one parse', () {
+      final page = AcademiaParsers.parseAttendancePage(_timetablePage);
+      expect(
+          page.attendance.map((a) => a.courseCode),
+          AcademiaParsers.parseAttendance(_timetablePage)
+              .map((a) => a.courseCode));
+      expect(page.profile, AcademiaParsers.parseStudentProfile(_timetablePage));
+      expect(page.marks.map((m) => m.courseCode),
+          AcademiaParsers.parseMarks(_timetablePage).map((m) => m.courseCode));
+      expect(
+          page.courses, AcademiaParsers.parseTimetableCourses(_timetablePage));
+      expect(page.advisors, AcademiaParsers.parseAdvisors(_timetablePage));
+    });
+
     test('parseAttendance picks the Attn % table, not the course list', () {
       final records = AcademiaParsers.parseAttendance(_timetablePage);
       expect(records, hasLength(1));
@@ -69,6 +83,22 @@ void main() {
       expect(records.first.hoursConducted, 20);
       expect(records.first.category, 'Professional Core');
       expect(records.first.facultyName, 'Dr. A B (100001)');
+    });
+
+    test('parseAttendance keeps columns aligned past split or empty headers',
+        () {
+      const page = '''
+<table>
+  <tr><th>Course<br>Code</th><th>Course Title</th><th></th>
+      <th>Hours<br>Conducted</th><th>Hours Absent</th><th>Attn<br>%</th></tr>
+  <tr><td>21CSC101T</td><td>Algorithms</td><td>x</td>
+      <td>40</td><td>4</td><td>90.00</td></tr>
+</table>''';
+      final r = AcademiaParsers.parseAttendance(page).single;
+      expect(r.courseCode, '21CSC101T');
+      expect(r.hoursConducted, 40);
+      expect(r.hoursAbsent, 4);
+      expect(r.attendancePct, 90.0);
     });
 
     test('parseStudentProfile pairs labels with values and skips colons', () {

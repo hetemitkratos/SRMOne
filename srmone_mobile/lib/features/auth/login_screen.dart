@@ -9,6 +9,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/constants/asset_paths.dart';
+import '../../scrapers/student_portal/sp_captcha_solver.dart';
 import '../settings/legal_markdown_screen.dart';
 import 'auth_controller.dart';
 import 'student_portal_connector.dart';
@@ -53,6 +54,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     // Captured before the await: a successful sign-in navigates away and
     // disposes this screen.
     final spConnector = ref.read(studentPortalConnectorProvider.notifier);
+    // Load the CAPTCHA model while Academia signs in, so the Student Portal
+    // connection doesn't wait for it afterwards.
+    if (spPassword.isNotEmpty) unawaited(SpCaptchaSolver.init());
     final success = await ref.read(authControllerProvider.notifier).login(
           email: _emailController.text,
           password: _passwordController.text,

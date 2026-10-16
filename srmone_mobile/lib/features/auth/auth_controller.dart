@@ -51,10 +51,16 @@ class AuthController extends StateNotifier<AuthState> {
 
   Future<void> checkInitialAuth() async {
     try {
-      final hasCreds = await _vault.hasStoredCredentials();
-      if (hasCreds) {
-        final email = await _vault.getAcademiaEmail();
-        state = Authenticated(email ?? '');
+      // Read both at once: each secure-storage read is a platform call.
+      final (email, password) = await (
+        _vault.getAcademiaEmail(),
+        _vault.getAcademiaPassword(),
+      ).wait;
+      if (email != null &&
+          email.isNotEmpty &&
+          password != null &&
+          password.isNotEmpty) {
+        state = Authenticated(email);
       } else {
         state = const Unauthenticated();
       }
@@ -98,6 +104,9 @@ class AuthController extends StateNotifier<AuthState> {
       final syncResult = await _orchestrator.syncAll(
         forceFreshLogin: true,
         includeStudentPortal: false,
+        // Open the dashboard as soon as attendance is saved; the timetable
+        // and calendar fill in a moment later.
+        waitForDetails: false,
         onProgress: (step) {
           if (mounted) state = AuthLoading(step);
         },

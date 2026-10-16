@@ -16,6 +16,7 @@ import '../../core/database/app_database.dart';
 import '../../core/security/biometric_auth_service.dart';
 import '../../main.dart';
 import '../auth/auth_controller.dart';
+import '../shared/cached_data_providers.dart';
 import 'legal_markdown_screen.dart';
 
 class SettingsScreen extends ConsumerStatefulWidget {
@@ -101,10 +102,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       ),
       body: email.isEmpty
           ? const Center(child: Text('Not signed in'))
-          : StreamBuilder<UserSettingsTableData?>(
-              stream: db.watchUserSettings(email),
-              builder: (context, snapshot) {
-                final settings = snapshot.data;
+          : Consumer(
+              builder: (context, ref, _) {
+                final snapshot = ref.watch(userSettingsProvider);
+                final settings = snapshot.valueOrNull;
                 final biometricEnabled =
                     (settings?.biometricLockEnabled ?? 0) == 1;
                 final threshold = settings?.attendanceThreshold ?? 75.0;
@@ -116,10 +117,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   ),
                   children: [
                     // Profile Header Card
-                    StreamBuilder<StudentProfile?>(
-                      stream: db.watchStudentProfile(email),
-                      builder: (context, profileSnap) {
-                        final prof = profileSnap.data;
+                    Consumer(
+                      builder: (context, ref, _) {
+                        final profileSnap = ref.watch(studentProfileProvider);
+                        final prof = profileSnap.valueOrNull;
                         return Card(
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(16),

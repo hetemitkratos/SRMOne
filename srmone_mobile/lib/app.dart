@@ -7,7 +7,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import 'core/constants/asset_paths.dart';
-import 'core/database/app_database.dart';
 import 'core/navigation/root_navigator.dart';
 import 'features/attendance/attendance_screen.dart';
 import 'features/auth/auth_controller.dart';
@@ -17,9 +16,10 @@ import 'features/calendar/calendar_screen.dart';
 import 'features/marks/marks_screen.dart';
 import 'features/overview/overview_screen.dart';
 import 'features/settings/settings_screen.dart';
+import 'features/shared/app_refresher.dart';
+import 'features/shared/cached_data_providers.dart';
 import 'features/shell/dashboard_shell_screen.dart';
 import 'features/timetable/timetable_screen.dart';
-import 'main.dart';
 
 class SrmOneApp extends ConsumerWidget {
   const SrmOneApp({super.key});
@@ -91,7 +91,9 @@ final _routerProvider = Provider<GoRouter>((ref) {
       StatefulShellRoute.indexedStack(
         builder: (context, state, navigationShell) {
           return BiometricLockGate(
-            child: DashboardShellScreen(navigationShell: navigationShell),
+            child: AutoRefreshScope(
+              child: DashboardShellScreen(navigationShell: navigationShell),
+            ),
           );
         },
         branches: [
@@ -156,25 +158,11 @@ class BiometricLockGate extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final authState = ref.watch(authControllerProvider);
-    final email = authState is Authenticated ? authState.email : '';
-    final db = ref.watch(appDatabaseProvider);
-
-    if (email.isEmpty) return child;
-
-    return StreamBuilder<UserSettingsTableData?>(
-      stream: db.watchUserSettings(email),
-      builder: (context, snapshot) {
-        final biometricEnabled =
-            (snapshot.data?.biometricLockEnabled ?? 0) == 1;
-
-        if (biometricEnabled) {
-          return BiometricLockScreen(child: child);
-        }
-
-        return child;
-      },
-    );
+    final biometricEnabled =
+        (ref.watch(userSettingsProvider).valueOrNull?.biometricLockEnabled ??
+                0) ==
+            1;
+    return biometricEnabled ? BiometricLockScreen(child: child) : child;
   }
 }
 

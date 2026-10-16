@@ -2,17 +2,18 @@
 // Academic calendar screen with Odd/Even semester toggle,
 // unified day-order resolution, and holiday highlights.
 
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../../core/constants/asset_paths.dart';
-import '../../core/database/app_database.dart';
+import '../../domain/services/calendar_day_resolver.dart';
 import '../../domain/services/session_sync_orchestrator.dart';
-import '../../main.dart';
 import '../auth/auth_controller.dart';
+import '../shared/app_refresher.dart';
+import '../shared/cached_data_providers.dart';
+import '../shared/refreshable_empty.dart';
 
 class CalendarScreen extends ConsumerStatefulWidget {
   const CalendarScreen({super.key});
@@ -29,7 +30,6 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
     final theme = Theme.of(context);
     final authState = ref.watch(authControllerProvider);
     final email = authState is Authenticated ? authState.email : '';
-    final db = ref.watch(appDatabaseProvider);
 
     if (email.isEmpty) {
       return const Scaffold(
@@ -67,19 +67,18 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
           ),
         ),
       ),
-      body: StreamBuilder<CalendarCacheData?>(
-        stream: db.watchCalendar(email, _selectedSemester),
-        builder: (context, snapshot) {
-          final calendarData = snapshot.data;
-          final months = _parseMonths(calendarData?.monthsJson);
+      body: Consumer(
+        builder: (context, ref, _) {
+          final months = ref.watch(calendarMonthsProvider(_selectedSemester));
 
           return RefreshIndicator(
             onRefresh: () async {
-              final orchestrator = ref.read(sessionSyncOrchestratorProvider);
-              await orchestrator.syncAll();
+              await ref
+                  .read(appRefresherProvider)
+                  .refresh(waitForDetails: true);
             },
             child: months.isEmpty
-                ? Center(
+                ? RefreshableEmpty(
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
@@ -98,21 +97,28 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
                       ],
                     ),
                   )
-                : ListView.builder(
-                    padding: const EdgeInsets.all(16),
-                    itemCount: months.length,
-                    itemBuilder: (context, idx) {
-                      final monthObj = months[idx];
-                      return _buildMonthCard(theme, monthObj);
-                    },
-                  ),
+                : Builder(builder: (context) {
+                    // Open on this month; the others start collapsed. When
+                    // the semester has no current month, show them all.
+                    final current = months.indexWhere(
+                        (m) => isCurrentMonth(m['month']?.toString() ?? ''));
+                    return ListView.builder(
+                      key: PageStorageKey('calendar-$_selectedSemester'),
+                      padding: const EdgeInsets.all(16),
+                      itemCount: months.length,
+                      itemBuilder: (context, idx) => _buildMonthCard(
+                          theme, months[idx],
+                          expanded: current < 0 || idx == current),
+                    );
+                  }),
           );
         },
       ),
     );
   }
 
-  Widget _buildMonthCard(ThemeData theme, Map<String, dynamic> month) {
+  Widget _buildMonthCard(ThemeData theme, Map<String, dynamic> month,
+      {required bool expanded}) {
     final monthName = month['month']?.toString() ?? 'Month';
     final days = (month['days'] as List<dynamic>?) ?? [];
 
@@ -124,7 +130,7 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
         side: BorderSide(color: theme.dividerColor.withAlpha(40)),
       ),
       child: ExpansionTile(
-        initiallyExpanded: true,
+        initiallyExpanded: expanded,
         tilePadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         leading: CircleAvatar(
           backgroundColor: const Color(0xFF2D6A4F).withAlpha(30),
@@ -269,14 +275,14 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
       ),
     );
   }
+}
 
-  List<Map<String, dynamic>> _parseMonths(String? jsonStr) {
-    if (jsonStr == null || jsonStr.isEmpty) return [];
-    try {
-      final list = jsonDecode(jsonStr) as List<dynamic>;
-      return list.cast<Map<String, dynamic>>();
-    } catch (_) {
-      return [];
-    }
-  }
+/// Whether an Academia month header such as "Oct '26" names the current
+/// month.
+bool isCurrentMonth(String header, [DateTime? now]) {
+  final month = CalendarDayResolver.parseMonthName(header);
+  final today = now ?? DateTime.now();
+  return month != null &&
+      month.year == today.year &&
+      month.month == today.month;
 }
