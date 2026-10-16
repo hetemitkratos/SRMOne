@@ -14,6 +14,7 @@ import '../../core/database/app_database.dart';
 import '../auth/auth_controller.dart';
 import '../shared/app_refresher.dart';
 import '../shared/cached_data_providers.dart';
+import '../shared/refreshable_empty.dart';
 
 class MarksScreen extends ConsumerStatefulWidget {
   const MarksScreen({super.key});
@@ -81,6 +82,7 @@ class _MarksScreenState extends ConsumerState<MarksScreen>
             onRefresh: () async {
               await ref.read(appRefresherProvider).refresh();
             },
+            notificationPredicate: tabbedRefreshPredicate,
             child: TabBarView(
               controller: _tabController,
               children: [
@@ -101,7 +103,7 @@ class _MarksScreenState extends ConsumerState<MarksScreen>
     List<MarksCacheData> internalMarks,
   ) {
     if (internalMarks.isEmpty) {
-      return Center(
+      return RefreshableEmpty(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
@@ -274,7 +276,7 @@ class _MarksScreenState extends ConsumerState<MarksScreen>
     List<MarksCacheData> semesterMarks,
   ) {
     if (semesterMarks.isEmpty) {
-      return Center(
+      return RefreshableEmpty(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [

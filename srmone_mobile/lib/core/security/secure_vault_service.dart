@@ -30,6 +30,46 @@ class SecureVaultService {
     ),
   );
 
+  /// Values already read or written in this isolate. Each secure-storage
+  /// call is a platform round trip with a decryption, so credentials are
+  /// read once per app run and unchanged values are not rewritten.
+  /// Shared by all instances: they all front the same storage.
+  static final Map<String, String?> _cache = {};
+
+  /// Keys the background sync (another isolate) may rewrite, so they are
+  /// always read from storage rather than from [_cache].
+  static const _sharedKeys = {
+    VaultKey.academiaCookiesJson,
+    VaultKey.academiaSavedAt,
+    VaultKey.spCookiesJson,
+  };
+
+  Future<String?> _read(String key) async {
+    if (!_sharedKeys.contains(key) && _cache.containsKey(key)) {
+      return _cache[key];
+    }
+    final value = await _storage.read(key: key);
+    _cache[key] = value;
+    return value;
+  }
+
+  /// Skips the write when [value] is what this isolate last read or wrote.
+  Future<void> _write(String key, String value) async {
+    if (_cache.containsKey(key) && _cache[key] == value) return;
+    _cache[key] = value;
+    try {
+      await _storage.write(key: key, value: value);
+    } catch (_) {
+      _cache.remove(key);
+      rethrow;
+    }
+  }
+
+  Future<void> _delete(String key) async {
+    _cache[key] = null;
+    await _storage.delete(key: key);
+  }
+
   // ─── Academia Credentials ─────────────────────────────────────────────────────
 
   Future<void> saveAcademiaCredentials({
@@ -37,41 +77,40 @@ class SecureVaultService {
     required String password,
   }) async {
     await Future.wait([
-      _storage.write(key: VaultKey.academiaEmail, value: email),
-      _storage.write(key: VaultKey.academiaPassword, value: password),
+      _write(VaultKey.academiaEmail, email),
+      _write(VaultKey.academiaPassword, password),
     ]);
   }
 
-  Future<String?> getAcademiaEmail() =>
-      _storage.read(key: VaultKey.academiaEmail);
+  Future<String?> getAcademiaEmail() => _read(VaultKey.academiaEmail);
 
-  Future<String?> getAcademiaPassword() =>
-      _storage.read(key: VaultKey.academiaPassword);
+  Future<String?> getAcademiaPassword() => _read(VaultKey.academiaPassword);
 
   // ─── Student Portal Credentials ───────────────────────────────────────────────
 
   Future<void> saveSpPassword(String password) =>
-      _storage.write(key: VaultKey.spPassword, value: password);
+      _write(VaultKey.spPassword, password);
 
-  Future<String?> getSpPassword() => _storage.read(key: VaultKey.spPassword);
+  Future<String?> getSpPassword() => _read(VaultKey.spPassword);
 
   // ─── Academia Cookies ─────────────────────────────────────────────────────────
 
+  /// Saves the Academia cookie jar. Does nothing when it is what this
+  /// isolate last read or saved, so a sync that changed no cookies writes
+  /// nothing and the saved-at time records when the session last changed.
   Future<void> saveAcademiaCookies(String cookiesJson) async {
+    if (_cache[VaultKey.academiaCookiesJson] == cookiesJson) return;
     await Future.wait([
-      _storage.write(key: VaultKey.academiaCookiesJson, value: cookiesJson),
-      _storage.write(
-        key: VaultKey.academiaSavedAt,
-        value: DateTime.now().toIso8601String(),
-      ),
+      _write(VaultKey.academiaCookiesJson, cookiesJson),
+      _write(VaultKey.academiaSavedAt, DateTime.now().toIso8601String()),
     ]);
   }
 
   Future<String?> getAcademiaCookiesJson() =>
-      _storage.read(key: VaultKey.academiaCookiesJson);
+      _read(VaultKey.academiaCookiesJson);
 
   Future<DateTime?> getAcademiaCookiesSavedAt() async {
-    final raw = await _storage.read(key: VaultKey.academiaSavedAt);
+    final raw = await _read(VaultKey.academiaSavedAt);
     if (raw == null) return null;
     return DateTime.tryParse(raw);
   }
@@ -79,20 +118,17 @@ class SecureVaultService {
   // ─── Student Portal Cookies ───────────────────────────────────────────────────
 
   Future<void> saveSpCookies(String cookiesJson) =>
-      _storage.write(key: VaultKey.spCookiesJson, value: cookiesJson);
+      _write(VaultKey.spCookiesJson, cookiesJson);
 
-  Future<String?> getSpCookiesJson() =>
-      _storage.read(key: VaultKey.spCookiesJson);
+  Future<String?> getSpCookiesJson() => _read(VaultKey.spCookiesJson);
 
   // ─── Biometric Lock ───────────────────────────────────────────────────────────
 
-  Future<void> setBiometricLockEnabled(bool enabled) => _storage.write(
-        key: VaultKey.biometricLockEnabled,
-        value: enabled.toString(),
-      );
+  Future<void> setBiometricLockEnabled(bool enabled) =>
+      _write(VaultKey.biometricLockEnabled, enabled.toString());
 
   Future<bool> isBiometricLockEnabled() async {
-    final raw = await _storage.read(key: VaultKey.biometricLockEnabled);
+    final raw = await _read(VaultKey.biometricLockEnabled);
     return raw == 'true';
   }
 
@@ -109,14 +145,31 @@ class SecureVaultService {
   }
 
   /// Clears all vault entries (full logout / account removal).
-  Future<void> clearAll() => _storage.deleteAll();
+  Future<void> clearAll() async {
+    _cache.clear();
+    await _storage.deleteAll();
+    // Everything is gone now; remember that instead of re-reading.
+    for (final key in _allKeys) {
+      _cache[key] = null;
+    }
+  }
+
+  static const _allKeys = [
+    VaultKey.academiaEmail,
+    VaultKey.academiaPassword,
+    VaultKey.spPassword,
+    VaultKey.academiaCookiesJson,
+    VaultKey.academiaSavedAt,
+    VaultKey.spCookiesJson,
+    VaultKey.biometricLockEnabled,
+  ];
 
   /// Clears only cookies (forces re-login on next scrape without removing credentials).
   Future<void> clearCookies() async {
     await Future.wait([
-      _storage.delete(key: VaultKey.academiaCookiesJson),
-      _storage.delete(key: VaultKey.academiaSavedAt),
-      _storage.delete(key: VaultKey.spCookiesJson),
+      _delete(VaultKey.academiaCookiesJson),
+      _delete(VaultKey.academiaSavedAt),
+      _delete(VaultKey.spCookiesJson),
     ]);
   }
 }

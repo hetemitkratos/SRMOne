@@ -17,6 +17,7 @@ import '../faculty/faculty_avatar.dart';
 import 'widgets/exportable_timetable_poster.dart';
 import '../shared/app_refresher.dart';
 import '../shared/cached_data_providers.dart';
+import '../shared/refreshable_empty.dart';
 
 class TimetableScreen extends ConsumerStatefulWidget {
   const TimetableScreen({super.key});
@@ -145,8 +146,9 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen>
                       .read(appRefresherProvider)
                       .refresh(waitForDetails: true);
                 },
+                notificationPredicate: tabbedRefreshPredicate,
                 child: rawCourses.isEmpty
-                    ? Center(
+                    ? RefreshableEmpty(
                         child: Column(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
@@ -198,7 +200,7 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen>
     final slotsWithTiming = TimetableSchedule.slotsForDay(courses, dayLabel);
 
     if (slotsWithTiming.isEmpty) {
-      return Center(
+      return RefreshableEmpty(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [

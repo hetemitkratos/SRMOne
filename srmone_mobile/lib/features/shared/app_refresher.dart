@@ -24,8 +24,9 @@ class AppRefresher {
 
   /// Refreshes the signed-in student's data. With [auto] true, does nothing
   /// when the cached attendance is newer than [autoRefreshAfter]. With
-  /// [waitForDetails] true the call also waits for the timetable and
-  /// calendar (for the screens that show them).
+  /// [waitForDetails] true (the Timetable and Calendar screens) the timetable
+  /// grid and calendar are re-downloaded even if cached today, and the call
+  /// waits for them.
   Future<SyncResult?> refresh(
       {bool auto = false, bool waitForDetails = false}) async {
     final email = _ref.read(currentEmailProvider);
@@ -41,6 +42,7 @@ class AppRefresher {
     final result = await orchestrator.syncAll(
       includeStudentPortal: false,
       waitForDetails: waitForDetails,
+      forceDetails: waitForDetails,
     );
     if (result.status != SyncStatus.error &&
         await orchestrator.isStudentPortalConfigured()) {

@@ -2,7 +2,6 @@
 // Academic calendar screen with Odd/Even semester toggle,
 // unified day-order resolution, and holiday highlights.
 
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_svg/flutter_svg.dart';
@@ -13,6 +12,7 @@ import '../../domain/services/session_sync_orchestrator.dart';
 import '../auth/auth_controller.dart';
 import '../shared/app_refresher.dart';
 import '../shared/cached_data_providers.dart';
+import '../shared/refreshable_empty.dart';
 
 class CalendarScreen extends ConsumerStatefulWidget {
   const CalendarScreen({super.key});
@@ -68,9 +68,7 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
       ),
       body: Consumer(
         builder: (context, ref, _) {
-          final snapshot = ref.watch(calendarProvider(_selectedSemester));
-          final calendarData = snapshot.valueOrNull;
-          final months = _parseMonths(calendarData?.monthsJson);
+          final months = ref.watch(calendarMonthsProvider(_selectedSemester));
 
           return RefreshIndicator(
             onRefresh: () async {
@@ -79,7 +77,7 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
                   .refresh(waitForDetails: true);
             },
             child: months.isEmpty
-                ? Center(
+                ? RefreshableEmpty(
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
@@ -268,15 +266,5 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
         ],
       ),
     );
-  }
-
-  List<Map<String, dynamic>> _parseMonths(String? jsonStr) {
-    if (jsonStr == null || jsonStr.isEmpty) return [];
-    try {
-      final list = jsonDecode(jsonStr) as List<dynamic>;
-      return list.cast<Map<String, dynamic>>();
-    } catch (_) {
-      return [];
-    }
   }
 }

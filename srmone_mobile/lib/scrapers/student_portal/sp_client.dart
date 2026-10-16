@@ -2,6 +2,7 @@
 // SRM Student Portal (sp.srmist.edu.in) HTTP client.
 // Ported from academia-backend/academia-scraper/cmd/studentportal/client.go & login.go
 
+import 'dart:async';
 import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
@@ -156,6 +157,8 @@ class SPClient {
   /// fresh CAPTCHAs; if none is accepted (or OCR is unavailable) returns
   /// [SPCaptchaRequired] with a fresh CAPTCHA for the user to read.
   Future<SPLoginResult> login(String netId, String password) async {
+    // Load the OCR model while the login page and CAPTCHA download.
+    unawaited(SpCaptchaSolver.init());
     var ctx = await prepareLogin();
     for (var attempt = 1; attempt <= autoSolveAttempts; attempt++) {
       final solved = await SpCaptchaSolver.solve(ctx.captchaImage);
@@ -327,10 +330,14 @@ class SPClient {
     return SPParsers.parseAttendance(response.data.toString());
   }
 
-  /// Fetches internal marks from Student Portal (iden=13).
-  Future<List<SPMarkRecord>> fetchInternalMarks() async {
-    await _client.get(_spDashboardUrl,
-        headers: {'Referer': _spLoginUrl}).timeout(stepTimeout);
+  /// Fetches internal marks from Student Portal (iden=13). Pass [prime]
+  /// false right after [fetchAttendance], which already opened the
+  /// dashboard in this session.
+  Future<List<SPMarkRecord>> fetchInternalMarks({bool prime = true}) async {
+    if (prime) {
+      await _client.get(_spDashboardUrl,
+          headers: {'Referer': _spLoginUrl}).timeout(stepTimeout);
+    }
 
     const body = 'iden=13&filter=&hdnFormDetails=1&csrfPreventionSalt=';
     final response = await _client.post(

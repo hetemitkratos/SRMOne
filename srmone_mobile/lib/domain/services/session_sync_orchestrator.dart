@@ -72,6 +72,11 @@ class SyncTimeouts {
   static const academiaPage = Duration(seconds: 45);
   static const detailsSection = Duration(seconds: 60);
   static const studentPortalBackground = Duration(seconds: 90);
+
+  /// The timetable grid and calendar change about once a semester, so a
+  /// normal sync re-downloads them only when the cached copy is older than
+  /// this (or when the caller passes `forceDetails`).
+  static const detailsMaxAge = Duration(hours: 24);
 }
 
 enum SyncStatus { idle, syncing, success, reauthenticated, error }
@@ -193,6 +198,7 @@ class SessionSyncOrchestrator {
     SyncProgress? onProgress,
     bool includeStudentPortal = true,
     bool waitForDetails = true,
+    bool forceDetails = false,
   }) async {
     final running = _inflight;
     if (running != null && !forceFreshLogin) {
@@ -208,6 +214,7 @@ class SessionSyncOrchestrator {
       onSpCaptcha: onSpCaptcha,
       onProgress: onProgress,
       includeStudentPortal: includeStudentPortal,
+      forceDetails: forceDetails,
       details: details,
     );
     _inflight = run;
@@ -229,6 +236,7 @@ class SessionSyncOrchestrator {
     required SpCaptchaPrompt? onSpCaptcha,
     required SyncProgress? onProgress,
     required bool includeStudentPortal,
+    required bool forceDetails,
     required Completer<void> details,
   }) async {
     try {
@@ -237,6 +245,7 @@ class SessionSyncOrchestrator {
         onSpCaptcha: onSpCaptcha,
         onProgress: onProgress,
         includeStudentPortal: includeStudentPortal,
+        forceDetails: forceDetails,
         details: details,
       );
     } finally {
@@ -250,6 +259,7 @@ class SessionSyncOrchestrator {
     required SpCaptchaPrompt? onSpCaptcha,
     required SyncProgress? onProgress,
     required bool includeStudentPortal,
+    required bool forceDetails,
     required Completer<void> details,
   }) async {
     final total = Stopwatch()..start();
@@ -350,8 +360,10 @@ class SessionSyncOrchestrator {
     // Best-effort sections that need more page fetches, run in parallel.
     step(SyncStep.syncingDetails);
     final detailsWork = Future.wait([
-      _guard('timetable', () => _syncTimetable(email, page, academiaClient)),
-      _guard('calendar', () => _syncCalendars(email, academiaClient)),
+      _guard('timetable',
+          () => _syncTimetable(email, page, academiaClient, forceDetails)),
+      _guard('calendar',
+          () => _syncCalendars(email, academiaClient, forceDetails)),
     ]).then((_) async {
       await _saveCookies(cookieJar);
       _log('details done in ${total.elapsedMilliseconds} ms');
@@ -595,13 +607,28 @@ class SessionSyncOrchestrator {
     ]);
   }
 
-  Future<void> _syncTimetable(
-      String email, AcademiaPageData page, AcademiaClient client) async {
+  static bool _isFresh(int? updatedAtMs) =>
+      updatedAtMs != null &&
+      DateTime.now()
+              .difference(DateTime.fromMillisecondsSinceEpoch(updatedAtMs)) <
+          SyncTimeouts.detailsMaxAge;
+
+  Future<void> _syncTimetable(String email, AcademiaPageData page,
+      AcademiaClient client, bool force) async {
     final rawCourses = page.courses;
     if (rawCourses.isEmpty) return;
     final batch = page.profile['Batch'];
     final effectiveBatch =
         (batch == null || batch.trim().isEmpty) ? '1' : batch.trim();
+    if (!force) {
+      final cached = await _db.getTimetable(email);
+      if (cached != null &&
+          cached.batch == effectiveBatch &&
+          _isFresh(cached.updatedAt)) {
+        _log('timetable cached, skipping the grid download');
+        return;
+      }
+    }
     final slotMap = await client.fetchUnifiedSlotMap(effectiveBatch);
     if (slotMap.isEmpty) return;
     final courses = AcademiaParsers.mergeTimetable(rawCourses, slotMap);
@@ -616,13 +643,19 @@ class SessionSyncOrchestrator {
 
   /// Refreshes the current semester's calendar every sync, and the other
   /// semester only until it has been cached once.
-  Future<void> _syncCalendars(String email, AcademiaClient client) async {
+  Future<void> _syncCalendars(
+      String email, AcademiaClient client, bool force) async {
     final current = semesterFor(DateTime.now());
     final other = current == 'odd' ? 'even' : 'odd';
+    final cached = await _db.getCalendar(email, current);
     final sems = [
-      current,
+      if (force || cached == null || !_isFresh(cached.updatedAt)) current,
       if (await _db.getCalendar(email, other) == null) other,
     ];
+    if (sems.isEmpty) {
+      _log('calendar cached, skipping the download');
+      return;
+    }
     await Future.wait([
       for (final sem in sems)
         client.fetchCalendar(sem).then((raw) async {
@@ -704,7 +737,7 @@ class SessionSyncOrchestrator {
     await _vault.saveSpCookies(jar.toJson());
 
     try {
-      final spMarks = await client.fetchInternalMarks();
+      final spMarks = await client.fetchInternalMarks(prime: false);
       if (spMarks.isNotEmpty) {
         final now = DateTime.now().millisecondsSinceEpoch;
         await _db.replaceMarksRecords(email, 'student_portal', [

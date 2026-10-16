@@ -51,6 +51,7 @@ class _FakeOrchestrator extends SessionSyncOrchestrator {
     SyncProgress? onProgress,
     bool includeStudentPortal = true,
     bool waitForDetails = true,
+    bool forceDetails = false,
   }) async {
     lastIncludedStudentPortal = includeStudentPortal;
     onProgress?.call(SyncStep.signingIn);

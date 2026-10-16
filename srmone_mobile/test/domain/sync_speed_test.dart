@@ -182,4 +182,19 @@ void main() {
     final last = await orchestrator.lastSyncedAt(_email);
     expect(DateTime.now().difference(last!).inMinutes, lessThan(1));
   });
+
+  test('a second sync reuses the cached grid and calendar unless forced',
+      () async {
+    academia.releaseGrid.complete();
+    await orchestrator.syncAll(includeStudentPortal: false);
+    academia.requests.clear();
+
+    await orchestrator.syncAll(includeStudentPortal: false);
+    expect(academia.requests, ['My_Time_Table_2023_24']);
+
+    academia.requests.clear();
+    await orchestrator.syncAll(includeStudentPortal: false, forceDetails: true);
+    expect(academia.requests, contains('Unified_Time_Table_2025_batch_2'));
+    expect(academia.requests, contains('Academic_Reports'));
+  });
 }
