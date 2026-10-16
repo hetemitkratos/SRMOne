@@ -6,14 +6,17 @@ import 'package:flutter/material.dart';
 
 class SpCaptchaBottomSheet extends StatefulWidget {
   final Uint8List captchaImage;
-  final VoidCallback onRefreshCaptcha;
-  final ValueChanged<String> onSubmitCaptcha;
+  final VoidCallback? onRefreshCaptcha;
+
+  /// Called with the typed text before the sheet closes. The sheet also pops
+  /// with the text as its result, so callers can simply await it.
+  final ValueChanged<String>? onSubmitCaptcha;
 
   const SpCaptchaBottomSheet({
     super.key,
     required this.captchaImage,
-    required this.onRefreshCaptcha,
-    required this.onSubmitCaptcha,
+    this.onRefreshCaptcha,
+    this.onSubmitCaptcha,
   });
 
   @override
@@ -32,8 +35,8 @@ class _SpCaptchaBottomSheetState extends State<SpCaptchaBottomSheet> {
   void _submit() {
     final text = _controller.text.trim();
     if (text.isNotEmpty) {
-      Navigator.of(context).pop();
-      widget.onSubmitCaptcha(text);
+      Navigator.of(context).pop(text);
+      widget.onSubmitCaptcha?.call(text);
     }
   }
 
@@ -93,12 +96,14 @@ class _SpCaptchaBottomSheetState extends State<SpCaptchaBottomSheet> {
                   fit: BoxFit.contain,
                 ),
               ),
-              const SizedBox(width: 12),
-              IconButton.outlined(
-                icon: const Icon(Icons.refresh, color: Color(0xFFBDE3D5)),
-                onPressed: widget.onRefreshCaptcha,
-                tooltip: 'Get new CAPTCHA',
-              ),
+              if (widget.onRefreshCaptcha != null) ...[
+                const SizedBox(width: 12),
+                IconButton.outlined(
+                  icon: const Icon(Icons.refresh, color: Color(0xFFBDE3D5)),
+                  onPressed: widget.onRefreshCaptcha,
+                  tooltip: 'Get new CAPTCHA',
+                ),
+              ],
             ],
           ),
           const SizedBox(height: 16),
@@ -127,9 +132,7 @@ class _SpCaptchaBottomSheetState extends State<SpCaptchaBottomSheet> {
             style: ElevatedButton.styleFrom(
               backgroundColor: const Color(0xFFBDE3D5),
               foregroundColor: const Color(0xFF0F0F0F),
-              padding: const Duration(milliseconds: 200) != Duration.zero
-                  ? const EdgeInsets.symmetric(vertical: 16)
-                  : EdgeInsets.zero,
+              padding: const EdgeInsets.symmetric(vertical: 16),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(14),
               ),
@@ -143,4 +146,14 @@ class _SpCaptchaBottomSheetState extends State<SpCaptchaBottomSheet> {
       ),
     );
   }
+}
+
+/// Shows the CAPTCHA sheet and returns the typed text, or null if dismissed.
+Future<String?> showSpCaptchaSheet(BuildContext context, Uint8List image) {
+  return showModalBottomSheet<String>(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: Colors.transparent,
+    builder: (_) => SpCaptchaBottomSheet(captchaImage: image),
+  );
 }

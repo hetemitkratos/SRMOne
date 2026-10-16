@@ -178,85 +178,122 @@ class AcademiaClient {
 
   // ─── Scrape Methods (With Cache-Busting Layer 2) ──────────────────────────────
 
+  /// Fetches a Zoho page fragment with cache-busting headers and decodes it.
+  /// Retries once with the portal home as Referer on a 403/404.
+  /// Throws [SessionExpiredException] if the response is a sign-in page.
+  Future<String> fetchDecodedPage(String pageUrl, {String? refererHash}) async {
+    Future<String> attempt(String referer) async {
+      final epoch = DateTime.now().millisecondsSinceEpoch;
+      final response = await _client.get(
+        '$pageUrl?_t=$epoch',
+        headers: {
+          'Accept':
+              'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache',
+          'Expires': '0',
+          'X-Requested-With': 'XMLHttpRequest',
+          'Referer': referer,
+          'User-Agent': PortalEndpoints.defaultUserAgent,
+        },
+      );
+      final status = response.statusCode ?? 0;
+      final rawHtml = response.data?.toString() ?? '';
+      if (looksLikeSigninPage(response.realUri.toString(), rawHtml)) {
+        throw const SessionExpiredException(
+            'Zoho session expired: landed on signin page');
+      }
+      if (status == 403 || status == 404) {
+        throw _RetryableStatus(status);
+      }
+      return AcademiaDecoder.decodeHTMLFragment(rawHtml);
+    }
+
+    const home = '${PortalEndpoints.academiaBaseUrl}/';
+    try {
+      return await attempt(refererHash != null
+          ? '${PortalEndpoints.academiaBaseUrl}/$refererHash'
+          : home);
+    } on _RetryableStatus catch (e) {
+      await Future<void>.delayed(const Duration(milliseconds: 500));
+      try {
+        return await attempt(home);
+      } on _RetryableStatus {
+        throw FormatException(
+            'Academia returned HTTP ${e.status} for $pageUrl');
+      }
+    }
+  }
+
+  /// Ported from Go `looksLikeUnauthenticatedPage`. Deliberately does not match
+  /// a bare "signin" substring, because logged-in pages link to sign-in URLs.
+  static bool looksLikeSigninPage(String finalUrl, String body) {
+    final url = finalUrl.toLowerCase();
+    if (url.contains('/accounts/') || url.contains('/signin')) return true;
+    final lower = body.toLowerCase();
+    return lower.contains('sign in to continue') ||
+        lower.contains('zoho accounts') ||
+        lower.contains('academic web services login');
+  }
+
+  /// Fetches the decoded My_Time_Table_2023_24 page. It carries attendance,
+  /// the student info table, the Test Performance (marks) table, the personal
+  /// course list and advisors.
+  Future<String> fetchAttendancePage() => fetchDecodedPage(
+        PortalEndpoints.attendanceUrl,
+        refererHash: '#Page:My_Time_Table_2023_24',
+      );
+
   /// Fetches attendance records with Zoho cache-busting headers.
   /// Throws [SessionExpiredException] if session has expired or was invalidated.
   Future<List<AttendanceInput>> fetchAttendance() async {
-    final epoch = DateTime.now().millisecondsSinceEpoch;
-    final url = '${PortalEndpoints.attendanceUrl}?_t=$epoch';
-
-    final response = await _client.get(
-      url,
-      headers: {
-        'Cache-Control': 'no-cache, no-store, must-revalidate',
-        'Pragma': 'no-cache',
-        'Expires': '0',
-        'X-Requested-With': 'XMLHttpRequest',
-        'Referer': '${PortalEndpoints.academiaBaseUrl}/',
-        'User-Agent': PortalEndpoints.defaultUserAgent,
-      },
-    );
-
-    final rawHtml = response.data.toString();
-
-    // Check if redirected to login
-    if (rawHtml.contains('signin') ||
-        rawHtml.contains('sign in to continue') ||
-        rawHtml.contains('academic web services login')) {
-      throw const SessionExpiredException(
-          'Zoho session expired: landed on signin page');
-    }
-
-    final decoded = AcademiaDecoder.decodeHTMLFragment(rawHtml);
-    return AcademiaParsers.parseAttendance(decoded);
+    return AcademiaParsers.parseAttendance(await fetchAttendancePage());
   }
 
-  /// Fetches timetable course list with cache-busting headers.
-  Future<List<Map<String, dynamic>>> fetchTimetable() async {
-    final epoch = DateTime.now().millisecondsSinceEpoch;
-    final url = '${PortalEndpoints.personalTimetableUrl}?_t=$epoch';
-
-    final response = await _client.get(
-      url,
-      headers: {
-        'Cache-Control': 'no-cache, no-store, must-revalidate',
-        'Pragma': 'no-cache',
-        'Expires': '0',
-        'X-Requested-With': 'XMLHttpRequest',
-        'Referer': '${PortalEndpoints.academiaBaseUrl}/',
-      },
+  /// Fetches the unified timetable slot grid for [batch] ("1" or "2").
+  Future<Map<String, List<Map<String, dynamic>>>> fetchUnifiedSlotMap(
+      String batch) async {
+    final isBatch2 = batch.trim() == '2';
+    final html = await fetchDecodedPage(
+      isBatch2
+          ? PortalEndpoints.unifiedTimetableBatch2
+          : PortalEndpoints.unifiedTimetableBatch1,
+      refererHash: isBatch2
+          ? '#Page:Unified_Time_Table_2025_batch_2'
+          : '#Page:Unified_Time_Table_2025_Batch_1',
     );
-
-    final rawHtml = response.data.toString();
-    if (rawHtml.contains('signin')) {
-      throw const SessionExpiredException('Zoho session expired');
-    }
-
-    final decoded = AcademiaDecoder.decodeHTMLFragment(rawHtml);
-    return AcademiaParsers.parseTimetableCourses(decoded);
+    return AcademiaParsers.parseUnifiedSlotMap(html);
   }
 
-  /// Fetches marks from Academic_Reports.
-  Future<List<Map<String, dynamic>>> fetchMarks() async {
-    final epoch = DateTime.now().millisecondsSinceEpoch;
-    final url = '${PortalEndpoints.academicReportsUrl}?_t=$epoch';
-
-    final response = await _client.get(
-      url,
-      headers: {
-        'Cache-Control': 'no-cache, no-store, must-revalidate',
-        'Pragma': 'no-cache',
-        'Expires': '0',
-        'X-Requested-With': 'XMLHttpRequest',
-        'Referer': '${PortalEndpoints.academiaBaseUrl}/',
-      },
-    );
-
-    final rawHtml = response.data.toString();
-    if (rawHtml.contains('signin')) {
-      throw const SessionExpiredException('Zoho session expired');
+  /// Fetches the academic calendar for [sem] ('odd' | 'even'), trying the
+  /// Academic_Reports page first and the legacy planner pages after it.
+  /// Returns an empty list when no candidate page yields a calendar.
+  Future<List<Map<String, dynamic>>> fetchCalendar(String sem) async {
+    final semToken = sem.toUpperCase();
+    final candidates = <(String, String)>[
+      (PortalEndpoints.academicReportsUrl, '#Academic_Reports'),
+      for (final year in ['2026_27', '2025_26', '2024_25'])
+        (
+          '${PortalEndpoints.academiaBaseUrl}/srm_university/academia-academic-services/page/Academic_Planner_${year}_$semToken',
+          '#Page:Academic_Planner_${year}_$semToken',
+        ),
+    ];
+    for (final (url, referer) in candidates) {
+      try {
+        final months = AcademiaParsers.parseCalendar(
+            await fetchDecodedPage(url, refererHash: referer));
+        if (months.isNotEmpty) return months;
+      } on SessionExpiredException {
+        rethrow;
+      } catch (_) {
+        // Try the next candidate page.
+      }
     }
-
-    final decoded = AcademiaDecoder.decodeHTMLFragment(rawHtml);
-    return AcademiaParsers.parseMarks(decoded);
+    return [];
   }
+}
+
+class _RetryableStatus implements Exception {
+  final int status;
+  const _RetryableStatus(this.status);
 }

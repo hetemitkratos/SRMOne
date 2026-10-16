@@ -2,7 +2,6 @@
 // Timetable screen with swipeable Day 1–5 views, live/upcoming class highlights,
 // calendar day order sync, and one-tap PNG poster export.
 
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_svg/flutter_svg.dart';
@@ -12,6 +11,8 @@ import '../../core/constants/asset_paths.dart';
 import '../../core/database/app_database.dart';
 import '../../domain/services/calendar_day_resolver.dart';
 import '../../domain/services/current_class_detector.dart';
+import '../../domain/services/session_sync_orchestrator.dart';
+import '../../domain/services/timetable_schedule.dart';
 import '../../main.dart';
 import '../auth/auth_controller.dart';
 import '../faculty/faculty_avatar.dart';
@@ -28,6 +29,7 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen>
     with SingleTickerProviderStateMixin {
   late final TabController _tabController;
   int _todayDayOrder = 1;
+  bool _openedTodayTab = false;
 
   @override
   void initState() {
@@ -58,13 +60,15 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen>
       stream: db.watchTimetable(email),
       builder: (context, timetableSnap) {
         final timetable = timetableSnap.data;
-        final rawCourses = _parseCourses(timetable?.coursesJson);
+        final rawCourses =
+            TimetableSchedule.parseCourses(timetable?.coursesJson);
 
         return StreamBuilder<CalendarCacheData?>(
-          stream: db.watchCalendar(email, 'odd'),
+          stream: db.watchCalendar(email, semesterFor(DateTime.now())),
           builder: (context, calendarSnap) {
             final calendar = calendarSnap.data;
-            final calendarMap = _buildCalendarMap(calendar?.monthsJson);
+            final calendarMap =
+                TimetableSchedule.parseCalendar(calendar?.monthsJson);
             final todayStatus = CalendarDayResolver.getDayStatus(
               calendarMap,
               DateTime.now(),
@@ -74,9 +78,14 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen>
                 todayStatus.dayOrderNum! >= 1 &&
                 todayStatus.dayOrderNum! <= 5) {
               _todayDayOrder = todayStatus.dayOrderNum!;
+              // Open on today's day order once, then leave tabs to the user.
+              if (!_openedTodayTab && todayStatus.isWorkingDay) {
+                _openedTodayTab = true;
+                _tabController.index = _todayDayOrder - 1;
+              }
             }
 
-            final dayScheduleMap = _buildDaySchedule(rawCourses);
+            final dayScheduleMap = TimetableSchedule.daySchedule(rawCourses);
 
             return Scaffold(
               appBar: AppBar(
@@ -102,6 +111,7 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen>
                 bottom: TabBar(
                   controller: _tabController,
                   isScrollable: false,
+                  labelPadding: const EdgeInsets.symmetric(horizontal: 4),
                   tabs: List.generate(5, (index) {
                     final dayNum = index + 1;
                     final isToday =
@@ -133,7 +143,7 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen>
                 onRefresh: () async {
                   final orchestrator =
                       ref.read(sessionSyncOrchestratorProvider);
-                  await orchestrator.syncAttendance(forceFreshLogin: true);
+                  await orchestrator.syncAll();
                 },
                 child: rawCourses.isEmpty
                     ? Center(
@@ -185,31 +195,7 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen>
     List<Map<String, dynamic>> courses,
     bool isToday,
   ) {
-    final slotsWithTiming = <TimetableSlotWithTiming>[];
-
-    for (final c in courses) {
-      final code =
-          c['course_code']?.toString() ?? c['courseCode']?.toString() ?? '';
-      final title =
-          c['course_title']?.toString() ?? c['courseTitle']?.toString() ?? '';
-      final slotStr = c['slot']?.toString() ?? '';
-
-      final matches =
-          RegExp(r'Day\s*([1-5])', caseSensitive: false).allMatches(slotStr);
-      for (final m in matches) {
-        if ('Day ${m.group(1)}' == dayLabel) {
-          slotsWithTiming.add(
-            TimetableSlotWithTiming(
-              courseCode: code,
-              courseTitle: title,
-              timing: _timingForSlot(slotStr),
-              hourIndex: slotsWithTiming.length + 1,
-              day: dayLabel,
-            ),
-          );
-        }
-      }
-    }
+    final slotsWithTiming = TimetableSchedule.slotsForDay(courses, dayLabel);
 
     if (slotsWithTiming.isEmpty) {
       return Center(
@@ -261,18 +247,13 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen>
     List<Map<String, dynamic>> courses,
   ) {
     final matchingCourse = courses.firstWhere(
-      (c) =>
-          (c['course_code']?.toString() ?? c['courseCode']?.toString()) ==
-          slot.courseCode,
+      (c) => c['courseCode']?.toString() == slot.courseCode,
       orElse: () => {},
     );
 
-    final faculty = matchingCourse['faculty_name']?.toString() ??
-        matchingCourse['facultyName']?.toString() ??
-        '';
-    final room = matchingCourse['room_no']?.toString() ??
-        matchingCourse['roomNo']?.toString() ??
-        '-';
+    final faculty = matchingCourse['facultyName']?.toString() ?? '';
+    final roomNo = matchingCourse['roomNo']?.toString() ?? '';
+    final room = roomNo.isEmpty ? '-' : roomNo;
 
     final isLive = info.state == ClassTimeState.ongoing;
     final isNext = info.state == ClassTimeState.upcomingNext;
@@ -302,7 +283,7 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen>
             Row(
               children: [
                 FacultyAvatar(
-                  facultyName: faculty.isNotEmpty ? faculty : slot.courseCode,
+                  facultyName: faculty.isNotEmpty ? faculty : slot.courseTitle,
                   radius: 18,
                 ),
                 const SizedBox(width: 12),
@@ -322,7 +303,7 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen>
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        '${slot.courseCode} • Room $room',
+                        '${slot.timing} • Room $room',
                         style: theme.textTheme.bodySmall?.copyWith(
                           color: Colors.grey,
                         ),
@@ -376,80 +357,5 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen>
         ),
       ),
     );
-  }
-
-  String _timingForSlot(String slotStr) {
-    return '09:00 - 09:50';
-  }
-
-  List<Map<String, dynamic>> _parseCourses(String? jsonStr) {
-    if (jsonStr == null || jsonStr.isEmpty) return [];
-    try {
-      final list = jsonDecode(jsonStr) as List<dynamic>;
-      return list.cast<Map<String, dynamic>>();
-    } catch (_) {
-      return [];
-    }
-  }
-
-  Map<String, CalendarEntry> _buildCalendarMap(String? jsonStr) {
-    if (jsonStr == null || jsonStr.isEmpty) return {};
-    try {
-      final list = jsonDecode(jsonStr) as List<dynamic>;
-      final map = <String, CalendarEntry>{};
-      for (final month in list) {
-        if (month is Map<String, dynamic> && month['days'] is List) {
-          for (final day in month['days'] as List<dynamic>) {
-            if (day is Map<String, dynamic>) {
-              final date = day['date']?.toString() ?? '';
-              if (date.isNotEmpty) {
-                map[date] = CalendarEntry(
-                  date: date,
-                  day: day['day']?.toString() ?? '',
-                  dayOrder: day['dayOrder']?.toString() ??
-                      day['day_order']?.toString() ??
-                      '',
-                  event: day['event']?.toString() ?? '',
-                );
-              }
-            }
-          }
-        }
-      }
-      return map;
-    } catch (_) {
-      return {};
-    }
-  }
-
-  Map<String, List<Map<String, String>>> _buildDaySchedule(
-    List<Map<String, dynamic>> courses,
-  ) {
-    final map = <String, List<Map<String, String>>>{};
-    for (final day in ['Day 1', 'Day 2', 'Day 3', 'Day 4', 'Day 5']) {
-      map[day] = [];
-    }
-
-    for (final c in courses) {
-      final code =
-          c['course_code']?.toString() ?? c['courseCode']?.toString() ?? '';
-      final title =
-          c['course_title']?.toString() ?? c['courseTitle']?.toString() ?? '';
-      final room = c['room_no']?.toString() ?? c['roomNo']?.toString() ?? '-';
-      final slotStr = c['slot']?.toString() ?? '';
-
-      final matches =
-          RegExp(r'Day\s*([1-5])', caseSensitive: false).allMatches(slotStr);
-      for (final m in matches) {
-        final dayKey = 'Day ${m.group(1)}';
-        map[dayKey]?.add({
-          'code': code,
-          'title': title,
-          'room': room,
-        });
-      }
-    }
-
-    return map;
   }
 }

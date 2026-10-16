@@ -28,6 +28,18 @@ void main() {
       expect(find.text('JS'), findsOneWidget);
     });
 
+    testWidgets('ignores the staff ID in portal faculty names', (tester) async {
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: Scaffold(
+            body: FacultyAvatar(facultyName: 'Dr. Jane Doe (103528)'),
+          ),
+        ),
+      );
+
+      expect(find.text('JD'), findsOneWidget);
+    });
+
     testWidgets('renders single initial for single-word name', (tester) async {
       await tester.pumpWidget(
         const MaterialApp(

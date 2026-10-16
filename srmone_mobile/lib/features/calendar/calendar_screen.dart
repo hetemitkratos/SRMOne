@@ -10,6 +10,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../../core/constants/asset_paths.dart';
 import '../../core/database/app_database.dart';
+import '../../domain/services/session_sync_orchestrator.dart';
 import '../../main.dart';
 import '../auth/auth_controller.dart';
 
@@ -21,7 +22,7 @@ class CalendarScreen extends ConsumerStatefulWidget {
 }
 
 class _CalendarScreenState extends ConsumerState<CalendarScreen> {
-  String _selectedSemester = 'odd';
+  String _selectedSemester = semesterFor(DateTime.now());
 
   @override
   Widget build(BuildContext context) {
@@ -75,7 +76,7 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
           return RefreshIndicator(
             onRefresh: () async {
               final orchestrator = ref.read(sessionSyncOrchestratorProvider);
-              await orchestrator.syncAttendance(forceFreshLogin: true);
+              await orchestrator.syncAll();
             },
             child: months.isEmpty
                 ? Center(

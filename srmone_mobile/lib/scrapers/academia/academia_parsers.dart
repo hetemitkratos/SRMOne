@@ -21,24 +21,31 @@ class AcademiaParsers {
     Element? targetTable;
     List<String> headers = [];
 
-    for (final table in tables) {
-      final thList = table.querySelectorAll('th');
-      final firstRowCells = table.querySelectorAll('tr').isNotEmpty
-          ? table.querySelectorAll('tr').first.querySelectorAll('td, th')
-          : <Element>[];
+    // Prefer the table with an `Attn %` header (the personal timetable on the
+    // same page also has Course Code/Course Title headers).
+    for (final pass in [true, false]) {
+      if (targetTable != null) break;
+      for (final table in tables) {
+        final thList = table.querySelectorAll('th');
+        final firstRowCells = table.querySelectorAll('tr').isNotEmpty
+            ? table.querySelectorAll('tr').first.querySelectorAll('td, th')
+            : <Element>[];
 
-      final candidateCells = thList.isNotEmpty ? thList : firstRowCells;
-      final rowHeaders = candidateCells
-          .map((c) => _cleanCellText(c.text))
-          .where((h) => h.isNotEmpty)
-          .toList();
+        final candidateCells = thList.isNotEmpty ? thList : firstRowCells;
+        final rowHeaders = candidateCells
+            .map((c) => cellText(c))
+            .where((h) => h.isNotEmpty)
+            .toList();
 
-      if (rowHeaders.any((h) => h.contains('Attn %') || h == 'Attn %') ||
-          (rowHeaders.contains('Course Code') &&
-              rowHeaders.contains('Course Title'))) {
-        targetTable = table;
-        headers = rowHeaders;
-        break;
+        final matches = pass
+            ? rowHeaders.any((h) => h.contains('Attn %'))
+            : rowHeaders.contains('Course Code') &&
+                rowHeaders.contains('Course Title');
+        if (matches) {
+          targetTable = table;
+          headers = rowHeaders;
+          break;
+        }
       }
     }
 
@@ -54,10 +61,8 @@ class AcademiaParsers {
     final List<AttendanceInput> records = [];
 
     for (int i = 1; i < rows.length; i++) {
-      final cells = rows[i]
-          .querySelectorAll('td')
-          .map((c) => _cleanCellText(c.text))
-          .toList();
+      final cells =
+          rows[i].querySelectorAll('td').map((c) => cellText(c)).toList();
       if (cells.isEmpty || cells[0].isEmpty) continue;
 
       final map = <String, String>{};
@@ -92,6 +97,10 @@ class AcademiaParsers {
           hoursConducted: conducted,
           hoursAbsent: absent,
           attendancePct: pct,
+          category: map['Category'] ?? '',
+          facultyName: map['Faculty Name'] ?? '',
+          slot: map['Slot'] ?? '',
+          roomNo: map['Room No'] ?? map['Room No.'] ?? '',
         ),
       );
     }
@@ -101,27 +110,45 @@ class AcademiaParsers {
 
   // ─── 2. Student Profile Parser ──────────────────────────────────────────────
 
-  /// Parses student details from Student Info or Academic Reports HTML.
-  static Map<String, dynamic> parseStudentProfile(String decodedHtml) {
+  /// Parses the student info table (the one containing `Registration Number:`)
+  /// from My_Time_Table_2023_24 into a label → value map.
+  /// Labels have their trailing `:` stripped; `:` separator cells are skipped.
+  static Map<String, String> parseStudentProfile(String decodedHtml) {
     final doc = html_parser.parse(decodedHtml);
-    final profile = <String, dynamic>{};
-
-    // Table key-value pairs (TD label : TD value)
-    final rows = doc.querySelectorAll('tr');
-    for (final row in rows) {
-      final cells = row.querySelectorAll('td');
-      if (cells.length >= 2) {
-        for (int i = 0; i < cells.length - 1; i += 2) {
-          final label = _cleanCellText(cells[i].text).replaceAll(':', '');
-          final val = _cleanCellText(cells[i + 1].text);
-          if (label.isNotEmpty && val.isNotEmpty) {
-            profile[label] = val;
-          }
-        }
+    Element? table;
+    for (final t in doc.querySelectorAll('table')) {
+      if (_headerTexts(t).contains('Registration Number:')) {
+        table = t;
+        break;
       }
     }
+    if (table == null) return {};
 
-    return profile;
+    final info = <String, String>{};
+    for (final row in table.querySelectorAll('tr')) {
+      final cells =
+          row.querySelectorAll('th, td').map((c) => cellText(c)).toList();
+      for (int i = 0; i < cells.length; i++) {
+        var key = cells[i].trim();
+        if (key.isEmpty || key == ':') continue;
+        if (key.endsWith(':')) key = key.substring(0, key.length - 1).trim();
+        if (key.isEmpty) continue;
+
+        int v = i + 1;
+        while (v < cells.length && cells[v].trim().isEmpty) {
+          v++;
+        }
+        if (v < cells.length && cells[v].trim() == ':') v++;
+        while (v < cells.length && cells[v].trim().isEmpty) {
+          v++;
+        }
+        if (v >= cells.length) continue;
+
+        final value = cells[v].trim();
+        if (value.isNotEmpty && value != ':') info[key] = value;
+      }
+    }
+    return info;
   }
 
   // ─── 3. Student Photo Download URL ──────────────────────────────────────────
@@ -152,89 +179,384 @@ class AcademiaParsers {
     return null;
   }
 
-  // ─── 4. Marks Parser (Academic Reports) ─────────────────────────────────────
+  // ─── 4. Marks Parser (My_Time_Table_2023_24) ────────────────────────────────
 
-  /// Parses test marks from Academic Reports HTML.
-  /// Bug Fix #6: Parses test-level rows strictly without inventing letter grades.
-  static List<Map<String, dynamic>> parseMarks(String decodedHtml) {
+  /// Parses the `Test Performance` table into one entry per course.
+  /// Bug Fix #6: keeps test-level rows only; never invents grades or totals.
+  ///
+  /// Each test cell reads like `FT-I/5.00` on its first line and the score on
+  /// the following line(s).
+  static List<AcademiaMarkRecord> parseMarks(String decodedHtml) {
     final doc = html_parser.parse(decodedHtml);
-    final tables = doc.querySelectorAll('table');
-    final List<Map<String, dynamic>> courses = [];
-
-    for (final table in tables) {
-      final ths = table
-          .querySelectorAll('th')
-          .map((e) => _cleanCellText(e.text))
-          .toList();
-      if (ths.any((h) => h.contains('Course Code')) &&
-          ths.any((h) => h.contains('Test') || h.contains('Mark'))) {
-        final rows = table.querySelectorAll('tr');
-        for (int i = 1; i < rows.length; i++) {
-          final tds = rows[i]
-              .querySelectorAll('td')
-              .map((e) => _cleanCellText(e.text))
-              .toList();
-          if (tds.length >= 4) {
-            courses.add({
-              'courseCode': tds[0],
-              'courseTitle': tds.length > 1 ? tds[1] : '',
-              'testName': tds.length > 2 ? tds[2] : '',
-              'obtained': tds.length > 3 ? tds[3] : '',
-              'maxMark': tds.length > 4 ? tds[4] : '',
-              'source': 'academia',
-            });
-          }
-        }
-      }
-    }
-
-    return courses;
-  }
-
-  // ─── 5. Timetable Parser ────────────────────────────────────────────────────
-
-  /// Parses course details and slot schedules from My_Time_Table_2023_24.
-  static List<Map<String, dynamic>> parseTimetableCourses(String decodedHtml) {
-    final doc = html_parser.parse(decodedHtml);
-    final tables = doc.querySelectorAll('table');
-    final List<Map<String, dynamic>> courses = [];
-
-    for (final table in tables) {
-      final ths = table
-          .querySelectorAll('th')
-          .map((e) => _cleanCellText(e.text))
-          .toList();
-      if (ths.contains('Course Code') && ths.contains('Slot')) {
-        final rows = table.querySelectorAll('tr');
-        for (int i = 1; i < rows.length; i++) {
-          final tds = rows[i]
-              .querySelectorAll('td')
-              .map((e) => _cleanCellText(e.text))
-              .toList();
-          if (tds.length >= 6) {
-            final map = <String, String>{};
-            for (int h = 0; h < ths.length && h < tds.length; h++) {
-              map[ths[h]] = tds[h];
-            }
-            courses.add({
-              'courseCode': map['Course Code'] ?? tds[0],
-              'courseTitle': map['Course Title'] ?? tds[1],
-              'category': map['Category'] ?? (tds.length > 2 ? tds[2] : ''),
-              'facultyName':
-                  map['Faculty Name'] ?? (tds.length > 3 ? tds[3] : ''),
-              'slot': map['Slot'] ?? (tds.length > 4 ? tds[4] : ''),
-              'roomNo': map['Room No'] ?? (tds.length > 5 ? tds[5] : ''),
-            });
-          }
-        }
+    Element? table;
+    for (final t in doc.querySelectorAll('table')) {
+      if (_headerTexts(t).contains('Test Performance')) {
+        table = t;
         break;
       }
     }
+    if (table == null) return [];
 
-    return courses;
+    final records = <AcademiaMarkRecord>[];
+    final rows = _directRows(table);
+    for (int i = 1; i < rows.length; i++) {
+      final cells = rows[i]
+          .children
+          .where((e) => e.localName == 'td' || e.localName == 'th')
+          .toList();
+      if (cells.length < 2) continue;
+      final code = cellText(cells[0]).trim();
+      if (code.isEmpty) continue;
+
+      final tests = <AcademiaMarkTest>[];
+      if (cells.length >= 3) {
+        for (final inner in cells[2].querySelectorAll('td')) {
+          final test = _parseMarkTestCell(inner);
+          if (test != null) tests.add(test);
+        }
+      }
+      records.add(AcademiaMarkRecord(
+        courseCode: code,
+        courseType: cellText(cells[1]).trim(),
+        tests: tests,
+      ));
+    }
+    return records;
   }
 
-  static String _cleanCellText(String text) {
-    return text.replaceAll('\u00A0', ' ').trim();
+  static AcademiaMarkTest? _parseMarkTestCell(Element cell) {
+    final lines = cellText(cell)
+        .split(RegExp(r'[\n\t]+'))
+        .map((l) => l.trim())
+        .where((l) => l.isNotEmpty)
+        .toList();
+    if (lines.isEmpty) return null;
+
+    var name = lines.first;
+    var max = '';
+    final score = lines.length > 1 ? lines.sublist(1).join(' ') : '';
+    final slash = name.lastIndexOf('/');
+    if (slash >= 0) {
+      max = name.substring(slash + 1).trim();
+      name = name.substring(0, slash).trim();
+    }
+    if (name.isEmpty && score.isEmpty && max.isEmpty) return null;
+    return AcademiaMarkTest(testName: name, scored: score, maxMarks: max);
   }
+
+  // ─── 5. Personal Timetable Parser ───────────────────────────────────────────
+
+  /// Parses the course table (headers include `Course Code` and `Slot`) from
+  /// My_Time_Table_2023_24. Each row becomes a header → value map.
+  static List<Map<String, String>> parseTimetableCourses(String decodedHtml) {
+    final doc = html_parser.parse(decodedHtml);
+    for (final table in doc.querySelectorAll('table')) {
+      final headers = _headerTexts(table);
+      if (!headers.contains('Course Code') || !headers.contains('Slot')) {
+        continue;
+      }
+      final courses = <Map<String, String>>[];
+      final rows = table.querySelectorAll('tr');
+      for (int i = 1; i < rows.length; i++) {
+        final cells =
+            rows[i].querySelectorAll('th, td').map((c) => cellText(c)).toList();
+        if (cells.length < 2 || cells[1].trim().isEmpty) continue;
+        final record = <String, String>{};
+        for (int h = 0; h < headers.length; h++) {
+          record[headers[h]] = h < cells.length ? cells[h].trim() : '';
+        }
+        courses.add(record);
+      }
+      return courses;
+    }
+    return [];
+  }
+
+  /// Parses faculty advisors from the table whose headers contain `Counselor`.
+  static List<Map<String, String>> parseAdvisors(String decodedHtml) {
+    final doc = html_parser.parse(decodedHtml);
+    for (final table in doc.querySelectorAll('table')) {
+      if (!_headerTexts(table).contains('Counselor')) continue;
+      final firstRow = table.querySelector('tr');
+      if (firstRow == null) return [];
+      final cells =
+          firstRow.querySelectorAll('th, td').map((c) => cellText(c)).toList();
+      final advisors = <Map<String, String>>[];
+      for (int i = 2; i < cells.length; i++) {
+        final lines = cells[i]
+            .split('\n')
+            .map((l) => l.trim())
+            .where((l) => l.isNotEmpty)
+            .toList();
+        if (lines.isEmpty) continue;
+        String at(int n) => n < lines.length ? lines[n] : '';
+        advisors.add({
+          'name': at(0),
+          'role': at(1),
+          'email': at(2),
+          'phone': at(3),
+        });
+      }
+      return advisors;
+    }
+    return [];
+  }
+
+  // ─── 6. Unified Timetable (Batch Slot Map) ──────────────────────────────────
+
+  /// Parses the Unified_Time_Table grid (first cell `FROM`) into a map of
+  /// slot token → schedule entries `{day, hourIndex, timing, slotToken}`.
+  static Map<String, List<Map<String, dynamic>>> parseUnifiedSlotMap(
+      String decodedHtml) {
+    final doc = html_parser.parse(decodedHtml);
+    List<List<String>>? grid;
+    for (final table in doc.querySelectorAll('table')) {
+      final rows = _tableMatrix(table);
+      if (rows.isNotEmpty &&
+          rows.first.isNotEmpty &&
+          rows.first.first.trim() == 'FROM') {
+        grid = rows;
+        break;
+      }
+    }
+    if (grid == null || grid.first.length < 2) return {};
+
+    final timings = grid.first.sublist(1);
+    final slotMap = <String, List<Map<String, dynamic>>>{};
+    for (final row in grid.skip(1)) {
+      if (row.isEmpty) continue;
+      final day = row.first.trim();
+      if (!day.startsWith('Day')) continue;
+      for (int col = 1; col < row.length && col - 1 < timings.length; col++) {
+        final text = row[col].trim();
+        if (text.isEmpty) continue;
+        final timing = timings[col - 1].trim();
+        for (final token in text.split(RegExp(r'\s*/\s*|\n+'))) {
+          final t = token.trim();
+          if (t.isEmpty) continue;
+          slotMap.putIfAbsent(t, () => []).add({
+            'day': day,
+            'hourIndex': col,
+            'timing': timing,
+            'slotToken': t,
+          });
+        }
+      }
+    }
+    return slotMap;
+  }
+
+  /// Joins personal courses with the unified slot map. Each returned course has
+  /// a `schedule` list sorted by day number then hour index.
+  static List<Map<String, dynamic>> mergeTimetable(
+    List<Map<String, String>> rawCourses,
+    Map<String, List<Map<String, dynamic>>> slotMap,
+  ) {
+    int dayNum(String d) =>
+        int.tryParse(RegExp(r'(\d+)').firstMatch(d)?.group(1) ?? '') ?? 999;
+
+    return rawCourses.map((c) {
+      final rawSlot = (c['Slot'] ?? '').trim();
+      final schedule = <Map<String, dynamic>>[];
+      for (final token in rawSlot.split('-')) {
+        final t = token.trim();
+        if (t.isEmpty) continue;
+        for (final entry in slotMap[t] ?? const <Map<String, dynamic>>[]) {
+          schedule.add({...entry, 'slotToken': t});
+        }
+      }
+      schedule.sort((a, b) {
+        final byDay =
+            dayNum(a['day'] as String).compareTo(dayNum(b['day'] as String));
+        if (byDay != 0) return byDay;
+        return (a['hourIndex'] as int).compareTo(b['hourIndex'] as int);
+      });
+      return <String, dynamic>{
+        'courseCode': (c['Course Code'] ?? '').trim(),
+        'courseTitle': (c['Course Title'] ?? '').trim(),
+        'credit': (c['Credit'] ?? '').trim(),
+        'category': (c['Category'] ?? '').trim(),
+        'courseType': (c['Course Type'] ?? '').trim(),
+        'facultyName': (c['Faculty Name'] ?? '').trim(),
+        'slot': rawSlot,
+        'roomNo': (c['Room No.'] ?? c['Room No'] ?? '').trim(),
+        'schedule': schedule,
+      };
+    }).toList();
+  }
+
+  // ─── 7. Academic Calendar Parser ────────────────────────────────────────────
+
+  static final RegExp _monthRe = RegExp(
+    r'^(Jan(uary)?|Feb(ruary)?|Mar(ch)?|Apr(il)?|May|Jun(e)?|Jul(y)?|'
+    r'Aug(ust)?|Sep(tember)?|Oct(ober)?|Nov(ember)?|Dec(ember)?)\b',
+    caseSensitive: false,
+  );
+
+  /// Heuristic calendar parser (Academic_Reports / Academic_Planner pages).
+  /// Returns months as `{month, days: [{date, day, event, dayOrder}]}` where
+  /// `date` is the raw day-of-month cell; callers convert it to YYYY-MM-DD.
+  static List<Map<String, dynamic>> parseCalendar(String decodedHtml) {
+    final doc = html_parser.parse(decodedHtml);
+    int bestScore = 0;
+    int bestHeaderRow = 0;
+    List<List<String>> bestTable = [];
+
+    for (final table in doc.querySelectorAll('table')) {
+      final rows = _tableMatrix(table);
+      for (int r = 0; r < rows.length && r < 5; r++) {
+        final hits = rows[r].where((c) => _monthRe.hasMatch(c.trim())).length;
+        if (hits > bestScore) {
+          bestScore = hits;
+          bestHeaderRow = r;
+          bestTable = rows;
+        }
+      }
+    }
+    if (bestScore == 0 || bestTable.isEmpty) return [];
+
+    final header = bestTable[bestHeaderRow];
+    final groups = <({String name, int dt, int day, int ev, int dO})>[];
+    for (int i = 0; i < header.length; i++) {
+      if (i >= 2 && _monthRe.hasMatch(header[i].trim())) {
+        groups.add(
+            (name: header[i].trim(), dt: i - 2, day: i - 1, ev: i, dO: i + 1));
+      }
+    }
+    if (groups.isEmpty && header.length >= 4) {
+      for (int i = 0; i + 3 < header.length; i += 5) {
+        var name = 'Month${groups.length + 1}';
+        for (final c in header.sublist(i, (i + 5).clamp(0, header.length))) {
+          if (_monthRe.hasMatch(c.trim())) {
+            name = c.trim();
+            break;
+          }
+        }
+        groups.add((name: name, dt: i, day: i + 1, ev: i + 2, dO: i + 3));
+      }
+    }
+
+    String at(List<String> row, int i) =>
+        i >= 0 && i < row.length ? row[i].trim() : '';
+
+    final months = <Map<String, dynamic>>[];
+    for (final g in groups) {
+      final days = <Map<String, String>>[];
+      for (int r = bestHeaderRow + 1; r < bestTable.length; r++) {
+        final row = bestTable[r];
+        final date = at(row, g.dt);
+        if (date.isEmpty) continue;
+        days.add({
+          'date': date,
+          'day': at(row, g.day),
+          'event': at(row, g.ev),
+          'dayOrder': at(row, g.dO),
+        });
+      }
+      months.add({'month': g.name, 'days': days});
+    }
+    return months;
+  }
+
+  // ─── Shared HTML helpers ────────────────────────────────────────────────────
+
+  /// Extracts cell text the way the Go scraper does: `<br>`/`<hr>` and block
+  /// elements become line breaks, runs of whitespace collapse per line.
+  static String cellText(Element cell) {
+    final b = StringBuffer();
+    void walk(Node node) {
+      if (node is Text) {
+        b.write(node.data);
+        return;
+      }
+      if (node is Element) {
+        final tag = node.localName ?? '';
+        if ((tag == 'br' || tag == 'hr') && !b.toString().endsWith('\n')) {
+          b.write('\n');
+        }
+        for (final child in node.nodes) {
+          walk(child);
+        }
+        if (_blockTags.contains(tag) && !b.toString().endsWith('\n')) {
+          b.write('\n');
+        }
+      }
+    }
+
+    for (final child in cell.nodes) {
+      walk(child);
+    }
+    return b
+        .toString()
+        .replaceAll('\u00A0', ' ')
+        .split('\n')
+        .map((l) => l.trim().split(RegExp(r'\s+')).join(' '))
+        .where((l) => l.isNotEmpty)
+        .join('\n')
+        .trim();
+  }
+
+  static const _blockTags = {
+    'div',
+    'p',
+    'section',
+    'article',
+    'header',
+    'footer',
+    'li',
+    'tr',
+    'table'
+  };
+
+  static List<String> _headerTexts(Element table) {
+    final first = table.querySelector('tr');
+    if (first == null) return [];
+    return first.querySelectorAll('th, td').map((c) => cellText(c)).toList();
+  }
+
+  static List<List<String>> _tableMatrix(Element table) => table
+      .querySelectorAll('tr')
+      .map((r) => r.querySelectorAll('th, td').map((c) => cellText(c)).toList())
+      .toList();
+
+  static List<Element> _directRows(Element table) {
+    final bodies = table.children.where((e) => e.localName == 'tbody').toList();
+    final containers = bodies.isEmpty ? [table] : bodies;
+    return [
+      for (final c in containers)
+        ...c.children.where((e) => e.localName == 'tr')
+    ];
+  }
+}
+
+/// One test from the Academia `Test Performance` table.
+class AcademiaMarkTest {
+  final String testName;
+  final String scored;
+  final String maxMarks;
+
+  const AcademiaMarkTest({
+    required this.testName,
+    required this.scored,
+    required this.maxMarks,
+  });
+
+  Map<String, String> toJson() => {
+        'testName': testName,
+        'scored': scored,
+        'maxMarks': maxMarks,
+      };
+}
+
+/// One course row from the Academia `Test Performance` table.
+class AcademiaMarkRecord {
+  final String courseCode;
+  final String courseType;
+  final List<AcademiaMarkTest> tests;
+
+  const AcademiaMarkRecord({
+    required this.courseCode,
+    required this.courseType,
+    required this.tests,
+  });
 }
