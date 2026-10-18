@@ -6,10 +6,12 @@
 // Layer 2: Cache-Busting — GET requests append ?_t=<epoch_ms> and no-cache headers.
 // Layer 3: Silent Re-Auth — If session returns 401/403/signin redirect, re-authenticates
 //          using SecureVault credentials, updates cookies, and retries seamlessly.
-// Layer 4: Dual-Source Reconciliation — Compares Academia and Student Portal hoursConducted.
+// Layer 4: Attendance comes only from the Student Portal; Academia supplies
+//          each course's details (faculty, slot, room, category).
 //
-// One sync refreshes attendance, student profile, internal marks, timetable
-// and the academic calendar. Attendance is required; the other sections are
+// One sync refreshes the student profile, internal marks, the course list,
+// timetable and academic calendar from Academia, and attendance from the
+// Student Portal. The Academia page is required; the other sections are
 // best-effort so a failure in one never discards the rest.
 
 import 'dart:async';
@@ -28,6 +30,7 @@ import '../../scrapers/student_portal/sp_client.dart';
 import 'attendance_planner_math.dart';
 import 'calendar_day_resolver.dart';
 import 'notification_rule_engine.dart';
+import 'timetable_schedule.dart';
 
 /// Asks the user to read a Student Portal CAPTCHA image. Returns the typed
 /// text, or null if the user cancelled.
@@ -36,7 +39,7 @@ typedef SpCaptchaPrompt = Future<String?> Function(Uint8List captchaImage);
 /// The user-visible stages of a sync, in the order they run.
 enum SyncStep {
   signingIn('Signing in to SRM Academia…'),
-  fetchingAttendance('Syncing attendance…'),
+  fetchingAttendance('Syncing your courses…'),
   syncingDetails('Syncing marks, timetable and calendar…'),
   saving('Saving…'),
   studentPortal('Connecting to Student Portal…'),
@@ -175,13 +178,14 @@ class SessionSyncOrchestrator {
   /// 1. Reads stored credentials & cookie jar from Hardware Vault.
   /// 2. Fetches the My_Time_Table page with cache-busting headers.
   /// 3. If Zoho session expired / invalid, triggers silent re-login with vault credentials.
-  /// 4. Parses attendance, profile, marks and the course list from that page
-  ///    in one background-isolate pass and saves them straight away.
+  /// 4. Parses the profile, marks and course list from that page in one
+  ///    background-isolate pass and saves them straight away. Academia's
+  ///    page has no attendance hours, so attendance is never taken from it.
   /// 5. Fetches the unified timetable grid and the academic calendar in
   ///    parallel. With [waitForDetails] false the returned future completes
   ///    as soon as step 4 is saved and this step finishes in the background
   ///    (the screens update from the database when it lands).
-  /// 6. Optionally reconciles with Student Portal if an SP password or cookies
+  /// 6. Saves the Student Portal's attendance if an SP password or cookies
   ///    exist. [onSpCaptcha] lets a foreground caller ask the user to solve a
   ///    CAPTCHA when on-device OCR fails; background syncs pass null.
   ///    With [includeStudentPortal] false this step is skipped, so the
@@ -342,7 +346,9 @@ class SessionSyncOrchestrator {
       return _error(friendlySyncError(e));
     }
 
-    var records = page.attendance;
+    // The page's course rows carry each course's details but no hours.
+    final courses = page.attendance;
+    _courseDetailsFromSync = {for (final c in courses) _courseKey(c): c};
 
     // Save cookie jar state after successful operations
     await _saveCookies(cookieJar);
@@ -351,17 +357,8 @@ class SessionSyncOrchestrator {
     // it while the timetable grid and calendar download.
     step(SyncStep.saving);
     await _guard('profile', () => _syncProfile(email, page.profile));
-    await _guard('marks', () => _syncAcademiaMarks(email, page, records));
-    if (!includeStudentPortal) {
-      // The Student Portal merge runs after this and often carries more
-      // conducted hours than Academia. Keep those until it does, so the
-      // screens don't flip to Academia's lower counts and back.
-      final early = await isStudentPortalConfigured()
-          ? reconcileAttendance(records, await _cachedAttendance(email))
-          : records;
-      await _persistAttendance(email, early);
-      _log('attendance saved in ${total.elapsedMilliseconds} ms');
-    }
+    await _guard('marks', () => _syncAcademiaMarks(email, page, courses));
+    _log('academia saved in ${total.elapsedMilliseconds} ms');
 
     // Best-effort sections that need more page fetches, run in parallel.
     step(SyncStep.syncingDetails);
@@ -377,9 +374,10 @@ class SessionSyncOrchestrator {
       _log('details failed: ${e.runtimeType}');
     });
 
+    var subjectsUpdated = 0;
     if (includeStudentPortal) {
-      // Layer 4: Dual-Source Reconciliation with Student Portal (if
-      // configured), while the details download.
+      // Layer 4: attendance from the Student Portal (if configured), while
+      // the details download.
       step(SyncStep.studentPortal);
       final spRecords = await _guard(
           'student portal',
@@ -389,9 +387,10 @@ class SessionSyncOrchestrator {
               ? SyncTimeouts.studentPortalBackground
               : null);
       if (spRecords != null && spRecords.isNotEmpty) {
-        records = reconcileAttendance(records, spRecords);
+        await _persistAttendance(
+            email, withCourseDetails(spRecords, await _courseDetails(email)));
+        subjectsUpdated = spRecords.length;
       }
-      await _persistAttendance(email, records);
     }
     details.complete(detailsWork);
     _log('sync done in ${total.elapsedMilliseconds} ms');
@@ -399,7 +398,7 @@ class SessionSyncOrchestrator {
     return SyncResult(
       status:
           sessionRefreshed ? SyncStatus.reauthenticated : SyncStatus.success,
-      subjectsUpdated: records.length,
+      subjectsUpdated: subjectsUpdated,
       sessionWasRefreshed: sessionRefreshed,
     );
   }
@@ -415,15 +414,21 @@ class SessionSyncOrchestrator {
         (cookies != null && cookies.isNotEmpty);
   }
 
-  /// When attendance was last saved for [email], or null if never.
+  /// When [email]'s data was last synced (the newer of the Academia profile
+  /// and the Student Portal attendance), or null if never.
   Future<DateTime?> lastSyncedAt(String email) async {
-    final ms = await _db.lastAttendanceUpdate(email);
-    return ms == null ? null : DateTime.fromMillisecondsSinceEpoch(ms);
+    final (attendanceMs, profile) = await (
+      _db.lastAttendanceUpdate(email),
+      _db.getStudentProfile(email),
+    ).wait;
+    final profileMs = profile?.cachedAt ?? 0;
+    final ms = [attendanceMs ?? 0, profileMs].reduce((a, b) => a > b ? a : b);
+    return ms == 0 ? null : DateTime.fromMillisecondsSinceEpoch(ms);
   }
 
   /// Signs in to the Student Portal (solving its CAPTCHA on-device, asking
-  /// [onSpCaptcha] only if that fails), merges its attendance into the cached
-  /// Academia records and stores its internal marks. Never throws.
+  /// [onSpCaptcha] only if that fails), saves its attendance with each
+  /// course's Academia details and stores its internal marks. Never throws.
   ///
   /// With [required] false a saved Student Portal session is reused even
   /// when no password is stored.
@@ -445,11 +450,11 @@ class SessionSyncOrchestrator {
         return const SpConnectResult(
             false, 'Add your Student Portal password first.');
       }
-      // Merge into the Academia attendance of a sync that is still running.
+      // Use the course details of an Academia sync that is still running.
       await _inflight?.catchError((Object _) => _error(''));
-      final cached = await _cachedAttendance(email);
-      if (cached.isNotEmpty && spRecords.isNotEmpty) {
-        await _persistAttendance(email, reconcileAttendance(cached, spRecords));
+      if (spRecords.isNotEmpty) {
+        await _persistAttendance(
+            email, withCourseDetails(spRecords, await _courseDetails(email)));
       }
       _log('student portal connected in ${sw.elapsedMilliseconds} ms');
       return SpConnectResult(
@@ -472,21 +477,49 @@ class SessionSyncOrchestrator {
     }
   }
 
-  /// The saved attendance, as reconcile inputs.
-  Future<List<AttendanceInput>> _cachedAttendance(String email) async => [
-        for (final c in await _db.watchAttendanceRecords(email).first)
-          AttendanceInput(
-            courseCode: c.courseCode,
-            courseTitle: c.courseTitle,
-            hoursConducted: c.hoursConducted,
-            hoursAbsent: c.hoursAbsent,
-            attendancePct: c.attendancePct,
-            category: c.category,
-            facultyName: c.facultyName,
-            slot: c.slot,
-            roomNo: c.roomNo,
+  /// Course details from this run's latest Academia sync, by [_courseKey].
+  Map<String, AttendanceInput> _courseDetailsFromSync = const {};
+
+  static String _courseKey(AttendanceInput c) =>
+      c.courseCode.trim().toUpperCase();
+
+  /// Each course's details (title, category, faculty, slot, room) by
+  /// [_courseKey]: the saved attendance rows, overridden by the cached
+  /// timetable course list, overridden by this run's Academia sync.
+  Future<Map<String, AttendanceInput>> _courseDetails(String email) async {
+    final (saved, timetable) = await (
+      _db.watchAttendanceRecords(email).first,
+      _db.getTimetable(email),
+    ).wait;
+    return {
+      for (final c in saved)
+        c.courseCode.trim().toUpperCase(): AttendanceInput(
+          courseCode: c.courseCode,
+          courseTitle: c.courseTitle,
+          hoursConducted: 0,
+          hoursAbsent: 0,
+          attendancePct: 0,
+          category: c.category,
+          facultyName: c.facultyName,
+          slot: c.slot,
+          roomNo: c.roomNo,
+        ),
+      for (final c in TimetableSchedule.parseCourses(timetable?.coursesJson))
+        if ((c['courseCode']?.toString().trim() ?? '').isNotEmpty)
+          c['courseCode'].toString().trim().toUpperCase(): AttendanceInput(
+            courseCode: c['courseCode'].toString().trim(),
+            courseTitle: c['courseTitle']?.toString() ?? '',
+            hoursConducted: 0,
+            hoursAbsent: 0,
+            attendancePct: 0,
+            category: c['category']?.toString() ?? '',
+            facultyName: c['facultyName']?.toString() ?? '',
+            slot: c['slot']?.toString() ?? '',
+            roomNo: c['roomNo']?.toString() ?? '',
           ),
-      ];
+      ..._courseDetailsFromSync,
+    };
+  }
 
   /// Replaces the cached attendance and runs the snapshot and notification
   /// rules for it.
@@ -506,7 +539,7 @@ class SessionSyncOrchestrator {
           hoursConducted: drift.Value(r.hoursConducted),
           hoursAbsent: drift.Value(r.hoursAbsent),
           attendancePct: drift.Value(r.attendancePct),
-          source: const drift.Value('academia'),
+          source: const drift.Value('student_portal'),
           updatedAt: drift.Value(now),
         );
       }).toList();
@@ -775,38 +808,30 @@ class SessionSyncOrchestrator {
     return spRecords;
   }
 
-  /// Layer 4: Reconciles records between Academia and Student Portal.
-  /// If Student Portal reports higher hoursConducted for a courseCode, uses SP data.
-  List<AttendanceInput> reconcileAttendance(
-    List<AttendanceInput> academiaRecords,
+  /// Layer 4: the Student Portal's attendance [spRecords] (the only source
+  /// of hours) with each course's title, category, faculty, slot and room
+  /// from Academia's [details], keyed by upper-case course code.
+  static List<AttendanceInput> withCourseDetails(
     List<AttendanceInput> spRecords,
+    Map<String, AttendanceInput> details,
   ) {
-    final spMap = {for (var r in spRecords) r.courseCode.toUpperCase(): r};
-    final merged = <AttendanceInput>[];
-
-    for (final acad in academiaRecords) {
-      final sp = spMap[acad.courseCode.toUpperCase()];
-      if (sp != null && sp.hoursConducted > acad.hoursConducted) {
-        // Student Portal has newer attendance counts
-        merged.add(
+    return [
+      for (final sp in spRecords)
+        if (details[sp.courseCode.trim().toUpperCase()] case final d?)
           AttendanceInput(
-            courseCode: acad.courseCode,
+            courseCode: sp.courseCode,
             courseTitle:
-                acad.courseTitle.isNotEmpty ? acad.courseTitle : sp.courseTitle,
+                d.courseTitle.isNotEmpty ? d.courseTitle : sp.courseTitle,
             hoursConducted: sp.hoursConducted,
             hoursAbsent: sp.hoursAbsent,
             attendancePct: sp.attendancePct,
-            category: acad.category,
-            facultyName: acad.facultyName,
-            slot: acad.slot,
-            roomNo: acad.roomNo,
-          ),
-        );
-      } else {
-        merged.add(acad);
-      }
-    }
-
-    return merged;
+            category: d.category,
+            facultyName: d.facultyName,
+            slot: d.slot,
+            roomNo: d.roomNo,
+          )
+        else
+          sp,
+    ];
   }
 }

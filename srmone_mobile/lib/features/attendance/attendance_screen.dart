@@ -100,7 +100,9 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> {
                           ),
                           const SizedBox(height: 8),
                           const Text(
-                            'Pull down to refresh from portal',
+                            'Attendance comes from the Student Portal.\n'
+                            'Pull down to refresh once it is connected.',
+                            textAlign: TextAlign.center,
                             style: TextStyle(fontSize: 12, color: Colors.grey),
                           ),
                         ],

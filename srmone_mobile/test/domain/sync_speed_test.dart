@@ -15,6 +15,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:srmone_mobile/core/database/app_database.dart';
 import 'package:srmone_mobile/core/network/simple_cookie_jar.dart';
 import 'package:srmone_mobile/core/security/secure_vault_service.dart';
+import 'package:srmone_mobile/domain/services/attendance_planner_math.dart';
 import 'package:srmone_mobile/domain/services/notification_rule_engine.dart';
 import 'package:srmone_mobile/domain/services/session_sync_orchestrator.dart';
 
@@ -75,6 +76,7 @@ class _MemoryVault extends SecureVaultService {
   @override
   Future<void> saveAcademiaCookies(String cookiesJson) async =>
       values['cookies'] = cookiesJson;
+
   /// Whether the Student Portal counts as set up.
   bool spConfigured = false;
 
@@ -138,13 +140,14 @@ void main() {
 
   tearDown(() => db.close());
 
-  test('saves attendance and profile before the timetable grid arrives',
-      () async {
+  test('saves the profile before the timetable grid arrives', () async {
     final result = await orchestrator.syncAll(
         includeStudentPortal: false, waitForDetails: false);
 
     expect(result.status, SyncStatus.success);
-    expect(await db.watchAttendanceRecords(_email).first, hasLength(1));
+    // Attendance comes only from the Student Portal, even when the Academia
+    // page has an attendance table.
+    expect(await db.watchAttendanceRecords(_email).first, isEmpty);
     expect((await db.getStudentProfile(_email))?.name, 'Test Student');
     expect(await db.getTimetable(_email), isNull);
     expect(orchestrator.isSyncing, isTrue);
@@ -181,7 +184,7 @@ void main() {
         hasLength(1));
   });
 
-  test('lastSyncedAt reflects the saved attendance', () async {
+  test('lastSyncedAt reflects the last Academia sync', () async {
     expect(await orchestrator.lastSyncedAt(_email), isNull);
     academia.releaseGrid.complete();
     await orchestrator.syncAll(includeStudentPortal: false);
@@ -217,8 +220,7 @@ void main() {
     expect(academia.requests, isNot(contains('Academic_Reports')));
   });
 
-  test('keeps higher Student Portal counts until the portal merge runs',
-      () async {
+  test('an Academia sync leaves the Student Portal attendance alone', () async {
     vault.spConfigured = true;
     await db.replaceAttendanceRecords(_email, [
       AttendanceCacheCompanion(
@@ -237,5 +239,47 @@ void main() {
     final saved = await db.watchAttendanceRecords(_email).first;
     expect(saved.single.hoursConducted, 24);
     expect(saved.single.hoursAbsent, 3);
+  });
+
+  test('withCourseDetails adds Academia course details to portal hours', () {
+    final merged = SessionSyncOrchestrator.withCourseDetails([
+      const AttendanceInput(
+        courseCode: '21csc101t',
+        courseTitle: 'ALGORITHMS',
+        hoursConducted: 24,
+        hoursAbsent: 3,
+        attendancePct: 87.5,
+      ),
+      const AttendanceInput(
+        courseCode: '21MAB201T',
+        courseTitle: 'Transforms',
+        hoursConducted: 10,
+        hoursAbsent: 0,
+        attendancePct: 100,
+      ),
+    ], {
+      '21CSC101T': const AttendanceInput(
+        courseCode: '21CSC101T',
+        courseTitle: 'Algorithms',
+        hoursConducted: 0,
+        hoursAbsent: 0,
+        attendancePct: 0,
+        category: 'Professional Core',
+        facultyName: 'Dr. A B (100001)',
+        slot: 'A',
+        roomNo: 'LH101',
+      ),
+    });
+
+    expect(merged, hasLength(2));
+    final first = merged.first;
+    expect(first.courseTitle, 'Algorithms');
+    expect((first.hoursConducted, first.hoursAbsent, first.attendancePct),
+        (24, 3, 87.5));
+    expect((first.facultyName, first.slot, first.roomNo, first.category),
+        ('Dr. A B (100001)', 'A', 'LH101', 'Professional Core'));
+    // A course Academia doesn't list keeps the portal's own fields.
+    expect(merged.last.courseTitle, 'Transforms');
+    expect(merged.last.hoursConducted, 10);
   });
 }

@@ -11,7 +11,6 @@ import 'package:dio/dio.dart';
 import '../../core/constants/portal_endpoints.dart';
 import '../../core/network/manual_redirect_client.dart';
 import '../../core/network/simple_cookie_jar.dart';
-import '../../domain/services/attendance_planner_math.dart';
 import 'academia_decoder.dart';
 import 'academia_parsers.dart';
 import 'zoho_login_helpers.dart';
@@ -434,14 +433,6 @@ class AcademiaClient {
   Future<AcademiaPageData> fetchAttendancePageData() => fetchParsedPage(
         PortalEndpoints.attendanceUrl,
         AcademiaParsers.parseAttendancePage,
-        refererHash: _attendanceReferer,
-      );
-
-  /// Fetches attendance records with Zoho cache-busting headers.
-  /// Throws [SessionExpiredException] if session has expired or was invalidated.
-  Future<List<AttendanceInput>> fetchAttendance() => fetchParsedPage(
-        PortalEndpoints.attendanceUrl,
-        AcademiaParsers.parseAttendance,
         refererHash: _attendanceReferer,
       );
 
