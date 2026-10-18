@@ -1,5 +1,6 @@
 // lib/features/auth/login_screen.dart
-// Native login screen with auto-append NetID, optional SP credentials,
+// Native login screen with auto-append NetID, the Student Portal password
+// (the Academia one unless switched off; attendance comes from the portal)
 // and terms of service check.
 
 import 'dart:async';
@@ -29,7 +30,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
   bool _obscurePassword = true;
   bool _obscureSpPassword = true;
-  bool _showSpField = false;
+
+  /// Whether the Student Portal password is the Academia one.
+  bool _spSamePassword = true;
   bool _acceptedTerms = false;
 
   @override
@@ -50,7 +53,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       return;
     }
 
-    final spPassword = _showSpField ? _spPasswordController.text : '';
+    final spPassword =
+        _spSamePassword ? _passwordController.text : _spPasswordController.text;
     // Captured before the await: a successful sign-in navigates away and
     // disposes this screen.
     final spConnector = ref.read(studentPortalConnectorProvider.notifier);
@@ -220,33 +224,28 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   ),
                   const SizedBox(height: 14),
 
-                  // Student Portal Optional Toggle
-                  GestureDetector(
-                    onTap: () => setState(() => _showSpField = !_showSpField),
-                    child: Row(
-                      children: [
-                        Icon(
-                          _showSpField
-                              ? Icons.keyboard_arrow_up
-                              : Icons.keyboard_arrow_down,
-                          color: const Color(0xFFBDE3D5),
-                          size: 20,
-                        ),
-                        const SizedBox(width: 4),
-                        const Text(
-                          'Add Student Portal (Optional for dual sync)',
-                          style: TextStyle(
-                              color: Color(0xFFBDE3D5),
-                              fontSize: 13,
-                              fontWeight: FontWeight.w500),
-                        ),
-                      ],
+                  // Student Portal password: attendance comes from the portal,
+                  // so it always connects. Usually the same as Academia's.
+                  SwitchListTile.adaptive(
+                    key: const ValueKey('sp-same-password'),
+                    contentPadding: EdgeInsets.zero,
+                    dense: true,
+                    value: _spSamePassword,
+                    activeColor: const Color(0xFFBDE3D5),
+                    onChanged: (v) => setState(() => _spSamePassword = v),
+                    title: const Text(
+                      'Student Portal uses the same password',
+                      style: TextStyle(
+                          color: Color(0xFFBDE3D5),
+                          fontSize: 13,
+                          fontWeight: FontWeight.w500),
                     ),
                   ),
 
-                  if (_showSpField) ...[
-                    const SizedBox(height: 12),
+                  if (!_spSamePassword) ...[
+                    const SizedBox(height: 8),
                     TextFormField(
+                      key: const ValueKey('sp-password'),
                       controller: _spPasswordController,
                       obscureText: _obscureSpPassword,
                       style: const TextStyle(color: Colors.white),
@@ -273,6 +272,12 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                           borderSide: BorderSide.none,
                         ),
                       ),
+                      validator: (v) {
+                        if (v == null || v.isEmpty) {
+                          return 'Enter your Student Portal password';
+                        }
+                        return null;
+                      },
                     ),
                   ],
 

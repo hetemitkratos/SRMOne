@@ -390,6 +390,8 @@ class SessionSyncOrchestrator {
         await _persistAttendance(
             email, withCourseDetails(spRecords, await _courseDetails(email)));
         subjectsUpdated = spRecords.length;
+        _log('student portal attendance saved in '
+            '${total.elapsedMilliseconds} ms');
       }
     }
     details.complete(detailsWork);
@@ -455,6 +457,7 @@ class SessionSyncOrchestrator {
       if (spRecords.isNotEmpty) {
         await _persistAttendance(
             email, withCourseDetails(spRecords, await _courseDetails(email)));
+        _log('student portal attendance saved in ${sw.elapsedMilliseconds} ms');
       }
       _log('student portal connected in ${sw.elapsedMilliseconds} ms');
       return SpConnectResult(
@@ -778,6 +781,25 @@ class SessionSyncOrchestrator {
 
     await _vault.saveSpCookies(jar.toJson());
 
+    // The attendance is returned (and saved) without waiting for the marks
+    // page; the marks follow in the background.
+    _spMarks = _syncSpMarks(email, client);
+    return spRecords;
+  }
+
+  /// The Student Portal marks download started by the latest portal sync.
+  Future<void> _spMarks = Future.value();
+
+  /// Completes when the latest Student Portal marks download has finished
+  /// (it never throws). Background syncs wait for it before closing the
+  /// database.
+  Future<void> get spMarksDone => _spMarks;
+
+  /// Stores the Student Portal internal marks as a synthetic "Total
+  /// (Internal)" test (Bug Fix #6). Optional: a failure is logged and the
+  /// cached marks are kept.
+  Future<void> _syncSpMarks(String email, SPClient client) async {
+    final sw = Stopwatch()..start();
     try {
       final spMarks = await client.fetchInternalMarks(prime: false);
       if (spMarks.isNotEmpty) {
@@ -801,11 +823,11 @@ class SessionSyncOrchestrator {
             ),
         ]);
       }
-    } catch (_) {
-      // SP marks are optional.
+      _log('student portal marks ok in ${sw.elapsedMilliseconds} ms');
+    } catch (e) {
+      _log('student portal marks skipped after ${sw.elapsedMilliseconds} '
+          'ms: ${e.runtimeType}');
     }
-
-    return spRecords;
   }
 
   /// Layer 4: the Student Portal's attendance [spRecords] (the only source
