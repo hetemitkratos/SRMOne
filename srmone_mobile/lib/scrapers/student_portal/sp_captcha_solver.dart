@@ -36,24 +36,25 @@ class SpCaptchaSolver {
   static Future<bool> _load() async {
     final sw = Stopwatch()..start();
     try {
-      // The worker reads the 54 MB model from the asset bundle itself, so it
-      // never passes through this isolate. Without a root token (not a
-      // Flutter root isolate) it is loaded here and handed over.
-      final token = RootIsolateToken.instance;
-      final model = token == null
-          ? TransferableTypedData.fromList([
-              (await rootBundle.load(AssetPaths.ddddocrOnnx))
-                  .buffer
-                  .asUint8List()
-            ])
-          : null;
+      // Assets can only be read on the root isolate: rootBundle needs the
+      // Flutter binding, and the engine doesn't answer flutter/assets
+      // requests sent through a BackgroundIsolateBinaryMessenger. The model
+      // is read here (the engine loads it off the UI thread) and moved to
+      // the worker without a copy; building the session runs there.
+      final charsetJson =
+          await rootBundle.loadString(AssetPaths.ddddocrCharset);
+      final model = TransferableTypedData.fromList([
+        (await rootBundle.load(AssetPaths.ddddocrOnnx)).buffer.asUint8List()
+      ]);
       final ready = ReceivePort();
       await Isolate.spawn(
         _workerMain,
-        (ready.sendPort, token, model),
+        (ready.sendPort, model, charsetJson),
         debugName: 'sp-captcha',
       );
-      final reply = await ready.first;
+      // A worker that dies before answering must not hang sign-in.
+      final reply = await ready.first
+          .timeout(const Duration(seconds: 60), onTimeout: () => 'timed out');
       ready.close();
       if (reply is! SendPort) {
         _log('model load failed: $reply');
@@ -91,24 +92,17 @@ class SpCaptchaSolver {
 
   /// Builds the session, reports its [SendPort] (or the error) and then
   /// answers `(replyPort, imageBytes)` requests with the decoded text.
-  static Future<void> _workerMain(
-      (SendPort, RootIsolateToken?, TransferableTypedData?) args) async {
-    final (ready, token, modelData) = args;
+  static void _workerMain((SendPort, TransferableTypedData, String) args) {
+    final (ready, modelData, charsetJson) = args;
     final OrtSession session;
     final List<String> charset;
     try {
-      if (token != null) {
-        BackgroundIsolateBinaryMessenger.ensureInitialized(token);
-      }
-      final model = modelData?.materialize().asUint8List() ??
-          (await rootBundle.load(AssetPaths.ddddocrOnnx)).buffer.asUint8List();
-      charset =
-          (jsonDecode(await rootBundle.loadString(AssetPaths.ddddocrCharset))
-                  as List<dynamic>)
-              .map((e) => e.toString())
-              .toList();
+      charset = (jsonDecode(charsetJson) as List<dynamic>)
+          .map((e) => e.toString())
+          .toList();
       OrtEnv.instance.init();
-      session = OrtSession.fromBuffer(model, OrtSessionOptions());
+      session = OrtSession.fromBuffer(
+          modelData.materialize().asUint8List(), OrtSessionOptions());
     } catch (e) {
       ready.send('$e');
       return;
