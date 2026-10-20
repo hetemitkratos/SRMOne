@@ -35,6 +35,11 @@ class AttendanceTrendChart extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = SrmColors.of(context);
+    // A day saved before any hours were known reads as 0%; skip it.
+    final snapshots = [
+      for (final s in this.snapshots)
+        if (s.totalClasses > 0) s,
+    ];
 
     final header = SectionTitle(
       'Attendance Trend',
@@ -164,7 +169,7 @@ class AttendanceTrendChart extends StatelessWidget {
                       dashArray: [5, 5],
                       label: HorizontalLineLabel(
                         show: true,
-                        alignment: Alignment.topRight,
+                        alignment: Alignment.bottomRight,
                         style: const TextStyle(
                           color: _thresholdColor,
                           fontSize: 10,

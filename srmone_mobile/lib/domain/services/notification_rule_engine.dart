@@ -44,7 +44,9 @@ class NotificationRuleEngine {
     String academiaEmail,
     List<AttendanceInput> records,
   ) async {
-    if (records.isEmpty) return;
+    // Rows with no hours yet (Academia courses before the portal fills
+    // them in) would record a meaningless 0% day.
+    if (records.every((r) => r.hoursConducted <= 0)) return;
 
     final summary = computeAttendanceSummary(records);
     final todayKey = CalendarDayResolver.localDateKey(DateTime.now());
