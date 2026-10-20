@@ -130,6 +130,9 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
         side: BorderSide(color: theme.dividerColor.withAlpha(40)),
       ),
       child: ExpansionTile(
+        // Its own storage slot for the expanded flag; without it the tile
+        // reads the list's saved scroll offset and crashes on a type cast.
+        key: PageStorageKey('calendar-$_selectedSemester-$monthName'),
         initiallyExpanded: expanded,
         tilePadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         leading: CircleAvatar(
@@ -149,16 +152,18 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
           style: theme.textTheme.bodySmall?.copyWith(color: Colors.grey),
         ),
         children: [
-          ListView.separated(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
+          // A plain column: a nested list would share the tile's storage
+          // slot and read its expanded flag as a scroll offset.
+          Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-            itemCount: days.length,
-            separatorBuilder: (_, __) => const Divider(height: 1),
-            itemBuilder: (context, dayIdx) {
-              final d = days[dayIdx] as Map<String, dynamic>;
-              return _buildDayRow(theme, d);
-            },
+            child: Column(
+              children: [
+                for (var i = 0; i < days.length; i++) ...[
+                  if (i > 0) const Divider(height: 1),
+                  _buildDayRow(theme, days[i] as Map<String, dynamic>),
+                ],
+              ],
+            ),
           ),
         ],
       ),
