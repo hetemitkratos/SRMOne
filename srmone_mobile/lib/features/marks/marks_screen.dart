@@ -12,6 +12,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../../core/constants/asset_paths.dart';
 import '../../core/database/app_database.dart';
 import '../../core/theme/app_theme.dart';
+import '../../domain/services/day_timeline.dart';
 import '../../domain/services/session_sync_orchestrator.dart';
 import '../auth/auth_controller.dart';
 import '../shared/app_refresher.dart';
@@ -125,15 +126,13 @@ class MarksScreen extends ConsumerWidget {
       body: RefreshIndicator(
         onRefresh: () => ref.read(appRefresherProvider).refresh(),
         child: ListView(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
-          children: [
-            const HeroBanner(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+          children: staggeredEntrance(context, [
+            const PageHeader(
               title: 'Marks',
-              subtitle:
-                  'Review your test scores and track your internal marks.',
-              illustration: AssetPaths.success,
+              subtitle: 'Internal marks for this semester',
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 12),
             const SyncSectionNotice(
               sections: [SyncSection.marks, SyncSection.studentPortalMarks],
               what: 'marks',
@@ -177,7 +176,7 @@ class MarksScreen extends ConsumerWidget {
                   child: _CourseMarksCard(course: course),
                 ),
             ],
-          ],
+          ]),
         ),
       ),
     );
@@ -255,9 +254,9 @@ class _CourseMarksCardState extends State<_CourseMarksCard> {
                   ),
                   const SizedBox(height: 10),
                   Text(
-                    course.courseTitle.isNotEmpty
+                    tidyTitle(course.courseTitle.isNotEmpty
                         ? course.courseTitle
-                        : course.courseCode,
+                        : course.courseCode),
                     style: TextStyle(
                       fontWeight: FontWeight.w700,
                       fontSize: 17,
@@ -282,6 +281,12 @@ class _CourseMarksCardState extends State<_CourseMarksCard> {
                           ),
                         ),
                         _score(c, _fmt(total.scored), _fmt(total.max), 26),
+                        const SizedBox(width: 8),
+                        SoftPill(
+                          label: '${(total.scored / total.max * 100).round()}%',
+                          background: SrmPalette.mint,
+                          foreground: SrmPalette.ink,
+                        ),
                       ],
                     ),
                     const SizedBox(height: 8),

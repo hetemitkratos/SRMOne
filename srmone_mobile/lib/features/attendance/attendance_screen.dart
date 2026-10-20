@@ -51,26 +51,25 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> {
       body: RefreshIndicator(
         onRefresh: () => ref.read(appRefresherProvider).refresh(),
         child: ListView(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
-          children: [
-            HeroBanner(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+          children: staggeredEntrance(context, [
+            PageHeader(
               title: 'Attendance',
-              subtitle:
-                  'Keep track of your classes, stay above 75%, and manage your absences.',
-              illustration: AssetPaths.calendar,
-              action: records.isEmpty
-                  ? null
-                  : HeroPillButton(
-                      label: _showPlanner ? 'Hide planner' : 'Plan absences',
-                      icon: _showPlanner
-                          ? LucideIcons.chevronUp
-                          : LucideIcons.calculator,
-                      light: true,
-                      onPressed: () =>
-                          setState(() => _showPlanner = !_showPlanner),
-                    ),
+              subtitle: 'Stay above 75% in every course',
+              actions: [
+                if (records.isNotEmpty)
+                  HeaderAction(
+                    label: _showPlanner ? 'Hide plan' : 'Plan',
+                    icon: _showPlanner
+                        ? LucideIcons.chevronUp
+                        : LucideIcons.calculator,
+                    filled: !_showPlanner,
+                    onPressed: () =>
+                        setState(() => _showPlanner = !_showPlanner),
+                  ),
+              ],
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 12),
             const SyncSectionNotice(
               sections: [SyncSection.attendance],
               what: 'attendance',
@@ -116,7 +115,7 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> {
                   child: _SubjectCard(item: r),
                 ),
             ],
-          ],
+          ]),
         ),
       ),
     );

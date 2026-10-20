@@ -15,6 +15,7 @@ import '../../core/theme/app_theme.dart';
 import '../../domain/services/attendance_planner_math.dart';
 import '../../domain/services/calendar_day_resolver.dart';
 import '../../domain/services/current_class_detector.dart';
+import '../../domain/services/day_timeline.dart';
 import '../../domain/services/session_sync_orchestrator.dart';
 import '../../domain/services/timetable_schedule.dart';
 import '../auth/auth_controller.dart';
@@ -58,7 +59,7 @@ class _OverviewScreenState extends ConsumerState<OverviewScreen> {
         onRefresh: () => ref.read(appRefresherProvider).refresh(),
         child: ListView(
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
-          children: [
+          children: staggeredEntrance(context, [
             _hero(context, profile),
             const SizedBox(height: 16),
             const SyncSectionNotice(
@@ -73,7 +74,7 @@ class _OverviewScreenState extends ConsumerState<OverviewScreen> {
             _schedulePanel(context, calMap, todayStatus, courses, now),
             const SizedBox(height: 16),
             if (records.isNotEmpty) _attendancePanel(context, records),
-          ],
+          ]),
         ),
       ),
     );
@@ -351,7 +352,9 @@ class _OverviewScreenState extends ConsumerState<OverviewScreen> {
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    r.courseTitle.isNotEmpty ? r.courseTitle : r.courseCode,
+                    tidyTitle(r.courseTitle.isNotEmpty
+                        ? r.courseTitle
+                        : r.courseCode),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
@@ -530,7 +533,7 @@ class _ClassCard extends StatelessWidget {
                 ],
                 const Spacer(),
                 Text(
-                  slot.timing,
+                  formatTiming(slot.timing),
                   style: TextStyle(
                     fontWeight: FontWeight.w700,
                     fontSize: 13,
@@ -541,7 +544,9 @@ class _ClassCard extends StatelessWidget {
             ),
             const SizedBox(height: 10),
             Text(
-              slot.courseTitle.isNotEmpty ? slot.courseTitle : slot.courseCode,
+              tidyTitle(slot.courseTitle.isNotEmpty
+                  ? slot.courseTitle
+                  : slot.courseCode),
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
@@ -656,8 +661,9 @@ class _LiveClassCard extends StatelessWidget {
 
     final isLive = ongoing.isNotEmpty;
     final (slot, info) = isLive ? ongoing.first : upcoming.first;
-    final label =
-        isLive ? 'LIVE NOW' : 'UP NEXT IN ${info.minutesUntilStart ?? 0} MIN';
+    final label = isLive
+        ? 'LIVE NOW'
+        : 'NEXT ${startsIn(info.minutesUntilStart ?? 0, info.startMinutes).toUpperCase()}';
 
     return SrmPanel(
       color: isLive ? SrmPalette.mint : c.card,
@@ -676,7 +682,7 @@ class _LiveClassCard extends StatelessWidget {
               ),
               const Spacer(),
               Text(
-                slot.timing,
+                formatTiming(slot.timing),
                 style: TextStyle(
                   fontWeight: FontWeight.w700,
                   fontSize: 13,
@@ -687,7 +693,9 @@ class _LiveClassCard extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           Text(
-            slot.courseTitle.isNotEmpty ? slot.courseTitle : slot.courseCode,
+            tidyTitle(slot.courseTitle.isNotEmpty
+                ? slot.courseTitle
+                : slot.courseCode),
             style: TextStyle(
               fontFamily: SrmFonts.display,
               fontWeight: FontWeight.w700,

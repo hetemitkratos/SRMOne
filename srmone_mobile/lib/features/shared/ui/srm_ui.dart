@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
+import 'package:flutter_animate/flutter_animate.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../../domain/services/session_sync_orchestrator.dart';
@@ -367,7 +368,7 @@ class PastelStatCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final fg = onDark ? Colors.white : SrmPalette.ink;
     return Container(
-      padding: const EdgeInsets.all(18),
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
       decoration: BoxDecoration(
         color: color,
         borderRadius: BorderRadius.circular(SrmRadii.card),
@@ -401,7 +402,7 @@ class PastelStatCard extends StatelessWidget {
                 ),
             ],
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 6),
           Text.rich(
             TextSpan(children: [
               TextSpan(
@@ -409,7 +410,7 @@ class PastelStatCard extends StatelessWidget {
                 style: TextStyle(
                   fontFamily: SrmFonts.display,
                   fontWeight: FontWeight.w700,
-                  fontSize: 36,
+                  fontSize: 32,
                   height: 1,
                   color: fg,
                 ),
@@ -613,4 +614,202 @@ class SyncSectionNotice extends ConsumerWidget {
     if (d.inHours < 24) return '${d.inHours} h ago';
     return '${d.inDays} d ago';
   }
+}
+
+/// A compact page title for the inner tabs: Space Grotesk title, one muted
+/// line under it, and the page's actions on the right.
+class PageHeader extends StatelessWidget {
+  final String title;
+  final String? subtitle;
+  final List<Widget> actions;
+
+  const PageHeader({
+    super.key,
+    required this.title,
+    this.subtitle,
+    this.actions = const [],
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final c = SrmColors.of(context);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(4, 4, 0, 4),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Semantics(
+                  header: true,
+                  child: Text(
+                    title,
+                    style: TextStyle(
+                      fontFamily: SrmFonts.display,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 28,
+                      height: 1.1,
+                      letterSpacing: -0.6,
+                      color: c.text,
+                    ),
+                  ),
+                ),
+                if (subtitle != null && subtitle!.isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    subtitle!,
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
+                      color: c.muted,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          for (final a in actions) ...[const SizedBox(width: 8), a],
+        ],
+      ),
+    );
+  }
+}
+
+/// A small pill action for a [PageHeader], such as "Share".
+class HeaderAction extends StatelessWidget {
+  final String label;
+  final IconData icon;
+  final VoidCallback? onPressed;
+
+  /// Black (primary) or outlined.
+  final bool filled;
+
+  const HeaderAction({
+    super.key,
+    required this.label,
+    required this.icon,
+    required this.onPressed,
+    this.filled = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final c = SrmColors.of(context);
+    final fg = filled ? c.onHero : c.text;
+    return Material(
+      color: filled ? c.hero : c.card,
+      shape: StadiumBorder(
+          side: filled ? BorderSide.none : BorderSide(color: c.border)),
+      child: InkWell(
+        customBorder: const StadiumBorder(),
+        onTap: onPressed,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 44),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(icon, size: 16, color: fg),
+                const SizedBox(width: 6),
+                Text(
+                  label,
+                  style: TextStyle(
+                      fontWeight: FontWeight.w700, fontSize: 13, color: fg),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// A two-or-more option pill switch on a light track (Odd/Even semester).
+class PillToggle<T> extends StatelessWidget {
+  final List<(T, String)> options;
+  final T value;
+  final ValueChanged<T> onChanged;
+
+  const PillToggle({
+    super.key,
+    required this.options,
+    required this.value,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final c = SrmColors.of(context);
+    return Container(
+      padding: const EdgeInsets.all(3),
+      decoration: BoxDecoration(
+        color: c.card,
+        borderRadius: BorderRadius.circular(99),
+        border: Border.all(color: c.border),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          for (final (v, label) in options)
+            Semantics(
+              button: true,
+              selected: v == value,
+              child: GestureDetector(
+                onTap: () => onChanged(v),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 180),
+                  constraints: const BoxConstraints(minHeight: 38),
+                  alignment: Alignment.center,
+                  padding: const EdgeInsets.symmetric(horizontal: 14),
+                  decoration: BoxDecoration(
+                    color: v == value ? c.hero : Colors.transparent,
+                    borderRadius: BorderRadius.circular(99),
+                  ),
+                  child: Text(
+                    label,
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: v == value ? c.onHero : c.muted,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Course colours, as soft pastels that keep dark text readable; index
+/// courses in timetable order so a course keeps its colour everywhere.
+const courseColors = [
+  SrmPalette.mint,
+  SrmPalette.lavender,
+  SrmPalette.beige,
+  Color(0xFFF4CDBE), // soft terracotta
+  Color(0xFFCFE0EE), // soft blue
+  Color(0xFFEFE3B0), // soft yellow
+];
+
+/// The colour for the course at [index] in the timetable.
+Color courseColorAt(int index) => courseColors[index % courseColors.length];
+
+/// Fades and slides [children] in one after another when a screen first
+/// opens, like the web app's entrance animation. Does nothing when the
+/// system asks for reduced motion.
+List<Widget> staggeredEntrance(BuildContext context, List<Widget> children) {
+  if (MediaQuery.disableAnimationsOf(context)) return children;
+  return [
+    for (final (i, w) in children.indexed)
+      w
+          .animate(delay: Duration(milliseconds: 40 * i.clamp(0, 8)))
+          .fadeIn(duration: 320.ms, curve: Curves.easeOut)
+          .slideY(begin: 0.04, end: 0, duration: 320.ms, curve: Curves.easeOut),
+  ];
 }

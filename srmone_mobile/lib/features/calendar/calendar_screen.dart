@@ -11,7 +11,9 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../../core/constants/asset_paths.dart';
 import '../../core/theme/app_theme.dart';
 import '../../domain/services/calendar_day_resolver.dart';
+import '../../domain/services/day_timeline.dart';
 import '../../domain/services/session_sync_orchestrator.dart';
+import '../../domain/services/timetable_schedule.dart';
 import '../auth/auth_controller.dart';
 import '../shared/app_refresher.dart';
 import '../shared/cached_data_providers.dart';
@@ -55,21 +57,23 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
         onRefresh: () =>
             ref.read(appRefresherProvider).refresh(waitForDetails: true),
         child: ListView(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
-          children: [
-            HeroBanner(
-              title: 'Academic Calendar',
-              subtitle: 'Semester events, holidays and day orders.',
-              illustration: AssetPaths.eventsCalendar,
-              action: _SemesterToggle(
-                value: _selectedSemester,
-                onChanged: (s) => setState(() {
-                  _selectedSemester = s;
-                  _monthIdx = null;
-                }),
-              ),
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+          children: staggeredEntrance(context, [
+            PageHeader(
+              title: 'Calendar',
+              subtitle: 'Day orders, events and holidays',
+              actions: [
+                PillToggle<String>(
+                  options: const [('odd', 'Odd'), ('even', 'Even')],
+                  value: _selectedSemester,
+                  onChanged: (s) => setState(() {
+                    _selectedSemester = s;
+                    _monthIdx = null;
+                  }),
+                ),
+              ],
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 12),
             const SyncSectionNotice(
               sections: [SyncSection.calendar],
               what: 'the calendar',
@@ -95,60 +99,8 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
               const SizedBox(height: 16),
               _EventsPanel(month: months[idx]),
             ],
-          ],
+          ]),
         ),
-      ),
-    );
-  }
-}
-
-/// The "Odd Sem / Even Sem" switch on the hero (`bg-white/10` track).
-class _SemesterToggle extends StatelessWidget {
-  final String value;
-  final ValueChanged<String> onChanged;
-
-  const _SemesterToggle({required this.value, required this.onChanged});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(4),
-      decoration: BoxDecoration(
-        color: Colors.white.withAlpha(26),
-        borderRadius: BorderRadius.circular(99),
-        border: Border.all(color: Colors.white.withAlpha(51)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          for (final s in const ['odd', 'even'])
-            Semantics(
-              button: true,
-              selected: s == value,
-              child: GestureDetector(
-                onTap: () => onChanged(s),
-                child: Container(
-                  constraints: const BoxConstraints(minHeight: 36),
-                  alignment: Alignment.center,
-                  padding: const EdgeInsets.symmetric(horizontal: 14),
-                  decoration: BoxDecoration(
-                    color: s == value ? Colors.white : Colors.transparent,
-                    borderRadius: BorderRadius.circular(99),
-                  ),
-                  child: Text(
-                    s == 'odd' ? 'Odd Sem' : 'Even Sem',
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w700,
-                      color: s == value
-                          ? SrmPalette.ink
-                          : Colors.white.withAlpha(178),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-        ],
       ),
     );
   }
@@ -419,49 +371,57 @@ class _DayCell extends StatelessWidget {
 
     return Semantics(
       label: label,
+      button: true,
       child: ExcludeSemantics(
-        child: Container(
-          decoration: BoxDecoration(
-            color: bg,
-            borderRadius: BorderRadius.circular(12),
-            border: border,
+        child: GestureDetector(
+          onTap: () => showModalBottomSheet<void>(
+            context: context,
+            showDragHandle: true,
+            builder: (_) => _DaySheet(day: day),
           ),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Text(
-                '${day.dayNum}',
-                style: TextStyle(
-                  fontWeight: FontWeight.w700,
-                  fontSize: 14,
-                  height: 1.1,
-                  color: fg,
-                ),
-              ),
-              const SizedBox(height: 3),
-              if (hasEvent && !day.isHoliday)
-                Container(
-                  width: 5,
-                  height: 5,
-                  decoration: BoxDecoration(
-                    color: today ? c.onHero : SrmPalette.terracotta,
-                    shape: BoxShape.circle,
-                  ),
-                )
-              else
+          child: Container(
+            decoration: BoxDecoration(
+              color: bg,
+              borderRadius: BorderRadius.circular(12),
+              border: border,
+            ),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
                 Text(
-                  day.isHoliday
-                      ? 'HOL'
-                      : day.dayOrder != null
-                          ? 'D${day.dayOrder}'
-                          : '',
+                  '${day.dayNum}',
                   style: TextStyle(
-                    fontSize: 9,
                     fontWeight: FontWeight.w700,
-                    color: fg.withAlpha(150),
+                    fontSize: 14,
+                    height: 1.1,
+                    color: fg,
                   ),
                 ),
-            ],
+                const SizedBox(height: 3),
+                if (hasEvent && !day.isHoliday)
+                  Container(
+                    width: 5,
+                    height: 5,
+                    decoration: BoxDecoration(
+                      color: today ? c.onHero : SrmPalette.terracotta,
+                      shape: BoxShape.circle,
+                    ),
+                  )
+                else
+                  Text(
+                    day.isHoliday
+                        ? 'HOL'
+                        : day.dayOrder != null
+                            ? 'D${day.dayOrder}'
+                            : '',
+                    style: TextStyle(
+                      fontSize: 9,
+                      fontWeight: FontWeight.w700,
+                      color: fg.withAlpha(150),
+                    ),
+                  ),
+              ],
+            ),
           ),
         ),
       ),
@@ -616,4 +576,147 @@ bool isCurrentMonth(String header, [DateTime? now]) {
   return month != null &&
       month.year == today.year &&
       month.month == today.month;
+}
+
+/// A day's details: weekday, day order, event, and that day order's classes.
+class _DaySheet extends ConsumerWidget {
+  final _Day day;
+  const _DaySheet({required this.day});
+
+  static const _months = [
+    'January',
+    'February',
+    'March',
+    'April',
+    'May',
+    'June',
+    'July',
+    'August',
+    'September',
+    'October',
+    'November',
+    'December',
+  ];
+  static const _weekdays = [
+    'Monday',
+    'Tuesday',
+    'Wednesday',
+    'Thursday',
+    'Friday',
+    'Saturday',
+    'Sunday',
+  ];
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final c = SrmColors.of(context);
+    final d = day.date;
+    final heading = d == null
+        ? '${day.dayNum}'
+        : '${_weekdays[d.weekday - 1]}, ${d.day} ${_months[d.month - 1]}';
+    final order = day.dayOrder;
+    final blocks = order == null || day.isHoliday
+        ? const <ClassBlock>[]
+        : buildDayTimeline(TimetableSchedule.slotsForDay(
+                ref.watch(timetableCoursesProvider), 'Day $order'))
+            .whereType<ClassBlock>()
+            .toList();
+
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(24, 0, 24, 20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              heading,
+              style: TextStyle(
+                fontFamily: SrmFonts.display,
+                fontWeight: FontWeight.w700,
+                fontSize: 22,
+                color: c.text,
+              ),
+            ),
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: [
+                if (day.isToday)
+                  SoftPill(
+                    label: 'TODAY',
+                    background: SrmPalette.terracotta.withAlpha(26),
+                    foreground: SrmPalette.terracottaText,
+                  ),
+                if (day.isHoliday)
+                  SoftPill(
+                    label: 'HOLIDAY',
+                    icon: LucideIcons.sun,
+                    background: SrmPalette.terracotta.withAlpha(36),
+                    foreground: SrmPalette.terracottaText,
+                  )
+                else if (order != null)
+                  SoftPill(
+                    label: 'DAY ORDER $order',
+                    background: c.hero,
+                    foreground: c.onHero,
+                  )
+                else
+                  SoftPill(
+                    label: 'NO CLASSES',
+                    background: c.track,
+                    foreground: c.muted,
+                  ),
+              ],
+            ),
+            if (day.event.isNotEmpty) ...[
+              const SizedBox(height: 14),
+              Text(
+                day.event,
+                style: TextStyle(
+                    fontWeight: FontWeight.w600, fontSize: 15, color: c.text),
+              ),
+            ],
+            if (blocks.isNotEmpty) ...[
+              const SizedBox(height: 18),
+              const EyebrowLabel('Classes'),
+              const SizedBox(height: 8),
+              for (final b in blocks)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Row(
+                    children: [
+                      SizedBox(
+                        width: 70,
+                        child: Text(
+                          b.start == null ? '—' : formatClock(b.start!),
+                          style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                              color: c.muted),
+                        ),
+                      ),
+                      Expanded(
+                        child: Text(
+                          tidyTitle(b.courseTitle.isNotEmpty
+                              ? b.courseTitle
+                              : b.courseCode),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                              color: c.text),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
 }
