@@ -10,11 +10,12 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../../core/constants/asset_paths.dart';
 import '../../core/database/app_database.dart';
 import '../../domain/services/attendance_planner_math.dart';
-import '../../main.dart';
 import '../auth/auth_controller.dart';
 import '../faculty/faculty_avatar.dart';
 import 'widgets/attendance_planner_card.dart';
 import 'widgets/attendance_trend_chart.dart';
+import '../shared/app_refresher.dart';
+import '../shared/cached_data_providers.dart';
 
 class AttendanceScreen extends ConsumerStatefulWidget {
   const AttendanceScreen({super.key});
@@ -31,7 +32,6 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> {
     final theme = Theme.of(context);
     final authState = ref.watch(authControllerProvider);
     final email = authState is Authenticated ? authState.email : '';
-    final db = ref.watch(appDatabaseProvider);
 
     if (email.isEmpty) {
       return const Scaffold(
@@ -40,15 +40,14 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> {
     }
 
     return Scaffold(
-      body: StreamBuilder<List<AttendanceCacheData>>(
-        stream: db.watchAttendanceRecords(email),
-        builder: (context, snapshot) {
-          final records = snapshot.data ?? [];
+      body: Consumer(
+        builder: (context, ref, _) {
+          final snapshot = ref.watch(attendanceRecordsProvider);
+          final records = snapshot.valueOrNull ?? [];
 
           return RefreshIndicator(
             onRefresh: () async {
-              final orchestrator = ref.read(sessionSyncOrchestratorProvider);
-              await orchestrator.syncAll();
+              await ref.read(appRefresherProvider).refresh();
             },
             child: CustomScrollView(
               slivers: [
@@ -101,7 +100,9 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> {
                           ),
                           const SizedBox(height: 8),
                           const Text(
-                            'Pull down to refresh from portal',
+                            'Attendance comes from the Student Portal.\n'
+                            'Pull down to refresh once it is connected.',
+                            textAlign: TextAlign.center,
                             style: TextStyle(fontSize: 12, color: Colors.grey),
                           ),
                         ],
@@ -113,11 +114,12 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> {
                   SliverToBoxAdapter(
                     child: Padding(
                       padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-                      child: StreamBuilder<List<AttendanceSnapshot>>(
-                        stream: db.watchAttendanceSnapshots(email),
-                        builder: (context, snapSnap) {
+                      child: Consumer(
+                        builder: (context, ref, _) {
+                          final snapSnap =
+                              ref.watch(attendanceSnapshotsProvider);
                           return AttendanceTrendChart(
-                            snapshots: snapSnap.data ?? [],
+                            snapshots: snapSnap.valueOrNull ?? [],
                           );
                         },
                       ),

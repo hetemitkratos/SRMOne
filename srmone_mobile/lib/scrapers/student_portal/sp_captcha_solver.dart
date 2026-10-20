@@ -10,7 +10,9 @@
 //   resize to height 64 (Lanczos in PIL) → grayscale → /255 → [1,1,64,W]
 //   output float logits [T,1,C] → argmax per step → CTC collapse, drop blank 0
 
+import 'dart:async';
 import 'dart:convert';
+import 'dart:isolate';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:image/image.dart' as img;
@@ -18,31 +20,47 @@ import 'package:onnxruntime/onnxruntime.dart';
 import '../../core/constants/asset_paths.dart';
 
 class SpCaptchaSolver {
-  static OrtSession? _session;
-  static List<String>? _charset;
+  /// Requests to the worker isolate that owns the model, once it is up.
+  static SendPort? _worker;
   static Future<bool>? _init;
 
   /// The model's fixed input height.
   static const int inputHeight = 64;
 
-  /// Loads the ONNX model and charset once. Safe to call repeatedly and
-  /// concurrently; a failed load is not retried within the same app run.
+  /// Loads the ONNX model and charset once, in a worker isolate, so building
+  /// the session (several seconds on a phone) never freezes the UI. Safe to
+  /// call repeatedly and concurrently; a failed load is not retried within
+  /// the same app run.
   static Future<bool> init() => _init ??= _load();
 
   static Future<bool> _load() async {
     final sw = Stopwatch()..start();
     try {
-      OrtEnv.instance.init();
-
-      final charsetStr = await rootBundle.loadString(AssetPaths.ddddocrCharset);
-      _charset = (jsonDecode(charsetStr) as List<dynamic>)
-          .map((e) => e.toString())
-          .toList();
-
-      final modelData = await rootBundle.load(AssetPaths.ddddocrOnnx);
-      final sessionOptions = OrtSessionOptions();
-      _session =
-          OrtSession.fromBuffer(modelData.buffer.asUint8List(), sessionOptions);
+      // Assets can only be read on the root isolate: rootBundle needs the
+      // Flutter binding, and the engine doesn't answer flutter/assets
+      // requests sent through a BackgroundIsolateBinaryMessenger. The model
+      // is read here (the engine loads it off the UI thread) and moved to
+      // the worker without a copy; building the session runs there.
+      final charsetJson =
+          await rootBundle.loadString(AssetPaths.ddddocrCharset);
+      final model = TransferableTypedData.fromList([
+        (await rootBundle.load(AssetPaths.ddddocrOnnx)).buffer.asUint8List()
+      ]);
+      final ready = ReceivePort();
+      await Isolate.spawn(
+        _workerMain,
+        (ready.sendPort, model, charsetJson),
+        debugName: 'sp-captcha',
+      );
+      // A worker that dies before answering must not hang sign-in.
+      final reply = await ready.first
+          .timeout(const Duration(seconds: 60), onTimeout: () => 'timed out');
+      ready.close();
+      if (reply is! SendPort) {
+        _log('model load failed: $reply');
+        return false;
+      }
+      _worker = reply;
       _log('model loaded in ${sw.elapsedMilliseconds} ms');
       return true;
     } catch (e) {
@@ -57,34 +75,12 @@ class SpCaptchaSolver {
   static Future<String?> solve(Uint8List imageBytes) async {
     try {
       if (!await init()) return null;
-      final session = _session!;
-      final charset = _charset!;
-
       final sw = Stopwatch()..start();
-      final image = img.decodeImage(imageBytes);
-      if (image == null) return null;
-      final (floatData, width) = preprocess(image);
-
-      final runOptions = OrtRunOptions();
-      final inputOrt = OrtValueTensor.createTensorWithDataList(
-          floatData, [1, 1, inputHeight, width]);
-      final inputName =
-          session.inputNames.isNotEmpty ? session.inputNames.first : 'input1';
-      final inputs = {inputName: inputOrt};
-      // Off the UI isolate when available, so the spinner keeps turning.
-      final outputs = await (session.runAsync(runOptions, inputs) ??
-          Future.value(session.run(runOptions, inputs)));
-      inputOrt.release();
-      runOptions.release();
-
-      if (outputs.isEmpty || outputs.first == null) return null;
-      final outputTensor = outputs.first!;
-      final raw = outputTensor.value;
-      for (final o in outputs) {
-        o?.release();
-      }
-
-      final predicted = decodeCtc(argmaxPerStep(raw), charset);
+      final reply = ReceivePort();
+      _worker!.send((reply.sendPort, imageBytes));
+      final predicted = await reply.first as String?;
+      reply.close();
+      if (predicted == null) return null;
       _log('solved in ${sw.elapsedMilliseconds} ms '
           '(${predicted.length} chars)');
       return isPlausibleAnswer(predicted) ? predicted : null;
@@ -92,6 +88,60 @@ class SpCaptchaSolver {
       _log('solve failed: $e');
       return null;
     }
+  }
+
+  /// Builds the session, reports its [SendPort] (or the error) and then
+  /// answers `(replyPort, imageBytes)` requests with the decoded text.
+  static void _workerMain((SendPort, TransferableTypedData, String) args) {
+    final (ready, modelData, charsetJson) = args;
+    final OrtSession session;
+    final List<String> charset;
+    try {
+      charset = (jsonDecode(charsetJson) as List<dynamic>)
+          .map((e) => e.toString())
+          .toList();
+      OrtEnv.instance.init();
+      session = OrtSession.fromBuffer(
+          modelData.materialize().asUint8List(), OrtSessionOptions());
+    } catch (e) {
+      ready.send('$e');
+      return;
+    }
+    final requests = ReceivePort();
+    requests.listen((message) {
+      final (reply, imageBytes) = message as (SendPort, Uint8List);
+      String? text;
+      try {
+        text = _run(session, charset, imageBytes);
+      } catch (e) {
+        _log('solve failed: $e');
+      }
+      reply.send(text);
+    });
+    ready.send(requests.sendPort);
+  }
+
+  static String? _run(
+      OrtSession session, List<String> charset, Uint8List imageBytes) {
+    final image = img.decodeImage(imageBytes);
+    if (image == null) return null;
+    final (floatData, width) = preprocess(image);
+
+    final runOptions = OrtRunOptions();
+    final inputOrt = OrtValueTensor.createTensorWithDataList(
+        floatData, [1, 1, inputHeight, width]);
+    final inputName =
+        session.inputNames.isNotEmpty ? session.inputNames.first : 'input1';
+    final outputs = session.run(runOptions, {inputName: inputOrt});
+    inputOrt.release();
+    runOptions.release();
+
+    if (outputs.isEmpty || outputs.first == null) return null;
+    final raw = outputs.first!.value;
+    for (final o in outputs) {
+      o?.release();
+    }
+    return decodeCtc(argmaxPerStep(raw), charset);
   }
 
   /// ddddocr preprocessing: scale to [inputHeight] keeping the aspect ratio,

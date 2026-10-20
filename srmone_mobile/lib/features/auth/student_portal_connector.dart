@@ -59,6 +59,16 @@ class StudentPortalConnector extends StateNotifier<SpConnectionState> {
         : SpFailed(result.message);
   }
 
+  /// Refreshes the Student Portal data without any banner or CAPTCHA sheet
+  /// (used by pull-to-refresh and the automatic refresh). Only a success
+  /// changes the state, clearing an earlier error.
+  Future<void> refreshQuietly() async {
+    if (state is SpConnecting) return;
+    final result = await _orchestrator.connectStudentPortal(required: false);
+    if (!mounted) return;
+    if (result.connected && state is SpFailed) state = const SpIdle();
+  }
+
   void dismiss() => state = const SpIdle();
 }
 

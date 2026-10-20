@@ -2,7 +2,6 @@
 // Interactive attendance planner with "Reach Target" and "Plan Holiday" modes.
 // Integrates Bug Fix #2 (T=100 division-by-zero guard) and holiday impact simulation.
 
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_svg/flutter_svg.dart';
@@ -13,7 +12,7 @@ import '../../../core/constants/asset_paths.dart';
 import '../../../core/database/app_database.dart';
 import '../../../domain/services/attendance_planner_math.dart';
 import '../../../domain/services/calendar_day_resolver.dart';
-import '../../../main.dart';
+import '../../shared/cached_data_providers.dart';
 
 class AttendancePlannerCard extends ConsumerStatefulWidget {
   final String academiaEmail;
@@ -256,40 +255,33 @@ class _AttendancePlannerCardState extends ConsumerState<AttendancePlannerCard>
 
   Widget _buildPlanHolidayTab(ThemeData theme) {
     final dateFormat = DateFormat('MMM d, yyyy');
-    final db = ref.watch(appDatabaseProvider);
 
-    return StreamBuilder<TimetableCacheData?>(
-      stream: db.watchTimetable(widget.academiaEmail),
-      builder: (context, timetableSnap) {
-        final timetableData = timetableSnap.data;
-        final timetableSlots = _parseSlots(timetableData?.coursesJson);
+    return Consumer(
+      builder: (context, ref, _) {
+        final timetableSlots = ref.watch(_plannerSlotsProvider);
 
-        return StreamBuilder<CalendarCacheData?>(
-          stream: db.watchCalendar(widget.academiaEmail, 'odd'),
-          builder: (context, calendarSnap) {
-            final calendarData = calendarSnap.data;
-            final holidayMap = _parseHolidays(calendarData?.monthsJson);
+        return Consumer(
+          builder: (context, ref, _) {
+            final calendarMap =
+                ref.watch(calendarMapProvider(currentSemester()));
 
             final results = computePlanHoliday(
               fromDate: _holidayFrom,
               toDate: _holidayTo,
               records: _inputs,
               timetableSlots: timetableSlots,
-              calendarResolver: (dt) {
-                final key = CalendarDayResolver.localDateKey(dt);
-                final isHol = holidayMap[key] == true;
-                if (isHol) {
-                  return const ResolvedDayStatus(isWorking: false);
-                }
-                final wd = dt.weekday;
-                if (wd >= DateTime.monday && wd <= DateTime.friday) {
-                  return ResolvedDayStatus(
-                    isWorking: true,
-                    dayLabel: 'Day $wd',
-                  );
-                }
-                return const ResolvedDayStatus(isWorking: false);
-              },
+              // Day orders come from the academic calendar; without one,
+              // fall back to the weekday guess.
+              calendarResolver: calendarMap.isEmpty
+                  ? null
+                  : (dt) {
+                      final status =
+                          CalendarDayResolver.getDayStatus(calendarMap, dt);
+                      return ResolvedDayStatus(
+                        isWorking: status.isWorkingDay,
+                        dayLabel: status.isWorkingDay ? status.dayLabel : null,
+                      );
+                    },
             );
 
             return Column(
@@ -426,58 +418,9 @@ class _AttendancePlannerCardState extends ConsumerState<AttendancePlannerCard>
       },
     );
   }
-
-  List<TimetableSlot> _parseSlots(String? jsonStr) {
-    if (jsonStr == null || jsonStr.isEmpty) return [];
-    try {
-      final list = jsonDecode(jsonStr) as List<dynamic>;
-      final slots = <TimetableSlot>[];
-      for (final item in list) {
-        if (item is Map<String, dynamic>) {
-          final code = item['course_code']?.toString() ??
-              item['courseCode']?.toString() ??
-              '';
-          final slotStr = item['slot']?.toString() ?? '';
-          // Extract day orders e.g. "Day 1", "Day 2", etc.
-          final dayMatches = RegExp(r'Day\s*([1-5])', caseSensitive: false)
-              .allMatches(slotStr);
-          for (final m in dayMatches) {
-            slots.add(TimetableSlot(
-              courseCode: code,
-              day: 'Day ${m.group(1)}',
-              hourIndex: 1,
-            ));
-          }
-        }
-      }
-      return slots;
-    } catch (_) {
-      return [];
-    }
-  }
-
-  Map<String, bool> _parseHolidays(String? jsonStr) {
-    if (jsonStr == null || jsonStr.isEmpty) return {};
-    try {
-      final list = jsonDecode(jsonStr) as List<dynamic>;
-      final map = <String, bool>{};
-      for (final month in list) {
-        if (month is Map<String, dynamic> && month['days'] is List) {
-          for (final day in month['days'] as List<dynamic>) {
-            if (day is Map<String, dynamic>) {
-              final date = day['date']?.toString();
-              final isHol =
-                  day['isHoliday'] == true || day['is_holiday'] == true;
-              if (date != null && isHol) {
-                map[date] = true;
-              }
-            }
-          }
-        }
-      }
-      return map;
-    } catch (_) {
-      return {};
-    }
-  }
 }
+
+// Built once per timetable change rather than on every rebuild of the
+// planner (each date pick rebuilds it).
+final _plannerSlotsProvider = Provider<List<TimetableSlot>>(
+    (ref) => timetableSlotsFromCourses(ref.watch(timetableCoursesProvider)));
