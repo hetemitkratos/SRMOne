@@ -44,8 +44,9 @@ class AppRefresher {
       waitForDetails: waitForDetails,
       forceDetails: waitForDetails,
     );
-    if (result.status != SyncStatus.error &&
-        await orchestrator.isStudentPortalConfigured()) {
+    // Attendance comes only from the Student Portal, so it refreshes even
+    // when Academia failed.
+    if (await orchestrator.isStudentPortalConfigured()) {
       unawaited(
           _ref.read(studentPortalConnectorProvider.notifier).refreshQuietly());
     }

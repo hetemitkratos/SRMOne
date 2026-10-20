@@ -50,6 +50,18 @@ final timetableProvider = StreamProvider<TimetableCacheData?>(
 final userSettingsProvider = StreamProvider<UserSettingsTableData?>(
     (ref) => _forUser(ref, (db, e) => db.watchUserSettings(e), null));
 
+/// How each [SyncSection] last went, keyed by section, for showing which
+/// data is stale and why. Sections never attempted are missing.
+final syncStatusProvider =
+    StreamProvider<Map<SyncSection, SyncSectionStatusData>>((ref) {
+  return _forUser(ref, (db, e) => db.watchSyncStatus(e), const [])
+      .map((rows) => {
+            for (final r in rows)
+              for (final s in SyncSection.values)
+                if (s.name == r.section) s: r,
+          });
+});
+
 /// The cached calendar row for a semester ('odd' | 'even').
 final calendarProvider = StreamProvider.family<CalendarCacheData?, String>(
     (ref, sem) => _forUser(ref, (db, e) => db.watchCalendar(e, sem), null));
