@@ -6,7 +6,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
-import '../../core/database/app_database.dart';
+import '../../core/theme/app_theme.dart';
+import '../../../core/database/app_database.dart';
 import '../../main.dart';
 import '../auth/auth_controller.dart';
 
@@ -76,11 +77,11 @@ class NotificationBellSheet extends ConsumerWidget {
   Color _colorForType(String type) {
     switch (type) {
       case 'low_attendance':
-        return Colors.orangeAccent;
+        return SrmPalette.terracotta;
       case 'holiday_alert':
-        return const Color(0xFF457B9D);
+        return SrmPalette.lavenderText;
       case 'welcome':
-        return const Color(0xFF2D6A4F);
+        return SrmPalette.mintText;
       default:
         return Colors.blueGrey;
     }
@@ -151,13 +152,13 @@ class NotificationBellSheet extends ConsumerWidget {
                         Icon(
                           LucideIcons.bellOff,
                           size: 48,
-                          color: Colors.grey.withAlpha(100),
+                          color: SrmPalette.slate500.withAlpha(100),
                         ),
                         const SizedBox(height: 12),
                         Text(
                           'No notifications yet',
                           style: theme.textTheme.bodyMedium?.copyWith(
-                            color: Colors.grey,
+                            color: SrmPalette.slate500,
                           ),
                         ),
                       ],
@@ -217,7 +218,7 @@ class NotificationBellSheet extends ConsumerWidget {
                             Text(
                               dateFormat.format(date),
                               style: theme.textTheme.labelSmall?.copyWith(
-                                color: Colors.grey,
+                                color: SrmPalette.slate500,
                               ),
                             ),
                           ],

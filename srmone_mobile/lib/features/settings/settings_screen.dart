@@ -13,7 +13,8 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 
-import '../../core/database/app_database.dart';
+import '../../core/theme/app_theme.dart';
+import '../../../core/database/app_database.dart';
 import '../../core/diagnostics/error_log.dart';
 import '../../core/security/biometric_auth_service.dart';
 import '../../main.dart';
@@ -146,7 +147,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                               children: [
                                 CircleAvatar(
                                   radius: 28,
-                                  backgroundColor: const Color(0xFF2D6A4F),
+                                  backgroundColor: SrmPalette.ink,
                                   child: Text(
                                     prof?.name.isNotEmpty == true
                                         ? prof!.name[0].toUpperCase()
@@ -177,7 +178,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                                       Text(
                                         email,
                                         style: theme.textTheme.bodySmall
-                                            ?.copyWith(color: Colors.grey),
+                                            ?.copyWith(
+                                                color: SrmPalette.slate500),
                                       ),
                                       if (prof?.regNumber.isNotEmpty == true)
                                         Text(
@@ -313,10 +315,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
                     ListTile(
                       leading:
-                          const Icon(LucideIcons.logOut, color: Colors.red),
+                          const Icon(LucideIcons.logOut, color: SrmPalette.red),
                       title: const Text(
                         'Log Out',
-                        style: TextStyle(color: Colors.red),
+                        style: TextStyle(color: SrmPalette.red),
                       ),
                       subtitle: const Text(
                         'Clears hardware keychain credentials from this device',
@@ -336,7 +338,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                               ),
                               FilledButton(
                                 style: FilledButton.styleFrom(
-                                  backgroundColor: Colors.red,
+                                  backgroundColor: SrmPalette.red,
                                 ),
                                 onPressed: () => Navigator.pop(ctx, true),
                                 child: const Text('Log Out'),
@@ -368,7 +370,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                           return Text(
                             'SRMOne Mobile$version\nLocal-First, built with Flutter & Drift',
                             style: theme.textTheme.labelSmall?.copyWith(
-                              color: Colors.grey,
+                              color: SrmPalette.slate500,
                             ),
                             textAlign: TextAlign.center,
                           );
@@ -392,7 +394,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           fontSize: 12,
           fontWeight: FontWeight.bold,
           letterSpacing: 1.1,
-          color: Colors.grey,
+          color: SrmPalette.slate500,
         ),
       ),
     );
