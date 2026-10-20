@@ -1,6 +1,7 @@
 // lib/features/auth/auth_controller.dart
 // Riverpod state notifier for authentication state and login actions.
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/security/secure_vault_service.dart';
 import '../../domain/services/notification_rule_engine.dart';
@@ -16,7 +17,9 @@ class AuthInitial extends AuthState {
 }
 
 class AuthLoading extends AuthState {
-  const AuthLoading();
+  /// The sign-in stage in progress, shown under the spinner.
+  final SyncStep step;
+  const AuthLoading([this.step = SyncStep.signingIn]);
 }
 
 class Authenticated extends AuthState {
@@ -48,10 +51,16 @@ class AuthController extends StateNotifier<AuthState> {
 
   Future<void> checkInitialAuth() async {
     try {
-      final hasCreds = await _vault.hasStoredCredentials();
-      if (hasCreds) {
-        final email = await _vault.getAcademiaEmail();
-        state = Authenticated(email ?? '');
+      // Read both at once: each secure-storage read is a platform call.
+      final (email, password) = await (
+        _vault.getAcademiaEmail(),
+        _vault.getAcademiaPassword(),
+      ).wait;
+      if (email != null &&
+          email.isNotEmpty &&
+          password != null &&
+          password.isNotEmpty) {
+        state = Authenticated(email);
       } else {
         state = const Unauthenticated();
       }
@@ -62,14 +71,16 @@ class AuthController extends StateNotifier<AuthState> {
     }
   }
 
-  /// Signs in and runs the first full sync. Credentials are only kept in the
-  /// vault if the sync succeeds, so a wrong password never leaves the app
+  /// Signs in and runs the first Academia sync. Credentials are only kept in
+  /// the vault if the sync succeeds, so a wrong password never leaves the app
   /// looking signed in on the next launch.
+  ///
+  /// The Student Portal is not part of this: once this returns true, call
+  /// StudentPortalConnector.connect so its CAPTCHA can't hold up sign-in.
   Future<bool> login({
     required String email,
     required String password,
     String? spPassword,
-    SpCaptchaPrompt? onSpCaptcha,
   }) async {
     state = const AuthLoading();
     try {
@@ -92,7 +103,13 @@ class AuthController extends StateNotifier<AuthState> {
 
       final syncResult = await _orchestrator.syncAll(
         forceFreshLogin: true,
-        onSpCaptcha: onSpCaptcha,
+        includeStudentPortal: false,
+        // Open the dashboard as soon as attendance is saved; the timetable
+        // and calendar fill in a moment later.
+        waitForDetails: false,
+        onProgress: (step) {
+          if (mounted) state = AuthLoading(step);
+        },
       );
 
       if (syncResult.status == SyncStatus.error) {
@@ -104,6 +121,7 @@ class AuthController extends StateNotifier<AuthState> {
       state = Authenticated(cleanEmail);
       return true;
     } catch (e) {
+      if (kDebugMode) debugPrint('[Auth] sign-in failed: ${e.runtimeType}');
       await _vault.clearAll().catchError((_) {});
       state = AuthError(friendlySyncError(e));
       return false;

@@ -13,11 +13,12 @@ import '../../core/database/app_database.dart';
 import '../../domain/services/attendance_planner_math.dart';
 import '../../domain/services/calendar_day_resolver.dart';
 import '../../domain/services/current_class_detector.dart';
-import '../../domain/services/session_sync_orchestrator.dart';
 import '../../domain/services/timetable_schedule.dart';
 import '../../main.dart';
 import '../auth/auth_controller.dart';
 import '../faculty/faculty_avatar.dart';
+import '../shared/app_refresher.dart';
+import '../shared/cached_data_providers.dart';
 
 class OverviewScreen extends ConsumerWidget {
   const OverviewScreen({super.key});
@@ -38,8 +39,7 @@ class OverviewScreen extends ConsumerWidget {
     return Scaffold(
       body: RefreshIndicator(
         onRefresh: () async {
-          final orchestrator = ref.read(sessionSyncOrchestratorProvider);
-          await orchestrator.syncAll();
+          await ref.read(appRefresherProvider).refresh();
         },
         child: CustomScrollView(
           slivers: [
@@ -47,10 +47,10 @@ class OverviewScreen extends ConsumerWidget {
             SliverAppBar(
               floating: true,
               pinned: true,
-              title: StreamBuilder<StudentProfile?>(
-                stream: db.watchStudentProfile(email),
-                builder: (context, snapshot) {
-                  final name = snapshot.data?.name ?? 'Student';
+              title: Consumer(
+                builder: (context, ref, _) {
+                  final snapshot = ref.watch(studentProfileProvider);
+                  final name = snapshot.valueOrNull?.name ?? 'Student';
                   return Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -62,7 +62,7 @@ class OverviewScreen extends ConsumerWidget {
                         ),
                       ),
                       Text(
-                        snapshot.data?.regNumber ?? email,
+                        snapshot.valueOrNull?.regNumber ?? email,
                         style: theme.textTheme.labelSmall
                             ?.copyWith(color: Colors.grey),
                       ),
@@ -76,20 +76,17 @@ class OverviewScreen extends ConsumerWidget {
             SliverToBoxAdapter(
               child: Padding(
                 padding: const EdgeInsets.all(16),
-                child: StreamBuilder<CalendarCacheData?>(
-                  stream: db.watchCalendar(email, semesterFor(DateTime.now())),
-                  builder: (context, calSnap) {
-                    final calMap = TimetableSchedule.parseCalendar(
-                        calSnap.data?.monthsJson);
+                child: Consumer(
+                  builder: (context, ref, _) {
+                    final calMap =
+                        ref.watch(calendarMapProvider(currentSemester()));
                     final now = DateTime.now();
                     final todayStatus =
                         CalendarDayResolver.getDayStatus(calMap, now);
 
-                    return StreamBuilder<TimetableCacheData?>(
-                      stream: db.watchTimetable(email),
-                      builder: (context, timeSnap) {
-                        final courses = TimetableSchedule.parseCourses(
-                            timeSnap.data?.coursesJson);
+                    return Consumer(
+                      builder: (context, ref, _) {
+                        final courses = ref.watch(timetableCoursesProvider);
 
                         return Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
@@ -495,10 +492,10 @@ class OverviewScreen extends ConsumerWidget {
     AppDatabase db,
     String email,
   ) {
-    return StreamBuilder<List<AttendanceCacheData>>(
-      stream: db.watchAttendanceRecords(email),
-      builder: (context, snapshot) {
-        final records = snapshot.data ?? [];
+    return Consumer(
+      builder: (context, ref, _) {
+        final snapshot = ref.watch(attendanceRecordsProvider);
+        final records = snapshot.valueOrNull ?? [];
         if (records.isEmpty) return const SizedBox.shrink();
 
         final inputs = records

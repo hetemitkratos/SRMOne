@@ -2,6 +2,7 @@
 // SRMOne Mobile — App Bootstrap
 // Initializes Drift DB, WorkManager, flutter_local_notifications, and ProviderScope.
 
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -33,22 +34,6 @@ Future<void> main() async {
     const InitializationSettings(android: androidInit, iOS: darwinInit),
   );
 
-  // Initialize WorkManager for background sync (mobile only)
-  if (Platform.isAndroid || Platform.isIOS) {
-    await Workmanager().initialize(backgroundSyncCallbackDispatcher);
-
-    // Register periodic background sync (every ~6 hours)
-    await Workmanager().registerPeriodicTask(
-      backgroundSyncTask,
-      backgroundSyncTask,
-      frequency: const Duration(hours: 6),
-      constraints: Constraints(
-        networkType: NetworkType.connected,
-      ),
-      existingWorkPolicy: ExistingPeriodicWorkPolicy.keep,
-    );
-  }
-
   runApp(
     ProviderScope(
       overrides: [
@@ -58,6 +43,26 @@ Future<void> main() async {
       ],
       child: const SrmOneApp(),
     ),
+  );
+
+  // Not needed for the first frame, so it runs after runApp.
+  unawaited(_registerBackgroundSync().catchError((Object e) {
+    debugPrint('[Startup] background sync registration failed: $e');
+  }));
+}
+
+/// Registers the periodic background sync (every ~6 hours, mobile only).
+Future<void> _registerBackgroundSync() async {
+  if (!(Platform.isAndroid || Platform.isIOS)) return;
+  await Workmanager().initialize(backgroundSyncCallbackDispatcher);
+  await Workmanager().registerPeriodicTask(
+    backgroundSyncTask,
+    backgroundSyncTask,
+    frequency: const Duration(hours: 6),
+    constraints: Constraints(
+      networkType: NetworkType.connected,
+    ),
+    existingWorkPolicy: ExistingPeriodicWorkPolicy.keep,
   );
 }
 

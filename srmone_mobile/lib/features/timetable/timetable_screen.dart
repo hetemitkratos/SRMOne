@@ -8,15 +8,16 @@ import 'package:flutter_svg/flutter_svg.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../../core/constants/asset_paths.dart';
-import '../../core/database/app_database.dart';
 import '../../domain/services/calendar_day_resolver.dart';
 import '../../domain/services/current_class_detector.dart';
-import '../../domain/services/session_sync_orchestrator.dart';
 import '../../domain/services/timetable_schedule.dart';
 import '../../main.dart';
 import '../auth/auth_controller.dart';
 import '../faculty/faculty_avatar.dart';
 import 'widgets/exportable_timetable_poster.dart';
+import '../shared/app_refresher.dart';
+import '../shared/cached_data_providers.dart';
+import '../shared/refreshable_empty.dart';
 
 class TimetableScreen extends ConsumerStatefulWidget {
   const TimetableScreen({super.key});
@@ -56,19 +57,15 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen>
       );
     }
 
-    return StreamBuilder<TimetableCacheData?>(
-      stream: db.watchTimetable(email),
-      builder: (context, timetableSnap) {
-        final timetable = timetableSnap.data;
-        final rawCourses =
-            TimetableSchedule.parseCourses(timetable?.coursesJson);
+    return Consumer(
+      builder: (context, ref, _) {
+        final timetable = ref.watch(timetableProvider).valueOrNull;
+        final rawCourses = ref.watch(timetableCoursesProvider);
 
-        return StreamBuilder<CalendarCacheData?>(
-          stream: db.watchCalendar(email, semesterFor(DateTime.now())),
-          builder: (context, calendarSnap) {
-            final calendar = calendarSnap.data;
+        return Consumer(
+          builder: (context, ref, _) {
             final calendarMap =
-                TimetableSchedule.parseCalendar(calendar?.monthsJson);
+                ref.watch(calendarMapProvider(currentSemester()));
             final todayStatus = CalendarDayResolver.getDayStatus(
               calendarMap,
               DateTime.now(),
@@ -141,12 +138,13 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen>
               ),
               body: RefreshIndicator(
                 onRefresh: () async {
-                  final orchestrator =
-                      ref.read(sessionSyncOrchestratorProvider);
-                  await orchestrator.syncAll();
+                  await ref
+                      .read(appRefresherProvider)
+                      .refresh(waitForDetails: true);
                 },
+                notificationPredicate: tabbedRefreshPredicate,
                 child: rawCourses.isEmpty
-                    ? Center(
+                    ? RefreshableEmpty(
                         child: Column(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
@@ -198,7 +196,7 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen>
     final slotsWithTiming = TimetableSchedule.slotsForDay(courses, dayLabel);
 
     if (slotsWithTiming.isEmpty) {
-      return Center(
+      return RefreshableEmpty(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [

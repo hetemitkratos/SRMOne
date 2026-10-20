@@ -1,16 +1,19 @@
 // lib/features/auth/login_screen.dart
-// Native login screen with auto-append NetID, optional SP credentials,
+// Native login screen with auto-append NetID, the Student Portal password
+// (the Academia one unless switched off; attendance comes from the portal)
 // and terms of service check.
+
+import 'dart:async';
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/constants/asset_paths.dart';
-import '../../main.dart';
+import '../../scrapers/student_portal/sp_captcha_solver.dart';
 import '../settings/legal_markdown_screen.dart';
 import 'auth_controller.dart';
-import 'sp_captcha_bottom_sheet.dart';
+import 'student_portal_connector.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});
@@ -27,7 +30,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
   bool _obscurePassword = true;
   bool _obscureSpPassword = true;
-  bool _showSpField = false;
+
+  /// Whether the Student Portal password is the Academia one.
+  bool _spSamePassword = true;
   bool _acceptedTerms = false;
 
   @override
@@ -48,21 +53,27 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       return;
     }
 
+    final spPassword =
+        _spSamePassword ? _passwordController.text : _spPasswordController.text;
+    // Captured before the await: a successful sign-in navigates away and
+    // disposes this screen.
+    final spConnector = ref.read(studentPortalConnectorProvider.notifier);
+    // Load the CAPTCHA model while Academia signs in, so the Student Portal
+    // connection doesn't wait for it afterwards.
+    if (spPassword.isNotEmpty) unawaited(SpCaptchaSolver.init());
     final success = await ref.read(authControllerProvider.notifier).login(
           email: _emailController.text,
           password: _passwordController.text,
-          spPassword: _showSpField ? _spPasswordController.text : null,
-          onSpCaptcha: (image) async {
-            if (!mounted) return null;
-            return showSpCaptchaSheet(context, image);
-          },
+          spPassword: spPassword.isEmpty ? null : spPassword,
         );
+    if (!success) return;
 
-    if (success && mounted) {
-      await requestNotificationPermission(
-          ref.read(notificationsPluginProvider));
-      if (mounted) context.go('/dashboard');
-    }
+    // The Student Portal connects in the background; the dashboard shows its
+    // progress and offers the manual CAPTCHA sheet only if OCR fails.
+    if (spPassword.isNotEmpty) unawaited(spConnector.connect());
+    // Notification permission is requested once by the dashboard shell;
+    // asking here too races it (permissionRequestInProgress).
+    if (mounted) context.go('/dashboard');
   }
 
   @override
@@ -213,33 +224,28 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   ),
                   const SizedBox(height: 14),
 
-                  // Student Portal Optional Toggle
-                  GestureDetector(
-                    onTap: () => setState(() => _showSpField = !_showSpField),
-                    child: Row(
-                      children: [
-                        Icon(
-                          _showSpField
-                              ? Icons.keyboard_arrow_up
-                              : Icons.keyboard_arrow_down,
-                          color: const Color(0xFFBDE3D5),
-                          size: 20,
-                        ),
-                        const SizedBox(width: 4),
-                        const Text(
-                          'Add Student Portal (Optional for dual sync)',
-                          style: TextStyle(
-                              color: Color(0xFFBDE3D5),
-                              fontSize: 13,
-                              fontWeight: FontWeight.w500),
-                        ),
-                      ],
+                  // Student Portal password: attendance comes from the portal,
+                  // so it always connects. Usually the same as Academia's.
+                  SwitchListTile.adaptive(
+                    key: const ValueKey('sp-same-password'),
+                    contentPadding: EdgeInsets.zero,
+                    dense: true,
+                    value: _spSamePassword,
+                    activeColor: const Color(0xFFBDE3D5),
+                    onChanged: (v) => setState(() => _spSamePassword = v),
+                    title: const Text(
+                      'Student Portal uses the same password',
+                      style: TextStyle(
+                          color: Color(0xFFBDE3D5),
+                          fontSize: 13,
+                          fontWeight: FontWeight.w500),
                     ),
                   ),
 
-                  if (_showSpField) ...[
-                    const SizedBox(height: 12),
+                  if (!_spSamePassword) ...[
+                    const SizedBox(height: 8),
                     TextFormField(
+                      key: const ValueKey('sp-password'),
                       controller: _spPasswordController,
                       obscureText: _obscureSpPassword,
                       style: const TextStyle(color: Colors.white),
@@ -266,6 +272,12 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                           borderSide: BorderSide.none,
                         ),
                       ),
+                      validator: (v) {
+                        if (v == null || v.isEmpty) {
+                          return 'Enter your Student Portal password';
+                        }
+                        return null;
+                      },
                     ),
                   ],
 
@@ -333,12 +345,15 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   ),
                   const SizedBox(height: 24),
 
-                  // Submit Button
+                  // Submit Button. The disabled colours match the enabled
+                  // ones so the spinner stays visible while signing in.
                   ElevatedButton(
                     onPressed: isLoading ? null : _submit,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFFBDE3D5),
                       foregroundColor: const Color(0xFF0F0F0F),
+                      disabledBackgroundColor: const Color(0xFF8FB5A7),
+                      disabledForegroundColor: const Color(0xFF0F0F0F),
                       padding: const EdgeInsets.symmetric(vertical: 16),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(14),
@@ -357,6 +372,19 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                 fontWeight: FontWeight.bold, fontSize: 16),
                           ),
                   ),
+                  if (authState is AuthLoading) ...[
+                    const SizedBox(height: 14),
+                    Semantics(
+                      liveRegion: true,
+                      child: Text(
+                        authState.step.label,
+                        key: const ValueKey('login-progress'),
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                            color: Colors.white70, fontSize: 13),
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),

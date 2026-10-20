@@ -7,6 +7,23 @@ import 'package:html/parser.dart' as html_parser;
 import '../../core/constants/portal_endpoints.dart';
 import '../../domain/services/attendance_planner_math.dart';
 
+/// Everything the app reads from the My_Time_Table page.
+class AcademiaPageData {
+  final List<AttendanceInput> attendance;
+  final Map<String, String> profile;
+  final List<AcademiaMarkRecord> marks;
+  final List<Map<String, String>> courses;
+  final List<Map<String, String>> advisors;
+
+  const AcademiaPageData({
+    required this.attendance,
+    required this.profile,
+    required this.marks,
+    required this.courses,
+    required this.advisors,
+  });
+}
+
 class AcademiaParsers {
   AcademiaParsers._();
 
@@ -14,8 +31,10 @@ class AcademiaParsers {
 
   /// Parses attendance records from the decoded HTML table of My_Time_Table_2023_24.
   /// Looks for the table whose headers contain 'Attn %' or 'Course Code'.
-  static List<AttendanceInput> parseAttendance(String decodedHtml) {
-    final doc = html_parser.parse(decodedHtml);
+  static List<AttendanceInput> parseAttendance(String decodedHtml) =>
+      parseAttendanceDoc(html_parser.parse(decodedHtml));
+
+  static List<AttendanceInput> parseAttendanceDoc(Document doc) {
     final tables = doc.querySelectorAll('table');
 
     Element? targetTable;
@@ -32,9 +51,11 @@ class AcademiaParsers {
             : <Element>[];
 
         final candidateCells = thList.isNotEmpty ? thList : firstRowCells;
+        // Kept index-aligned with the data cells (an empty header must not
+        // shift later columns), with whitespace collapsed so a header
+        // broken by <br> ("Hours<br>Conducted") still matches.
         final rowHeaders = candidateCells
-            .map((c) => cellText(c))
-            .where((h) => h.isNotEmpty)
+            .map((c) => cellText(c).replaceAll(RegExp(r'\s+'), ' ').trim())
             .toList();
 
         final matches = pass
@@ -108,13 +129,37 @@ class AcademiaParsers {
     return records;
   }
 
+  /// Parses every section of the decoded My_Time_Table page from a single
+  /// HTML parse. Attendance errors propagate; the other sections are
+  /// best-effort and come back empty when their table can't be read.
+  static AcademiaPageData parseAttendancePage(String decodedHtml) {
+    final doc = html_parser.parse(decodedHtml);
+    T orEmpty<T>(T Function() parse, T empty) {
+      try {
+        return parse();
+      } catch (_) {
+        return empty;
+      }
+    }
+
+    return AcademiaPageData(
+      attendance: parseAttendanceDoc(doc),
+      profile: orEmpty(() => parseStudentProfileDoc(doc), const {}),
+      marks: orEmpty(() => parseMarksDoc(doc), const []),
+      courses: orEmpty(() => parseTimetableCoursesDoc(doc), const []),
+      advisors: orEmpty(() => parseAdvisorsDoc(doc), const []),
+    );
+  }
+
   // ─── 2. Student Profile Parser ──────────────────────────────────────────────
 
   /// Parses the student info table (the one containing `Registration Number:`)
   /// from My_Time_Table_2023_24 into a label → value map.
   /// Labels have their trailing `:` stripped; `:` separator cells are skipped.
-  static Map<String, String> parseStudentProfile(String decodedHtml) {
-    final doc = html_parser.parse(decodedHtml);
+  static Map<String, String> parseStudentProfile(String decodedHtml) =>
+      parseStudentProfileDoc(html_parser.parse(decodedHtml));
+
+  static Map<String, String> parseStudentProfileDoc(Document doc) {
     Element? table;
     for (final t in doc.querySelectorAll('table')) {
       if (_headerTexts(t).contains('Registration Number:')) {
@@ -186,8 +231,10 @@ class AcademiaParsers {
   ///
   /// Each test cell reads like `FT-I/5.00` on its first line and the score on
   /// the following line(s).
-  static List<AcademiaMarkRecord> parseMarks(String decodedHtml) {
-    final doc = html_parser.parse(decodedHtml);
+  static List<AcademiaMarkRecord> parseMarks(String decodedHtml) =>
+      parseMarksDoc(html_parser.parse(decodedHtml));
+
+  static List<AcademiaMarkRecord> parseMarksDoc(Document doc) {
     Element? table;
     for (final t in doc.querySelectorAll('table')) {
       if (_headerTexts(t).contains('Test Performance')) {
@@ -248,8 +295,10 @@ class AcademiaParsers {
 
   /// Parses the course table (headers include `Course Code` and `Slot`) from
   /// My_Time_Table_2023_24. Each row becomes a header → value map.
-  static List<Map<String, String>> parseTimetableCourses(String decodedHtml) {
-    final doc = html_parser.parse(decodedHtml);
+  static List<Map<String, String>> parseTimetableCourses(String decodedHtml) =>
+      parseTimetableCoursesDoc(html_parser.parse(decodedHtml));
+
+  static List<Map<String, String>> parseTimetableCoursesDoc(Document doc) {
     for (final table in doc.querySelectorAll('table')) {
       final headers = _headerTexts(table);
       if (!headers.contains('Course Code') || !headers.contains('Slot')) {
@@ -273,8 +322,10 @@ class AcademiaParsers {
   }
 
   /// Parses faculty advisors from the table whose headers contain `Counselor`.
-  static List<Map<String, String>> parseAdvisors(String decodedHtml) {
-    final doc = html_parser.parse(decodedHtml);
+  static List<Map<String, String>> parseAdvisors(String decodedHtml) =>
+      parseAdvisorsDoc(html_parser.parse(decodedHtml));
+
+  static List<Map<String, String>> parseAdvisorsDoc(Document doc) {
     for (final table in doc.querySelectorAll('table')) {
       if (!_headerTexts(table).contains('Counselor')) continue;
       final firstRow = table.querySelector('tr');

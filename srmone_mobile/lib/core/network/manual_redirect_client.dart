@@ -14,16 +14,20 @@ class ManualRedirectClient {
 
   /// [dio] can be injected by tests (for example with a fake adapter).
   ManualRedirectClient({required this.cookieJar, Dio? dio})
-      : _dio = dio ??
-            Dio(
-              BaseOptions(
-                followRedirects: false,
-                validateStatus: (status) => status != null && status < 500,
-                receiveDataWhenStatusError: true,
-                connectTimeout: const Duration(seconds: 30),
-                receiveTimeout: const Duration(seconds: 30),
-              ),
-            );
+      : _dio = dio ?? _shared;
+
+  /// One Dio (and so one connection pool) for every client in this isolate,
+  /// so later syncs reuse open TLS connections. Cookies never live in Dio:
+  /// each request carries its own jar's Cookie header.
+  static final Dio _shared = Dio(
+    BaseOptions(
+      followRedirects: false,
+      validateStatus: (status) => status != null && status < 500,
+      receiveDataWhenStatusError: true,
+      connectTimeout: const Duration(seconds: 30),
+      receiveTimeout: const Duration(seconds: 30),
+    ),
+  );
 
   /// Execute a request with manual redirect following and automatic cookie management.
   ///

@@ -48,4 +48,21 @@ void main() {
     expect(rows.map((r) => '${r.courseCode}/${r.source}').toSet(),
         {'Y2/academia', 'X1/student_portal'});
   });
+
+  test('a second snapshot on the same day updates instead of failing',
+      () async {
+    AttendanceSnapshotsCompanion snap(double pct) =>
+        AttendanceSnapshotsCompanion(
+          academiaEmail: const drift.Value('a@srmist.edu.in'),
+          snapshotDate: const drift.Value('2026-10-17'),
+          overallPercentage: drift.Value(pct),
+        );
+    await db.upsertAttendanceSnapshot(snap(80));
+    // Used to throw "UNIQUE constraint failed" and abort the sync's save.
+    await db.upsertAttendanceSnapshot(snap(82));
+
+    final rows = await db.getAttendanceSnapshots('a@srmist.edu.in');
+    expect(rows, hasLength(1));
+    expect(rows.single.overallPercentage, 82);
+  });
 }

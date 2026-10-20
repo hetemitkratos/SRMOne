@@ -2,159 +2,234 @@
 // On-device CAPTCHA solver using onnxruntime with fallback trigger.
 // Runs ddddocr_common.onnx offline with CTC decoding.
 // Specification: architecture.md §7
+//
+// The bundled model is ddddocr's `common.onnx` (the "beta" model). It must be
+// paired with ddddocr's CHARSET_BETA (assets/ml/ddddocr_charset.json); the
+// CHARSET_OLD list belongs to `common_old.onnx` and maps every index to the
+// wrong character. Pre/post-processing mirrors ddddocr's OcrEngine:
+//   resize to height 64 (Lanczos in PIL) → grayscale → /255 → [1,1,64,W]
+//   output float logits [T,1,C] → argmax per step → CTC collapse, drop blank 0
 
+import 'dart:async';
 import 'dart:convert';
-import 'dart:typed_data';
+import 'dart:isolate';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:image/image.dart' as img;
 import 'package:onnxruntime/onnxruntime.dart';
 import '../../core/constants/asset_paths.dart';
 
 class SpCaptchaSolver {
-  static OrtSession? _session;
-  static List<String>? _charset;
-  static bool _initAttempted = false;
+  /// Requests to the worker isolate that owns the model, once it is up.
+  static SendPort? _worker;
+  static Future<bool>? _init;
 
-  /// Initializes the ONNX runtime environment and loads the model + charset.
-  static Future<bool> init() async {
-    if (_session != null && _charset != null) return true;
-    if (_initAttempted && _session == null) return false;
+  /// The model's fixed input height.
+  static const int inputHeight = 64;
 
-    _initAttempted = true;
+  /// Loads the ONNX model and charset once, in a worker isolate, so building
+  /// the session (several seconds on a phone) never freezes the UI. Safe to
+  /// call repeatedly and concurrently; a failed load is not retried within
+  /// the same app run.
+  static Future<bool> init() => _init ??= _load();
+
+  static Future<bool> _load() async {
+    final sw = Stopwatch()..start();
     try {
-      OrtEnv.instance.init();
-
-      // Load charset JSON from Flutter assets
-      final charsetStr = await rootBundle.loadString(AssetPaths.ddddocrCharset);
-      final rawList = jsonDecode(charsetStr) as List<dynamic>;
-      _charset = rawList.map((e) => e.toString()).toList();
-
-      // Load ONNX model bytes from Flutter assets
-      final modelData = await rootBundle.load(AssetPaths.ddddocrOnnx);
-      final modelBytes = modelData.buffer.asUint8List();
-
-      final sessionOptions = OrtSessionOptions();
-      _session = OrtSession.fromBuffer(modelBytes, sessionOptions);
+      // Assets can only be read on the root isolate: rootBundle needs the
+      // Flutter binding, and the engine doesn't answer flutter/assets
+      // requests sent through a BackgroundIsolateBinaryMessenger. The model
+      // is read here (the engine loads it off the UI thread) and moved to
+      // the worker without a copy; building the session runs there.
+      final charsetJson =
+          await rootBundle.loadString(AssetPaths.ddddocrCharset);
+      final model = TransferableTypedData.fromList([
+        (await rootBundle.load(AssetPaths.ddddocrOnnx)).buffer.asUint8List()
+      ]);
+      final ready = ReceivePort();
+      await Isolate.spawn(
+        _workerMain,
+        (ready.sendPort, model, charsetJson),
+        debugName: 'sp-captcha',
+      );
+      // A worker that dies before answering must not hang sign-in.
+      final reply = await ready.first
+          .timeout(const Duration(seconds: 60), onTimeout: () => 'timed out');
+      ready.close();
+      if (reply is! SendPort) {
+        _log('model load failed: $reply');
+        return false;
+      }
+      _worker = reply;
+      _log('model loaded in ${sw.elapsedMilliseconds} ms');
       return true;
-    } catch (_) {
+    } catch (e) {
+      _log('model load failed: $e');
       return false;
     }
   }
 
   /// Solves the CAPTCHA from raw image bytes.
-  /// Returns the predicted string, or null if inference failed.
+  /// Returns the predicted string, or null if inference failed or the answer
+  /// does not look like an SRM CAPTCHA.
   static Future<String?> solve(Uint8List imageBytes) async {
     try {
-      final initialized = await init();
-      if (!initialized || _session == null || _charset == null) {
-        return null;
-      }
-
-      // 1. Decode image using package:image
-      final image = img.decodeImage(imageBytes);
-      if (image == null) return null;
-
-      // 2. Resize height to 64px preserving aspect ratio
-      const targetHeight = 64;
-      final targetWidth = (image.width * (targetHeight / image.height)).round();
-      final resized =
-          img.copyResize(image, width: targetWidth, height: targetHeight);
-
-      // 3. Build normalized grayscale float tensor: [-1.0, 1.0]
-      // Shape: [1, 1, 64, targetWidth]
-      final floatData = Float32List(1 * 1 * targetHeight * targetWidth);
-      int idx = 0;
-
-      for (int y = 0; y < targetHeight; y++) {
-        for (int x = 0; x < targetWidth; x++) {
-          final pixel = resized.getPixel(x, y);
-          // Luminance formula (grayscale)
-          final r = pixel.r;
-          final g = pixel.g;
-          final b = pixel.b;
-          final gray = (0.299 * r + 0.587 * g + 0.114 * b);
-          // Normalize to [-1.0, 1.0]: (pixel / 255.0 - 0.5) / 0.5
-          floatData[idx++] = ((gray / 255.0) - 0.5) / 0.5;
-        }
-      }
-
-      // 4. Run OrtSession
-      final runOptions = OrtRunOptions();
-      final inputShape = [1, 1, targetHeight, targetWidth];
-      final inputOrt =
-          OrtValueTensor.createTensorWithDataList(floatData, inputShape);
-
-      final inputs = {'input1': inputOrt};
-      final outputs = _session!.run(runOptions, inputs);
-      inputOrt.release();
-
-      if (outputs.isEmpty || outputs.first == null) return null;
-
-      final outputTensor = outputs.first!;
-      final outputList = outputTensor.value as List<dynamic>;
-      outputTensor.release();
-
-      // 5. CTC ArgMax decoding
-      // Output shape: [batch=1, timeSteps, vocabSize] or flattened
-      final predicted = _decodeCTC(outputList, _charset!);
-      return predicted.isNotEmpty ? predicted : null;
-    } catch (_) {
+      if (!await init()) return null;
+      final sw = Stopwatch()..start();
+      final reply = ReceivePort();
+      _worker!.send((reply.sendPort, imageBytes));
+      final predicted = await reply.first as String?;
+      reply.close();
+      if (predicted == null) return null;
+      _log('solved in ${sw.elapsedMilliseconds} ms '
+          '(${predicted.length} chars)');
+      return isPlausibleAnswer(predicted) ? predicted : null;
+    } catch (e) {
+      _log('solve failed: $e');
       return null;
     }
   }
 
-  /// CTC ArgMax decoding with blank token (index 0) removal and adjacent collapse.
-  static String _decodeCTC(dynamic outputData, List<String> charset) {
-    // outputData is typically List<List<List<double>>> or List<dynamic>
-    List<List<double>> timeSteps = [];
+  /// Builds the session, reports its [SendPort] (or the error) and then
+  /// answers `(replyPort, imageBytes)` requests with the decoded text.
+  static void _workerMain((SendPort, TransferableTypedData, String) args) {
+    final (ready, modelData, charsetJson) = args;
+    final OrtSession session;
+    final List<String> charset;
+    try {
+      charset = (jsonDecode(charsetJson) as List<dynamic>)
+          .map((e) => e.toString())
+          .toList();
+      OrtEnv.instance.init();
+      session = OrtSession.fromBuffer(
+          modelData.materialize().asUint8List(), OrtSessionOptions());
+    } catch (e) {
+      ready.send('$e');
+      return;
+    }
+    final requests = ReceivePort();
+    requests.listen((message) {
+      final (reply, imageBytes) = message as (SendPort, Uint8List);
+      String? text;
+      try {
+        text = _run(session, charset, imageBytes);
+      } catch (e) {
+        _log('solve failed: $e');
+      }
+      reply.send(text);
+    });
+    ready.send(requests.sendPort);
+  }
 
-    if (outputData is List) {
-      if (outputData.isNotEmpty && outputData.first is List) {
-        final first = outputData.first as List;
-        if (first.isNotEmpty && first.first is List) {
-          // [batch][time][vocab]
-          for (final t in first) {
-            timeSteps
-                .add((t as List).map((v) => (v as num).toDouble()).toList());
-          }
-        } else {
-          // [time][vocab]
-          for (final t in outputData) {
-            timeSteps
-                .add((t as List).map((v) => (v as num).toDouble()).toList());
-          }
-        }
+  static String? _run(
+      OrtSession session, List<String> charset, Uint8List imageBytes) {
+    final image = img.decodeImage(imageBytes);
+    if (image == null) return null;
+    final (floatData, width) = preprocess(image);
+
+    final runOptions = OrtRunOptions();
+    final inputOrt = OrtValueTensor.createTensorWithDataList(
+        floatData, [1, 1, inputHeight, width]);
+    final inputName =
+        session.inputNames.isNotEmpty ? session.inputNames.first : 'input1';
+    final outputs = session.run(runOptions, {inputName: inputOrt});
+    inputOrt.release();
+    runOptions.release();
+
+    if (outputs.isEmpty || outputs.first == null) return null;
+    final raw = outputs.first!.value;
+    for (final o in outputs) {
+      o?.release();
+    }
+    return decodeCtc(argmaxPerStep(raw), charset);
+  }
+
+  /// ddddocr preprocessing: scale to [inputHeight] keeping the aspect ratio,
+  /// convert to luminance (ITU-R 601-2, as PIL's `convert('L')`) and scale
+  /// to [0, 1]. Returns the row-major tensor data and its width.
+  static (Float32List, int) preprocess(img.Image image) {
+    final width =
+        (image.width * (inputHeight / image.height)).floor().clamp(1, 4096);
+    final resized = img.copyResize(image,
+        width: width,
+        height: inputHeight,
+        interpolation: img.Interpolation.cubic);
+    final data = Float32List(inputHeight * width);
+    var i = 0;
+    for (var y = 0; y < inputHeight; y++) {
+      for (var x = 0; x < width; x++) {
+        final p = resized.getPixel(x, y);
+        final gray = (p.r * 299 + p.g * 587 + p.b * 114) / 1000;
+        data[i++] = gray.roundToDouble() / 255.0;
       }
     }
+    return (data, width);
+  }
 
-    if (timeSteps.isEmpty) return '';
+  /// Argmax over the class axis for every time step. Accepts the model's
+  /// `[T, 1, C]` output, a `[1, T, C]` layout, `[T, C]`, or an already
+  /// argmaxed `[1, T]` / `[T]` index list.
+  static List<int> argmaxPerStep(Object? output) {
+    if (output is! List || output.isEmpty) return const [];
+    final first = output.first;
+    if (first is num) {
+      return [for (final v in output) (v as num).toInt()];
+    }
+    if (first is! List) return const [];
 
-    final tokens = <int>[];
-    for (final step in timeSteps) {
-      int maxIdx = 0;
-      double maxVal = double.negativeInfinity;
-      for (int i = 0; i < step.length; i++) {
-        if (step[i] > maxVal) {
-          maxVal = step[i];
-          maxIdx = i;
-        }
-      }
-      tokens.add(maxIdx);
+    List<List> steps;
+    final inner = first.isNotEmpty ? first.first : null;
+    if (inner is List) {
+      // 3-D: [T][1][C] when the middle axis is the batch, else [1][T][C].
+      steps = first.length == 1
+          ? [for (final t in output) (t as List).first as List]
+          : [for (final t in first) t as List];
+    } else if (output.length == 1 && first.isNotEmpty && first.first is num) {
+      // [1][T] already-argmaxed indices, or a lone [1][C] logit row.
+      final row = first;
+      final looksLikeIndices = row.every((v) => v is int);
+      if (looksLikeIndices) return [for (final v in row) v as int];
+      steps = [row];
+    } else {
+      steps = [for (final t in output) t as List];
     }
 
-    // Collapse adjacent duplicates and remove blank token (0)
+    return [
+      for (final step in steps)
+        () {
+          var best = 0;
+          var bestVal = double.negativeInfinity;
+          for (var c = 0; c < step.length; c++) {
+            final v = (step[c] as num).toDouble();
+            if (v > bestVal) {
+              bestVal = v;
+              best = c;
+            }
+          }
+          return best;
+        }(),
+    ];
+  }
+
+  /// CTC greedy decode: collapse repeated indices, then drop the blank (0).
+  static String decodeCtc(List<int> indices, List<String> charset) {
     final buffer = StringBuffer();
-    int prevToken = -1;
-
-    for (final token in tokens) {
-      if (token != prevToken) {
-        if (token != 0 && token < charset.length) {
-          buffer.write(charset[token]);
-        }
-        prevToken = token;
+    int? prev;
+    for (final idx in indices) {
+      if (idx != prev && idx != 0 && idx > 0 && idx < charset.length) {
+        buffer.write(charset[idx]);
       }
+      prev = idx;
     }
-
     return buffer.toString().trim();
+  }
+
+  /// SRM CAPTCHAs are 4–8 ASCII letters/digits. Anything else is a misread
+  /// that would only burn a sign-in attempt.
+  static bool isPlausibleAnswer(String s) =>
+      RegExp(r'^[A-Za-z0-9]{4,8}$').hasMatch(s);
+
+  static void _log(String message) {
+    if (kDebugMode) debugPrint('[SP OCR] $message');
   }
 }

@@ -5,12 +5,12 @@
 // Ported from academia-backend/academia-scraper/cmd/loginprobe/login.go & client.go
 
 import 'dart:convert';
+import 'dart:isolate';
 
 import 'package:dio/dio.dart';
 import '../../core/constants/portal_endpoints.dart';
 import '../../core/network/manual_redirect_client.dart';
 import '../../core/network/simple_cookie_jar.dart';
-import '../../domain/services/attendance_planner_math.dart';
 import 'academia_decoder.dart';
 import 'academia_parsers.dart';
 import 'zoho_login_helpers.dart';
@@ -335,7 +335,28 @@ class AcademiaClient {
   /// Fetches a Zoho page fragment with cache-busting headers and decodes it.
   /// Retries once with the portal home as Referer on a 403/404.
   /// Throws [SessionExpiredException] if the response is a sign-in page.
-  Future<String> fetchDecodedPage(String pageUrl, {String? refererHash}) async {
+  Future<String> fetchDecodedPage(String pageUrl, {String? refererHash}) =>
+      fetchParsedPage(pageUrl, _identity, refererHash: refererHash);
+
+  /// Like [fetchDecodedPage], but decodes the page and runs [parse] on it in
+  /// a background isolate, so large pages never stall the UI thread.
+  /// [parse] must be a top-level or static function (or a closure that only
+  /// captures sendable values).
+  Future<T> fetchParsedPage<T>(
+      String pageUrl, T Function(String decodedHtml) parse,
+      {String? refererHash}) async {
+    final raw = await _fetchRawPage(pageUrl, refererHash: refererHash);
+    return _decodeAndParse(raw, parse);
+  }
+
+  static String _identity(String s) => s;
+
+  /// Static so the isolate closure captures only [raw] and [parse].
+  static Future<T> _decodeAndParse<T>(
+          String raw, T Function(String decodedHtml) parse) =>
+      Isolate.run(() => parse(AcademiaDecoder.decodeHTMLFragment(raw)));
+
+  Future<String> _fetchRawPage(String pageUrl, {String? refererHash}) async {
     Future<String> attempt(String referer) async {
       final epoch = DateTime.now().millisecondsSinceEpoch;
       // Like Go fetchDecodedFragment, don't follow redirects: an
@@ -367,7 +388,7 @@ class AcademiaClient {
       if (status == 403 || status == 404) {
         throw _RetryableStatus(status);
       }
-      return AcademiaDecoder.decodeHTMLFragment(rawHtml);
+      return rawHtml;
     }
 
     const home = '${PortalEndpoints.academiaBaseUrl}/';
@@ -397,60 +418,76 @@ class AcademiaClient {
         lower.contains('academic web services login');
   }
 
+  static const _attendanceReferer = '#Page:My_Time_Table_2023_24';
+
   /// Fetches the decoded My_Time_Table_2023_24 page. It carries attendance,
   /// the student info table, the Test Performance (marks) table, the personal
   /// course list and advisors.
   Future<String> fetchAttendancePage() => fetchDecodedPage(
         PortalEndpoints.attendanceUrl,
-        refererHash: '#Page:My_Time_Table_2023_24',
+        refererHash: _attendanceReferer,
       );
 
-  /// Fetches attendance records with Zoho cache-busting headers.
-  /// Throws [SessionExpiredException] if session has expired or was invalidated.
-  Future<List<AttendanceInput>> fetchAttendance() async {
-    return AcademiaParsers.parseAttendance(await fetchAttendancePage());
-  }
+  /// Fetches the My_Time_Table page and parses every section of it in one
+  /// pass, off the UI thread.
+  Future<AcademiaPageData> fetchAttendancePageData() => fetchParsedPage(
+        PortalEndpoints.attendanceUrl,
+        AcademiaParsers.parseAttendancePage,
+        refererHash: _attendanceReferer,
+      );
 
   /// Fetches the unified timetable slot grid for [batch] ("1" or "2").
   Future<Map<String, List<Map<String, dynamic>>>> fetchUnifiedSlotMap(
-      String batch) async {
+      String batch) {
     final isBatch2 = batch.trim() == '2';
-    final html = await fetchDecodedPage(
+    return fetchParsedPage(
       isBatch2
           ? PortalEndpoints.unifiedTimetableBatch2
           : PortalEndpoints.unifiedTimetableBatch1,
+      AcademiaParsers.parseUnifiedSlotMap,
       refererHash: isBatch2
           ? '#Page:Unified_Time_Table_2025_batch_2'
           : '#Page:Unified_Time_Table_2025_Batch_1',
     );
-    return AcademiaParsers.parseUnifiedSlotMap(html);
+  }
+
+  /// Calendar pages already requested by this client, so the shared
+  /// Academic_Reports page is downloaded once even when both semesters are
+  /// fetched at the same time.
+  final Map<String, Future<List<Map<String, dynamic>>>> _calendarPages = {};
+
+  Future<List<Map<String, dynamic>>> _calendarPage(String url, String referer) {
+    return _calendarPages.putIfAbsent(
+        url,
+        () => fetchParsedPage(url, AcademiaParsers.parseCalendar,
+            refererHash: referer));
   }
 
   /// Fetches the academic calendar for [sem] ('odd' | 'even'), trying the
   /// Academic_Reports page first and the legacy planner pages after it.
-  /// Returns an empty list when no candidate page yields a calendar.
+  /// The planner pages are requested together; the first one (in order)
+  /// that yields a calendar wins. Returns an empty list when none does.
   Future<List<Map<String, dynamic>>> fetchCalendar(String sem) async {
     final semToken = sem.toUpperCase();
-    final candidates = <(String, String)>[
-      (PortalEndpoints.academicReportsUrl, '#Academic_Reports'),
+
+    Future<List<Map<String, dynamic>>> tryPage(String url, String referer) =>
+        _calendarPage(url, referer).catchError((Object e) {
+          if (e is SessionExpiredException) throw e;
+          return <Map<String, dynamic>>[];
+        });
+
+    final reports =
+        await tryPage(PortalEndpoints.academicReportsUrl, '#Academic_Reports');
+    if (reports.isNotEmpty) return reports;
+
+    final planners = await Future.wait([
       for (final year in ['2026_27', '2025_26', '2024_25'])
-        (
+        tryPage(
           '${PortalEndpoints.academiaBaseUrl}/srm_university/academia-academic-services/page/Academic_Planner_${year}_$semToken',
           '#Page:Academic_Planner_${year}_$semToken',
         ),
-    ];
-    for (final (url, referer) in candidates) {
-      try {
-        final months = AcademiaParsers.parseCalendar(
-            await fetchDecodedPage(url, refererHash: referer));
-        if (months.isNotEmpty) return months;
-      } on SessionExpiredException {
-        rethrow;
-      } catch (_) {
-        // Try the next candidate page.
-      }
-    }
-    return [];
+    ]);
+    return planners.firstWhere((m) => m.isNotEmpty, orElse: () => []);
   }
 }
 

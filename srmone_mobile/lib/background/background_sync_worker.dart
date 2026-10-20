@@ -41,6 +41,9 @@ void backgroundSyncCallbackDispatcher() {
       // No CAPTCHA prompt in the background: Student Portal sign-in only
       // happens if on-device OCR solves it.
       final result = await orchestrator.syncAll();
+      // The portal marks finish after the attendance; let them land before
+      // the database is closed.
+      await orchestrator.spMarksDone;
       return result.status != SyncStatus.error;
     } catch (_) {
       return false;
