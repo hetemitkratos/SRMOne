@@ -198,6 +198,23 @@ class NotificationsTable extends Table {
   Set<Column> get primaryKey => {id};
 }
 
+/// How each part of the sync last went, so screens can say what is stale.
+/// One row per student and [section] (a `SyncSection` name). Added in v2.
+class SyncSectionStatus extends Table {
+  TextColumn get academiaEmail => text()();
+  TextColumn get section => text()();
+  IntColumn get lastAttemptAt => integer().withDefault(const Constant(0))();
+
+  /// When the section last refreshed successfully, or null if never.
+  IntColumn get lastSuccessAt => integer().nullable()();
+
+  /// What went wrong on the last attempt, for the user; null if it worked.
+  TextColumn get lastError => text().nullable()();
+
+  @override
+  Set<Column> get primaryKey => {academiaEmail, section};
+}
+
 // ─── Database Class ───────────────────────────────────────────────────────────
 
 @DriftDatabase(
@@ -212,6 +229,7 @@ class NotificationsTable extends Table {
     UserSettingsTable,
     NotificationSettingsTable,
     NotificationsTable,
+    SyncSectionStatus,
   ],
 )
 class AppDatabase extends _$AppDatabase {
@@ -221,12 +239,50 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.executor);
 
   @override
-  int get schemaVersion => 1;
+  int get schemaVersion => currentSchemaVersion;
 
+  /// Bumped with every schema change (see [migration]).
+  static const currentSchemaVersion = 2;
+
+  /// Each schema change bumps [schemaVersion] and adds a step here; the
+  /// snapshots in drift_schemas/ and test/database/migration_test.dart check
+  /// that every older version upgrades to the current one.
   @override
   MigrationStrategy get migration => MigrationStrategy(
         onCreate: (m) => m.createAll(),
+        onUpgrade: (m, from, to) async {
+          if (from < 2) await m.createTable(syncSectionStatus);
+        },
       );
+
+  // ─── Sync Status DAO ────────────────────────────────────────────────────────
+
+  /// Records one sync section's outcome: a null [error] means it worked.
+  Future<void> recordSyncOutcome(String academiaEmail, String section,
+      {String? error}) {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    return into(syncSectionStatus).insert(
+      SyncSectionStatusCompanion.insert(
+        academiaEmail: academiaEmail,
+        section: section,
+        lastAttemptAt: Value(now),
+        lastSuccessAt: error == null ? Value(now) : const Value.absent(),
+        lastError: Value(error),
+      ),
+      onConflict: DoUpdate((old) => SyncSectionStatusCompanion(
+            lastAttemptAt: Value(now),
+            lastSuccessAt: error == null ? Value(now) : const Value.absent(),
+            lastError: Value(error),
+          )),
+    );
+  }
+
+  /// Every section's latest outcome for [academiaEmail].
+  Stream<List<SyncSectionStatusData>> watchSyncStatus(String academiaEmail) {
+    return (select(syncSectionStatus)
+          ..where((t) => t.academiaEmail.equals(academiaEmail)))
+        .watch();
+  }
 
   // ─── Attendance DAO ─────────────────────────────────────────────────────────
 

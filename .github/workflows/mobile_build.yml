@@ -7,11 +7,44 @@ on:
       - 'srmone_mobile/**'
       - '.github/workflows/mobile_build.yml'
     tags: [ 'v*' ]
+  pull_request:
+    paths:
+      - 'srmone_mobile/**'
+      - '.github/workflows/mobile_build.yml'
   workflow_dispatch:
 
 jobs:
+  checks:
+    name: Analyze and test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: srmone_mobile
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.32.8'
+          channel: 'stable'
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Analyze
+        run: flutter analyze --no-fatal-infos
+
+      - name: Run Unit Tests
+        run: flutter test
+
   build-android:
     name: Build Android Release APK
+    # Pull requests only get the checks above; builds run on main, tags and manual runs.
+    if: github.event_name != 'pull_request'
+    needs: checks
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -35,13 +68,38 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
-      - name: Run Unit Tests
-        run: flutter test
+      # The release key lives in repository secrets. Version tags must be signed
+      # with it so each release installs over the last one; other builds fall
+      # back to the debug key when the secrets are missing.
+      - name: Set up release signing
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+              echo "::error::Release signing secrets are missing; refusing to publish a debug-signed release."
+              exit 1
+            fi
+            echo "::warning::No release signing secrets; this APK is debug-signed and can't update an installed app."
+            exit 0
+          fi
+          echo "$KEYSTORE_BASE64" | base64 -d > android/upload-keystore.jks
+          {
+            echo "storeFile=upload-keystore.jks"
+            echo "storePassword=$KEYSTORE_PASSWORD"
+            echo "keyAlias=$KEY_ALIAS"
+            echo "keyPassword=$KEY_PASSWORD"
+          } > android/key.properties
 
       # One APK for every real Android phone (32- and 64-bit ARM); x86_64 is emulator-only.
       - name: Build Android APK
         run: |
-          flutter build apk --release --target-platform android-arm,android-arm64
+          # The run number always grows, so each build is an upgrade of the last.
+          flutter build apk --release --target-platform android-arm,android-arm64 \
+            --build-number ${{ github.run_number }}
           mv build/app/outputs/flutter-apk/app-release.apk build/app/outputs/flutter-apk/SRMOne.apk
 
       - name: Upload Android APK
@@ -52,6 +110,8 @@ jobs:
 
   build-ios:
     name: Build iOS IPA (macOS Cloud Runner)
+    if: github.event_name != 'pull_request'
+    needs: checks
     runs-on: macos-14
     defaults:
       run:

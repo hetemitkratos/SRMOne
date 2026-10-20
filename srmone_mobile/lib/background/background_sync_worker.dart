@@ -6,6 +6,7 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:workmanager/workmanager.dart';
 import '../core/database/app_database.dart';
+import '../core/diagnostics/error_log.dart';
 import '../core/security/secure_vault_service.dart';
 import '../domain/services/notification_rule_engine.dart';
 import '../domain/services/session_sync_orchestrator.dart';
@@ -19,6 +20,7 @@ void backgroundSyncCallbackDispatcher() {
     WidgetsFlutterBinding.ensureInitialized();
     AppDatabase? db;
     try {
+      await ErrorLog.init();
       db = AppDatabase();
       final notifPlugin = FlutterLocalNotificationsPlugin();
       await notifPlugin.initialize(
@@ -45,7 +47,8 @@ void backgroundSyncCallbackDispatcher() {
       // the database is closed.
       await orchestrator.spMarksDone;
       return result.status != SyncStatus.error;
-    } catch (_) {
+    } catch (e, stack) {
+      await ErrorLog.record(e, stack, context: 'background sync');
       return false;
     } finally {
       await db?.close();

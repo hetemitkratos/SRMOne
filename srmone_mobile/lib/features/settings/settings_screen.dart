@@ -9,10 +9,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../../core/database/app_database.dart';
+import '../../core/diagnostics/error_log.dart';
 import '../../core/security/biometric_auth_service.dart';
 import '../../main.dart';
 import '../auth/auth_controller.dart';
@@ -28,6 +30,7 @@ class SettingsScreen extends ConsumerStatefulWidget {
 
 class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   final _biometrics = BiometricAuthService();
+  final _packageInfo = PackageInfo.fromPlatform();
   bool _biometricSupported = false;
 
   @override
@@ -87,6 +90,18 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       final xFile = XFile(file.path, mimeType: 'application/json');
       await Share.shareXFiles([xFile], text: 'SRMOne Data Backup');
     }
+  }
+
+  Future<void> _shareErrorLog() async {
+    final messenger = ScaffoldMessenger.of(context);
+    final file = await ErrorLog.file();
+    if (file == null) {
+      messenger.showSnackBar(
+          const SnackBar(content: Text('No errors recorded so far.')));
+      return;
+    }
+    await Share.shareXFiles([XFile(file.path, mimeType: 'text/plain')],
+        text: 'SRMOne error log');
   }
 
   @override
@@ -254,6 +269,14 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                     ),
 
                     ListTile(
+                      leading: const Icon(LucideIcons.bug),
+                      title: const Text('Share Error Log'),
+                      subtitle: const Text(
+                          'Errors this app hit, without your NetID or password'),
+                      onTap: _shareErrorLog,
+                    ),
+
+                    ListTile(
                       leading: const Icon(LucideIcons.shieldCheck),
                       title: const Text('Privacy Policy'),
                       trailing: const Icon(LucideIcons.chevronRight, size: 18),
@@ -335,12 +358,21 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
                     const SizedBox(height: 32),
                     Center(
-                      child: Text(
-                        'SRMOne Mobile v1.0.0 (Local-First)\nBuilt with Flutter & Drift',
-                        style: theme.textTheme.labelSmall?.copyWith(
-                          color: Colors.grey,
-                        ),
-                        textAlign: TextAlign.center,
+                      child: FutureBuilder<PackageInfo>(
+                        future: _packageInfo,
+                        builder: (context, snap) {
+                          final info = snap.data;
+                          final version = info == null
+                              ? ''
+                              : ' v${info.version} (${info.buildNumber})';
+                          return Text(
+                            'SRMOne Mobile$version\nLocal-First, built with Flutter & Drift',
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              color: Colors.grey,
+                            ),
+                            textAlign: TextAlign.center,
+                          );
+                        },
                       ),
                     ),
                     const SizedBox(height: 20),

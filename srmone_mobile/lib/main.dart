@@ -4,11 +4,13 @@
 
 import 'dart:async';
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:workmanager/workmanager.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'core/database/app_database.dart';
+import 'core/diagnostics/error_log.dart';
 import 'app.dart';
 import 'background/background_sync_worker.dart';
 
@@ -18,6 +20,20 @@ final flutterLocalNotificationsPlugin = FlutterLocalNotificationsPlugin();
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Catch everything uncaught (framework and async) before anything can throw.
+  FlutterError.onError = (details) {
+    FlutterError.presentError(details);
+    ErrorLog.record(details.exception, details.stack,
+        context: 'flutter ${details.library ?? ''}');
+  };
+  PlatformDispatcher.instance.onError = (error, stack) {
+    ErrorLog.record(error, stack, context: 'uncaught');
+    return true;
+  };
+  await ErrorLog.init().catchError((Object e) {
+    debugPrint('[Startup] error log unavailable: $e');
+  });
 
   // Initialize local database
   appDatabase = AppDatabase();

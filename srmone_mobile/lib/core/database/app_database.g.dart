@@ -5279,6 +5279,339 @@ class NotificationsTableCompanion
   }
 }
 
+class $SyncSectionStatusTable extends SyncSectionStatus
+    with TableInfo<$SyncSectionStatusTable, SyncSectionStatusData> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $SyncSectionStatusTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _academiaEmailMeta =
+      const VerificationMeta('academiaEmail');
+  @override
+  late final GeneratedColumn<String> academiaEmail = GeneratedColumn<String>(
+      'academia_email', aliasedName, false,
+      type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _sectionMeta =
+      const VerificationMeta('section');
+  @override
+  late final GeneratedColumn<String> section = GeneratedColumn<String>(
+      'section', aliasedName, false,
+      type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _lastAttemptAtMeta =
+      const VerificationMeta('lastAttemptAt');
+  @override
+  late final GeneratedColumn<int> lastAttemptAt = GeneratedColumn<int>(
+      'last_attempt_at', aliasedName, false,
+      type: DriftSqlType.int,
+      requiredDuringInsert: false,
+      defaultValue: const Constant(0));
+  static const VerificationMeta _lastSuccessAtMeta =
+      const VerificationMeta('lastSuccessAt');
+  @override
+  late final GeneratedColumn<int> lastSuccessAt = GeneratedColumn<int>(
+      'last_success_at', aliasedName, true,
+      type: DriftSqlType.int, requiredDuringInsert: false);
+  static const VerificationMeta _lastErrorMeta =
+      const VerificationMeta('lastError');
+  @override
+  late final GeneratedColumn<String> lastError = GeneratedColumn<String>(
+      'last_error', aliasedName, true,
+      type: DriftSqlType.string, requiredDuringInsert: false);
+  @override
+  List<GeneratedColumn> get $columns =>
+      [academiaEmail, section, lastAttemptAt, lastSuccessAt, lastError];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'sync_section_status';
+  @override
+  VerificationContext validateIntegrity(
+      Insertable<SyncSectionStatusData> instance,
+      {bool isInserting = false}) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('academia_email')) {
+      context.handle(
+          _academiaEmailMeta,
+          academiaEmail.isAcceptableOrUnknown(
+              data['academia_email']!, _academiaEmailMeta));
+    } else if (isInserting) {
+      context.missing(_academiaEmailMeta);
+    }
+    if (data.containsKey('section')) {
+      context.handle(_sectionMeta,
+          section.isAcceptableOrUnknown(data['section']!, _sectionMeta));
+    } else if (isInserting) {
+      context.missing(_sectionMeta);
+    }
+    if (data.containsKey('last_attempt_at')) {
+      context.handle(
+          _lastAttemptAtMeta,
+          lastAttemptAt.isAcceptableOrUnknown(
+              data['last_attempt_at']!, _lastAttemptAtMeta));
+    }
+    if (data.containsKey('last_success_at')) {
+      context.handle(
+          _lastSuccessAtMeta,
+          lastSuccessAt.isAcceptableOrUnknown(
+              data['last_success_at']!, _lastSuccessAtMeta));
+    }
+    if (data.containsKey('last_error')) {
+      context.handle(_lastErrorMeta,
+          lastError.isAcceptableOrUnknown(data['last_error']!, _lastErrorMeta));
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {academiaEmail, section};
+  @override
+  SyncSectionStatusData map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return SyncSectionStatusData(
+      academiaEmail: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}academia_email'])!,
+      section: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}section'])!,
+      lastAttemptAt: attachedDatabase.typeMapping
+          .read(DriftSqlType.int, data['${effectivePrefix}last_attempt_at'])!,
+      lastSuccessAt: attachedDatabase.typeMapping
+          .read(DriftSqlType.int, data['${effectivePrefix}last_success_at']),
+      lastError: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}last_error']),
+    );
+  }
+
+  @override
+  $SyncSectionStatusTable createAlias(String alias) {
+    return $SyncSectionStatusTable(attachedDatabase, alias);
+  }
+}
+
+class SyncSectionStatusData extends DataClass
+    implements Insertable<SyncSectionStatusData> {
+  final String academiaEmail;
+  final String section;
+  final int lastAttemptAt;
+
+  /// When the section last refreshed successfully, or null if never.
+  final int? lastSuccessAt;
+
+  /// What went wrong on the last attempt, for the user; null if it worked.
+  final String? lastError;
+  const SyncSectionStatusData(
+      {required this.academiaEmail,
+      required this.section,
+      required this.lastAttemptAt,
+      this.lastSuccessAt,
+      this.lastError});
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['academia_email'] = Variable<String>(academiaEmail);
+    map['section'] = Variable<String>(section);
+    map['last_attempt_at'] = Variable<int>(lastAttemptAt);
+    if (!nullToAbsent || lastSuccessAt != null) {
+      map['last_success_at'] = Variable<int>(lastSuccessAt);
+    }
+    if (!nullToAbsent || lastError != null) {
+      map['last_error'] = Variable<String>(lastError);
+    }
+    return map;
+  }
+
+  SyncSectionStatusCompanion toCompanion(bool nullToAbsent) {
+    return SyncSectionStatusCompanion(
+      academiaEmail: Value(academiaEmail),
+      section: Value(section),
+      lastAttemptAt: Value(lastAttemptAt),
+      lastSuccessAt: lastSuccessAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(lastSuccessAt),
+      lastError: lastError == null && nullToAbsent
+          ? const Value.absent()
+          : Value(lastError),
+    );
+  }
+
+  factory SyncSectionStatusData.fromJson(Map<String, dynamic> json,
+      {ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return SyncSectionStatusData(
+      academiaEmail: serializer.fromJson<String>(json['academiaEmail']),
+      section: serializer.fromJson<String>(json['section']),
+      lastAttemptAt: serializer.fromJson<int>(json['lastAttemptAt']),
+      lastSuccessAt: serializer.fromJson<int?>(json['lastSuccessAt']),
+      lastError: serializer.fromJson<String?>(json['lastError']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'academiaEmail': serializer.toJson<String>(academiaEmail),
+      'section': serializer.toJson<String>(section),
+      'lastAttemptAt': serializer.toJson<int>(lastAttemptAt),
+      'lastSuccessAt': serializer.toJson<int?>(lastSuccessAt),
+      'lastError': serializer.toJson<String?>(lastError),
+    };
+  }
+
+  SyncSectionStatusData copyWith(
+          {String? academiaEmail,
+          String? section,
+          int? lastAttemptAt,
+          Value<int?> lastSuccessAt = const Value.absent(),
+          Value<String?> lastError = const Value.absent()}) =>
+      SyncSectionStatusData(
+        academiaEmail: academiaEmail ?? this.academiaEmail,
+        section: section ?? this.section,
+        lastAttemptAt: lastAttemptAt ?? this.lastAttemptAt,
+        lastSuccessAt:
+            lastSuccessAt.present ? lastSuccessAt.value : this.lastSuccessAt,
+        lastError: lastError.present ? lastError.value : this.lastError,
+      );
+  SyncSectionStatusData copyWithCompanion(SyncSectionStatusCompanion data) {
+    return SyncSectionStatusData(
+      academiaEmail: data.academiaEmail.present
+          ? data.academiaEmail.value
+          : this.academiaEmail,
+      section: data.section.present ? data.section.value : this.section,
+      lastAttemptAt: data.lastAttemptAt.present
+          ? data.lastAttemptAt.value
+          : this.lastAttemptAt,
+      lastSuccessAt: data.lastSuccessAt.present
+          ? data.lastSuccessAt.value
+          : this.lastSuccessAt,
+      lastError: data.lastError.present ? data.lastError.value : this.lastError,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('SyncSectionStatusData(')
+          ..write('academiaEmail: $academiaEmail, ')
+          ..write('section: $section, ')
+          ..write('lastAttemptAt: $lastAttemptAt, ')
+          ..write('lastSuccessAt: $lastSuccessAt, ')
+          ..write('lastError: $lastError')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+      academiaEmail, section, lastAttemptAt, lastSuccessAt, lastError);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is SyncSectionStatusData &&
+          other.academiaEmail == this.academiaEmail &&
+          other.section == this.section &&
+          other.lastAttemptAt == this.lastAttemptAt &&
+          other.lastSuccessAt == this.lastSuccessAt &&
+          other.lastError == this.lastError);
+}
+
+class SyncSectionStatusCompanion
+    extends UpdateCompanion<SyncSectionStatusData> {
+  final Value<String> academiaEmail;
+  final Value<String> section;
+  final Value<int> lastAttemptAt;
+  final Value<int?> lastSuccessAt;
+  final Value<String?> lastError;
+  final Value<int> rowid;
+  const SyncSectionStatusCompanion({
+    this.academiaEmail = const Value.absent(),
+    this.section = const Value.absent(),
+    this.lastAttemptAt = const Value.absent(),
+    this.lastSuccessAt = const Value.absent(),
+    this.lastError = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  SyncSectionStatusCompanion.insert({
+    required String academiaEmail,
+    required String section,
+    this.lastAttemptAt = const Value.absent(),
+    this.lastSuccessAt = const Value.absent(),
+    this.lastError = const Value.absent(),
+    this.rowid = const Value.absent(),
+  })  : academiaEmail = Value(academiaEmail),
+        section = Value(section);
+  static Insertable<SyncSectionStatusData> custom({
+    Expression<String>? academiaEmail,
+    Expression<String>? section,
+    Expression<int>? lastAttemptAt,
+    Expression<int>? lastSuccessAt,
+    Expression<String>? lastError,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (academiaEmail != null) 'academia_email': academiaEmail,
+      if (section != null) 'section': section,
+      if (lastAttemptAt != null) 'last_attempt_at': lastAttemptAt,
+      if (lastSuccessAt != null) 'last_success_at': lastSuccessAt,
+      if (lastError != null) 'last_error': lastError,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  SyncSectionStatusCompanion copyWith(
+      {Value<String>? academiaEmail,
+      Value<String>? section,
+      Value<int>? lastAttemptAt,
+      Value<int?>? lastSuccessAt,
+      Value<String?>? lastError,
+      Value<int>? rowid}) {
+    return SyncSectionStatusCompanion(
+      academiaEmail: academiaEmail ?? this.academiaEmail,
+      section: section ?? this.section,
+      lastAttemptAt: lastAttemptAt ?? this.lastAttemptAt,
+      lastSuccessAt: lastSuccessAt ?? this.lastSuccessAt,
+      lastError: lastError ?? this.lastError,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (academiaEmail.present) {
+      map['academia_email'] = Variable<String>(academiaEmail.value);
+    }
+    if (section.present) {
+      map['section'] = Variable<String>(section.value);
+    }
+    if (lastAttemptAt.present) {
+      map['last_attempt_at'] = Variable<int>(lastAttemptAt.value);
+    }
+    if (lastSuccessAt.present) {
+      map['last_success_at'] = Variable<int>(lastSuccessAt.value);
+    }
+    if (lastError.present) {
+      map['last_error'] = Variable<String>(lastError.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('SyncSectionStatusCompanion(')
+          ..write('academiaEmail: $academiaEmail, ')
+          ..write('section: $section, ')
+          ..write('lastAttemptAt: $lastAttemptAt, ')
+          ..write('lastSuccessAt: $lastSuccessAt, ')
+          ..write('lastError: $lastError, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
@@ -5298,6 +5631,8 @@ abstract class _$AppDatabase extends GeneratedDatabase {
       $NotificationSettingsTableTable(this);
   late final $NotificationsTableTable notificationsTable =
       $NotificationsTableTable(this);
+  late final $SyncSectionStatusTable syncSectionStatus =
+      $SyncSectionStatusTable(this);
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
@@ -5312,7 +5647,8 @@ abstract class _$AppDatabase extends GeneratedDatabase {
         facultyCache,
         userSettingsTable,
         notificationSettingsTable,
-        notificationsTable
+        notificationsTable,
+        syncSectionStatus
       ];
 }
 
@@ -7875,6 +8211,186 @@ typedef $$NotificationsTableTableProcessedTableManager = ProcessedTableManager<
     ),
     NotificationsTableData,
     PrefetchHooks Function()>;
+typedef $$SyncSectionStatusTableCreateCompanionBuilder
+    = SyncSectionStatusCompanion Function({
+  required String academiaEmail,
+  required String section,
+  Value<int> lastAttemptAt,
+  Value<int?> lastSuccessAt,
+  Value<String?> lastError,
+  Value<int> rowid,
+});
+typedef $$SyncSectionStatusTableUpdateCompanionBuilder
+    = SyncSectionStatusCompanion Function({
+  Value<String> academiaEmail,
+  Value<String> section,
+  Value<int> lastAttemptAt,
+  Value<int?> lastSuccessAt,
+  Value<String?> lastError,
+  Value<int> rowid,
+});
+
+class $$SyncSectionStatusTableFilterComposer
+    extends Composer<_$AppDatabase, $SyncSectionStatusTable> {
+  $$SyncSectionStatusTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get academiaEmail => $composableBuilder(
+      column: $table.academiaEmail, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get section => $composableBuilder(
+      column: $table.section, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<int> get lastAttemptAt => $composableBuilder(
+      column: $table.lastAttemptAt, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<int> get lastSuccessAt => $composableBuilder(
+      column: $table.lastSuccessAt, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get lastError => $composableBuilder(
+      column: $table.lastError, builder: (column) => ColumnFilters(column));
+}
+
+class $$SyncSectionStatusTableOrderingComposer
+    extends Composer<_$AppDatabase, $SyncSectionStatusTable> {
+  $$SyncSectionStatusTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get academiaEmail => $composableBuilder(
+      column: $table.academiaEmail,
+      builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get section => $composableBuilder(
+      column: $table.section, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<int> get lastAttemptAt => $composableBuilder(
+      column: $table.lastAttemptAt,
+      builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<int> get lastSuccessAt => $composableBuilder(
+      column: $table.lastSuccessAt,
+      builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get lastError => $composableBuilder(
+      column: $table.lastError, builder: (column) => ColumnOrderings(column));
+}
+
+class $$SyncSectionStatusTableAnnotationComposer
+    extends Composer<_$AppDatabase, $SyncSectionStatusTable> {
+  $$SyncSectionStatusTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get academiaEmail => $composableBuilder(
+      column: $table.academiaEmail, builder: (column) => column);
+
+  GeneratedColumn<String> get section =>
+      $composableBuilder(column: $table.section, builder: (column) => column);
+
+  GeneratedColumn<int> get lastAttemptAt => $composableBuilder(
+      column: $table.lastAttemptAt, builder: (column) => column);
+
+  GeneratedColumn<int> get lastSuccessAt => $composableBuilder(
+      column: $table.lastSuccessAt, builder: (column) => column);
+
+  GeneratedColumn<String> get lastError =>
+      $composableBuilder(column: $table.lastError, builder: (column) => column);
+}
+
+class $$SyncSectionStatusTableTableManager extends RootTableManager<
+    _$AppDatabase,
+    $SyncSectionStatusTable,
+    SyncSectionStatusData,
+    $$SyncSectionStatusTableFilterComposer,
+    $$SyncSectionStatusTableOrderingComposer,
+    $$SyncSectionStatusTableAnnotationComposer,
+    $$SyncSectionStatusTableCreateCompanionBuilder,
+    $$SyncSectionStatusTableUpdateCompanionBuilder,
+    (
+      SyncSectionStatusData,
+      BaseReferences<_$AppDatabase, $SyncSectionStatusTable,
+          SyncSectionStatusData>
+    ),
+    SyncSectionStatusData,
+    PrefetchHooks Function()> {
+  $$SyncSectionStatusTableTableManager(
+      _$AppDatabase db, $SyncSectionStatusTable table)
+      : super(TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$SyncSectionStatusTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$SyncSectionStatusTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$SyncSectionStatusTableAnnotationComposer(
+                  $db: db, $table: table),
+          updateCompanionCallback: ({
+            Value<String> academiaEmail = const Value.absent(),
+            Value<String> section = const Value.absent(),
+            Value<int> lastAttemptAt = const Value.absent(),
+            Value<int?> lastSuccessAt = const Value.absent(),
+            Value<String?> lastError = const Value.absent(),
+            Value<int> rowid = const Value.absent(),
+          }) =>
+              SyncSectionStatusCompanion(
+            academiaEmail: academiaEmail,
+            section: section,
+            lastAttemptAt: lastAttemptAt,
+            lastSuccessAt: lastSuccessAt,
+            lastError: lastError,
+            rowid: rowid,
+          ),
+          createCompanionCallback: ({
+            required String academiaEmail,
+            required String section,
+            Value<int> lastAttemptAt = const Value.absent(),
+            Value<int?> lastSuccessAt = const Value.absent(),
+            Value<String?> lastError = const Value.absent(),
+            Value<int> rowid = const Value.absent(),
+          }) =>
+              SyncSectionStatusCompanion.insert(
+            academiaEmail: academiaEmail,
+            section: section,
+            lastAttemptAt: lastAttemptAt,
+            lastSuccessAt: lastSuccessAt,
+            lastError: lastError,
+            rowid: rowid,
+          ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ));
+}
+
+typedef $$SyncSectionStatusTableProcessedTableManager = ProcessedTableManager<
+    _$AppDatabase,
+    $SyncSectionStatusTable,
+    SyncSectionStatusData,
+    $$SyncSectionStatusTableFilterComposer,
+    $$SyncSectionStatusTableOrderingComposer,
+    $$SyncSectionStatusTableAnnotationComposer,
+    $$SyncSectionStatusTableCreateCompanionBuilder,
+    $$SyncSectionStatusTableUpdateCompanionBuilder,
+    (
+      SyncSectionStatusData,
+      BaseReferences<_$AppDatabase, $SyncSectionStatusTable,
+          SyncSectionStatusData>
+    ),
+    SyncSectionStatusData,
+    PrefetchHooks Function()>;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
@@ -7900,4 +8416,6 @@ class $AppDatabaseManager {
           _db, _db.notificationSettingsTable);
   $$NotificationsTableTableTableManager get notificationsTable =>
       $$NotificationsTableTableTableManager(_db, _db.notificationsTable);
+  $$SyncSectionStatusTableTableManager get syncSectionStatus =>
+      $$SyncSectionStatusTableTableManager(_db, _db.syncSectionStatus);
 }

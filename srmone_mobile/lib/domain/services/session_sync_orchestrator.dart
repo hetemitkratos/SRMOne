@@ -82,12 +82,32 @@ class SyncTimeouts {
   static const detailsMaxAge = Duration(hours: 24);
 }
 
-enum SyncStatus { idle, syncing, success, reauthenticated, error }
+/// [partial]: Academia failed (see [SyncResult.errorMessage]) but the
+/// Student Portal attendance still refreshed.
+enum SyncStatus { idle, syncing, success, reauthenticated, partial, error }
+
+/// The parts of a sync whose outcome is recorded in the database (by name),
+/// so screens can say which data is stale and why.
+enum SyncSection {
+  /// Signing in to Academia and fetching its course page.
+  academia,
+  profile,
+  marks,
+  timetable,
+  calendar,
+
+  /// Attendance, from the Student Portal.
+  attendance,
+  studentPortalMarks,
+}
 
 class SyncResult {
   final SyncStatus status;
   final int subjectsUpdated;
   final bool sessionWasRefreshed;
+
+  /// Why the sync failed ([SyncStatus.error]) or what failed in a
+  /// [SyncStatus.partial] sync.
   final String? errorMessage;
 
   const SyncResult({
@@ -150,17 +170,20 @@ class SessionSyncOrchestrator {
   final SecureVaultService _vault;
   final NotificationRuleEngine _notifEngine;
   final Dio? _academiaDio;
+  final SPClient Function(SimpleCookieJar jar) _spClient;
 
-  /// [academiaDio] is only for tests (fake HTTP adapter).
+  /// [academiaDio] and [spClient] are only for tests (fake portals).
   SessionSyncOrchestrator({
     required AppDatabase db,
     required SecureVaultService vault,
     required NotificationRuleEngine notifEngine,
     Dio? academiaDio,
+    SPClient Function(SimpleCookieJar jar)? spClient,
   })  : _db = db,
         _vault = vault,
         _notifEngine = notifEngine,
-        _academiaDio = academiaDio;
+        _academiaDio = academiaDio,
+        _spClient = spClient ?? ((jar) => SPClient(cookieJar: jar));
 
   /// The sync currently running, shared by every caller that asks for one
   /// while it runs (two screens refreshing, or a refresh during sign-in), so
@@ -297,7 +320,8 @@ class SessionSyncOrchestrator {
     final academiaClient =
         AcademiaClient(cookieJar: cookieJar, dio: _academiaDio);
     bool sessionRefreshed = false;
-    AcademiaPageData page;
+    AcademiaPageData? page;
+    String? academiaError;
 
     Future<bool> signIn() {
       step(SyncStep.signingIn);
@@ -327,27 +351,48 @@ class SessionSyncOrchestrator {
       } on SessionExpiredException catch (_) {
         // Layer 3: Silent Background Cookie Rotation
         if (password == null || password.isEmpty) {
-          return _error('Your session expired. Sign in again.');
-        }
-        final reauthOk = await signIn();
-        if (!reauthOk) return _error('Incorrect NetID or password.');
-        await _saveCookies(cookieJar);
-        sessionRefreshed = true;
-        try {
-          page = await fetchPage();
-        } on SessionExpiredException catch (_) {
-          return _error(
-              "Couldn't sign in to SRM Academia. Check your NetID and password.");
+          academiaError = 'Your session expired. Sign in again.';
+        } else if (!await signIn()) {
+          academiaError = 'Incorrect NetID or password.';
+        } else {
+          await _saveCookies(cookieJar);
+          sessionRefreshed = true;
+          try {
+            page = await fetchPage();
+          } on SessionExpiredException catch (_) {
+            academiaError = "Couldn't sign in to SRM Academia. "
+                'Check your NetID and password.';
+          }
         }
       }
     } catch (e) {
       _log('academia failed after ${total.elapsedMilliseconds} ms: '
           '${e.runtimeType}');
-      return _error(friendlySyncError(e));
+      academiaError = friendlySyncError(e);
     }
 
+    if (page == null) {
+      final message = academiaError ?? friendlySyncError(Object());
+      await _recordOutcome(email, SyncSection.academia, error: message);
+      // A first sign-in must fail here. Otherwise attendance, which comes
+      // only from the Student Portal, can still refresh with the cached
+      // course details.
+      if (forceFreshLogin || !includeStudentPortal) return _error(message);
+      final subjects = await _syncAttendance(email,
+          step: step, onSpCaptcha: onSpCaptcha, onProgress: onProgress);
+      _log('sync done without academia in ${total.elapsedMilliseconds} ms');
+      return SyncResult(
+        status: subjects > 0 ? SyncStatus.partial : SyncStatus.error,
+        subjectsUpdated: subjects,
+        sessionWasRefreshed: false,
+        errorMessage: message,
+      );
+    }
+    await _recordOutcome(email, SyncSection.academia);
+    final AcademiaPageData academiaPage = page;
+
     // The page's course rows carry each course's details but no hours.
-    final courses = page.attendance;
+    final courses = academiaPage.attendance;
     _courseDetailsFromSync = {for (final c in courses) _courseKey(c): c};
 
     // Save cookie jar state after successful operations
@@ -356,17 +401,25 @@ class SessionSyncOrchestrator {
     // Save everything the page carried first, so the dashboard can open on
     // it while the timetable grid and calendar download.
     step(SyncStep.saving);
-    await _guard('profile', () => _syncProfile(email, page.profile));
-    await _guard('marks', () => _syncAcademiaMarks(email, page, courses));
+    await _guard('profile', () => _syncProfile(email, academiaPage.profile),
+        section: SyncSection.profile, email: email);
+    await _guard(
+        'marks', () => _syncAcademiaMarks(email, academiaPage, courses),
+        section: SyncSection.marks, email: email);
     _log('academia saved in ${total.elapsedMilliseconds} ms');
 
     // Best-effort sections that need more page fetches, run in parallel.
     step(SyncStep.syncingDetails);
     final detailsWork = Future.wait([
-      _guard('timetable',
-          () => _syncTimetable(email, page, academiaClient, forceDetails)),
-      _guard('calendar',
-          () => _syncCalendars(email, academiaClient, forceDetails)),
+      _guard(
+          'timetable',
+          () =>
+              _syncTimetable(email, academiaPage, academiaClient, forceDetails),
+          section: SyncSection.timetable,
+          email: email),
+      _guard(
+          'calendar', () => _syncCalendars(email, academiaClient, forceDetails),
+          section: SyncSection.calendar, email: email),
     ]).then((_) async {
       await _saveCookies(cookieJar);
       _log('details done in ${total.elapsedMilliseconds} ms');
@@ -376,23 +429,11 @@ class SessionSyncOrchestrator {
 
     var subjectsUpdated = 0;
     if (includeStudentPortal) {
-      // Layer 4: attendance from the Student Portal (if configured), while
-      // the details download.
-      step(SyncStep.studentPortal);
-      final spRecords = await _guard(
-          'student portal',
-          () => _syncStudentPortal(email,
-              onSpCaptcha: onSpCaptcha, onProgress: onProgress),
-          timeout: onSpCaptcha == null
-              ? SyncTimeouts.studentPortalBackground
-              : null);
-      if (spRecords != null && spRecords.isNotEmpty) {
-        await _persistAttendance(
-            email, withCourseDetails(spRecords, await _courseDetails(email)));
-        subjectsUpdated = spRecords.length;
-        _log('student portal attendance saved in '
-            '${total.elapsedMilliseconds} ms');
-      }
+      // Layer 4: attendance from the Student Portal, while the details
+      // download.
+      subjectsUpdated = await _syncAttendance(email,
+          step: step, onSpCaptcha: onSpCaptcha, onProgress: onProgress);
+      _log('student portal step done in ${total.elapsedMilliseconds} ms');
     }
     details.complete(detailsWork);
     _log('sync done in ${total.elapsedMilliseconds} ms');
@@ -403,6 +444,41 @@ class SessionSyncOrchestrator {
       subjectsUpdated: subjectsUpdated,
       sessionWasRefreshed: sessionRefreshed,
     );
+  }
+
+  /// Layer 4: refreshes attendance from the Student Portal (if configured)
+  /// and saves it with each course's details. Returns the number of
+  /// subjects saved; never throws.
+  Future<int> _syncAttendance(
+    String email, {
+    required void Function(SyncStep) step,
+    required SpCaptchaPrompt? onSpCaptcha,
+    required SyncProgress? onProgress,
+  }) async {
+    step(SyncStep.studentPortal);
+    final spRecords = await _guard(
+        'student portal',
+        () => _syncStudentPortal(email,
+            onSpCaptcha: onSpCaptcha, onProgress: onProgress),
+        timeout:
+            onSpCaptcha == null ? SyncTimeouts.studentPortalBackground : null,
+        section: SyncSection.attendance,
+        email: email,
+        recordWhen: (records) => records != null);
+    if (spRecords == null || spRecords.isEmpty) return 0;
+    await _persistAttendance(
+        email, withCourseDetails(spRecords, await _courseDetails(email)));
+    return spRecords.length;
+  }
+
+  /// Saves how [section] went; never throws.
+  Future<void> _recordOutcome(String email, SyncSection section,
+      {String? error}) async {
+    try {
+      await _db.recordSyncOutcome(email, section.name, error: error);
+    } catch (e) {
+      _log('could not record ${section.name}: ${e.runtimeType}');
+    }
   }
 
   Future<void> _saveCookies(SimpleCookieJar jar) =>
@@ -441,8 +517,17 @@ class SessionSyncOrchestrator {
   }) async {
     final sw = Stopwatch()..start();
     onProgress?.call(SyncStep.studentPortal);
+    String? email;
+    Future<SpConnectResult> failed(String message) async {
+      final signedIn = email;
+      if (signedIn != null && signedIn.isNotEmpty) {
+        await _recordOutcome(signedIn, SyncSection.attendance, error: message);
+      }
+      return SpConnectResult(false, message);
+    }
+
     try {
-      final email = await _vault.getAcademiaEmail();
+      email = await _vault.getAcademiaEmail();
       if (email == null || email.isEmpty) {
         return const SpConnectResult(false, 'Sign in to Academia first.');
       }
@@ -452,6 +537,7 @@ class SessionSyncOrchestrator {
         return const SpConnectResult(
             false, 'Add your Student Portal password first.');
       }
+      await _recordOutcome(email, SyncSection.attendance);
       // Use the course details of an Academia sync that is still running.
       await _inflight?.catchError((Object _) => _error(''));
       if (spRecords.isNotEmpty) {
@@ -464,19 +550,17 @@ class SessionSyncOrchestrator {
           true, 'Student Portal connected (${spRecords.length} subjects).');
     } on SpSyncException catch (e) {
       _log('student portal: ${e.message}');
-      return SpConnectResult(false, e.message);
+      return failed(e.message);
     } on TimeoutException {
-      return const SpConnectResult(
-          false, 'Student Portal is taking too long to respond.');
+      return failed('Student Portal is taking too long to respond.');
     } on DioException {
-      return const SpConnectResult(
-          false, "Couldn't reach the Student Portal. Check your connection.");
+      return failed(
+          "Couldn't reach the Student Portal. Check your connection.");
     } catch (e) {
       final detail = e.toString();
       _log('student portal failed: ${e.runtimeType}: '
           '${detail.length > 300 ? detail.substring(0, 300) : detail}');
-      return const SpConnectResult(
-          false, "Couldn't connect to the Student Portal. Try again later.");
+      return failed("Couldn't connect to the Student Portal. Try again later.");
     }
   }
 
@@ -590,20 +674,43 @@ class SessionSyncOrchestrator {
   /// Runs a best-effort section; a failure or a section that overruns
   /// [timeout] leaves the cached data untouched. A null [timeout] means no
   /// limit (used when the user may be typing a CAPTCHA).
-  Future<T?> _guard<T>(String name, Future<T> Function() section,
-      {Duration? timeout = SyncTimeouts.detailsSection}) async {
+  ///
+  /// With a [section] (and the student's [email]) the outcome is saved for
+  /// the screens: success when [recordWhen] accepts the value (always, if
+  /// null), and the failure's user-facing reason otherwise.
+  Future<T?> _guard<T>(String name, Future<T> Function() body,
+      {Duration? timeout = SyncTimeouts.detailsSection,
+      SyncSection? section,
+      String? email,
+      bool Function(T value)? recordWhen}) async {
     final sw = Stopwatch()..start();
     try {
-      final future = section();
+      final future = body();
       final value = await (timeout == null ? future : future.timeout(timeout));
       _log('$name ok in ${sw.elapsedMilliseconds} ms');
+      if (section != null &&
+          email != null &&
+          (recordWhen == null || recordWhen(value))) {
+        await _recordOutcome(email, section);
+      }
       return value;
     } catch (e) {
       _log('$name skipped after ${sw.elapsedMilliseconds} ms: '
           '${e is SpSyncException ? e.message : e.runtimeType}');
+      if (section != null && email != null) {
+        await _recordOutcome(email, section, error: _sectionError(e));
+      }
       return null;
     }
   }
+
+  /// A short reason a best-effort section failed, for the screens.
+  static String _sectionError(Object e) => switch (e) {
+        SpSyncException(:final message) => message,
+        TimeoutException() => 'Took too long to respond.',
+        DioException() || SocketException() => "Couldn't connect.",
+        _ => "Couldn't read this from SRM.",
+      };
 
   Future<void> _syncProfile(String email, Map<String, String> info) async {
     if (info.isEmpty) return;
@@ -736,7 +843,7 @@ class SessionSyncOrchestrator {
     final jar = spSavedCookies != null
         ? SimpleCookieJar.fromJson(spSavedCookies)
         : SimpleCookieJar();
-    final client = SPClient(cookieJar: jar);
+    final client = _spClient(jar);
 
     List<AttendanceInput> spRecords = const [];
     if (spSavedCookies != null) {
@@ -748,7 +855,11 @@ class SessionSyncOrchestrator {
     }
 
     if (spRecords.isEmpty) {
-      if (!hasPassword) return null;
+      if (!hasPassword) {
+        // A saved session that stopped working, and no password to renew it.
+        throw const SpSyncException('Your Student Portal session expired. '
+            'Add your Student Portal password to keep attendance updating.');
+      }
       final netId = email.split('@').first;
       onProgress?.call(SyncStep.solvingCaptcha);
       var result = await client.login(netId, spPassword);
@@ -824,9 +935,12 @@ class SessionSyncOrchestrator {
         ]);
       }
       _log('student portal marks ok in ${sw.elapsedMilliseconds} ms');
+      await _recordOutcome(email, SyncSection.studentPortalMarks);
     } catch (e) {
       _log('student portal marks skipped after ${sw.elapsedMilliseconds} '
           'ms: ${e.runtimeType}');
+      await _recordOutcome(email, SyncSection.studentPortalMarks,
+          error: _sectionError(e));
     }
   }
 

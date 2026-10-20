@@ -27,6 +27,10 @@ class SecureVaultService {
     ),
     aOptions: AndroidOptions(
       encryptedSharedPreferences: true,
+      // Data that can't be decrypted (its Keystore key is gone, e.g. after a
+      // restore onto another phone) is wiped instead of throwing on every
+      // read, so the student just signs in again.
+      resetOnError: true,
     ),
   );
 
