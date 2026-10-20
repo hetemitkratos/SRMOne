@@ -8,6 +8,7 @@ import 'package:flutter_svg/flutter_svg.dart';
 import 'package:intl/intl.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
+import '../../../core/theme/app_theme.dart';
 import '../../../core/constants/asset_paths.dart';
 import '../../../core/database/app_database.dart';
 import '../../../domain/services/attendance_planner_math.dart';
@@ -66,24 +67,30 @@ class _AttendancePlannerCardState extends ConsumerState<AttendancePlannerCard>
     final theme = Theme.of(context);
 
     return Card(
-      elevation: 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      clipBehavior: Clip.antiAlias,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(SrmRadii.panel),
+        side: BorderSide(color: SrmColors.of(context).border),
+      ),
       child: Column(
         children: [
-          TabBar(
-            controller: _tabController,
-            indicatorSize: TabBarIndicatorSize.tab,
-            dividerColor: Colors.transparent,
-            tabs: const [
-              Tab(
-                icon: Icon(LucideIcons.target, size: 18),
-                text: 'Reach Target',
-              ),
-              Tab(
-                icon: Icon(LucideIcons.plane, size: 18),
-                text: 'Plan Holiday',
-              ),
-            ],
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
+            child: TabBar(
+              controller: _tabController,
+              indicatorSize: TabBarIndicatorSize.tab,
+              dividerColor: Colors.transparent,
+              tabs: const [
+                Tab(
+                  icon: Icon(LucideIcons.target, size: 18),
+                  text: 'Reach Target',
+                ),
+                Tab(
+                  icon: Icon(LucideIcons.plane, size: 18),
+                  text: 'Plan Holiday',
+                ),
+              ],
+            ),
           ),
           const Divider(height: 1),
           SizedBox(
@@ -159,14 +166,14 @@ class _AttendancePlannerCardState extends ConsumerState<AttendancePlannerCard>
       return Container(
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: Colors.red.withAlpha(25),
+          color: SrmPalette.red.withAlpha(25),
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: Colors.red.withAlpha(80)),
+          border: Border.all(color: SrmPalette.red.withAlpha(80)),
         ),
         child: Row(
           children: [
             const Icon(LucideIcons.circleAlert,
-                color: Colors.redAccent, size: 24),
+                color: SrmPalette.red, size: 24),
             const SizedBox(width: 12),
             Expanded(
               child: Column(
@@ -181,7 +188,7 @@ class _AttendancePlannerCardState extends ConsumerState<AttendancePlannerCard>
                   const SizedBox(height: 2),
                   const Text(
                     '100% target is mathematically impossible because absences cannot be undone.',
-                    style: TextStyle(color: Colors.redAccent, fontSize: 12),
+                    style: TextStyle(color: SrmPalette.red, fontSize: 12),
                   ),
                 ],
               ),
@@ -192,7 +199,7 @@ class _AttendancePlannerCardState extends ConsumerState<AttendancePlannerCard>
     }
 
     final isSafe = item.alreadyAbove;
-    final badgeColor = isSafe ? Colors.green : Colors.orange;
+    final badgeColor = isSafe ? SrmPalette.emerald : SrmPalette.amber;
 
     return Container(
       padding: const EdgeInsets.all(12),
@@ -339,10 +346,10 @@ class _AttendancePlannerCardState extends ConsumerState<AttendancePlannerCard>
                             final item = results[index];
                             final willDrop = item.willDropBelow75;
                             final color = willDrop
-                                ? Colors.redAccent
+                                ? SrmPalette.red
                                 : (item.missed > 0
-                                    ? Colors.orange
-                                    : Colors.green);
+                                    ? SrmPalette.amber
+                                    : SrmPalette.emerald);
 
                             return Container(
                               padding: const EdgeInsets.all(12),
@@ -351,7 +358,7 @@ class _AttendancePlannerCardState extends ConsumerState<AttendancePlannerCard>
                                 borderRadius: BorderRadius.circular(12),
                                 border: Border.all(
                                   color: willDrop
-                                      ? Colors.red.withAlpha(120)
+                                      ? SrmPalette.red.withAlpha(120)
                                       : theme.dividerColor.withAlpha(50),
                                 ),
                               ),
@@ -399,7 +406,7 @@ class _AttendancePlannerCardState extends ConsumerState<AttendancePlannerCard>
                                         Text(
                                           'Need ${item.recoveryNeeded} to recover',
                                           style: const TextStyle(
-                                            color: Colors.redAccent,
+                                            color: SrmPalette.red,
                                             fontSize: 10,
                                           ),
                                         ),

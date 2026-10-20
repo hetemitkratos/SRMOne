@@ -1,6 +1,7 @@
 // test/widget_test.dart
 // Widget smoke and interaction tests for Phase 4 UI components.
 
+import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:srmone_mobile/core/database/app_database.dart';
@@ -119,7 +120,7 @@ void main() {
       );
 
       expect(
-        find.textContaining('Attendance trend will appear'),
+        find.text('No attendance history yet'),
         findsOneWidget,
       );
     });
@@ -158,8 +159,8 @@ void main() {
         ),
       );
 
-      expect(find.text('Attendance Trend (30 Days)'), findsOneWidget);
-      expect(find.text('75% Min Target'), findsOneWidget);
+      expect(find.text('Attendance Trend'), findsOneWidget);
+      expect(find.byType(LineChart), findsOneWidget);
     });
   });
 }

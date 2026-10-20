@@ -7,6 +7,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
+import '../../core/constants/asset_paths.dart';
+import '../../core/theme/app_theme.dart';
 import '../../main.dart';
 import '../auth/student_portal_banner.dart';
 import '../notifications/notification_bell_sheet.dart';
@@ -33,34 +35,27 @@ class DashboardShellScreen extends ConsumerWidget {
         (_) => requestNotificationPermission(plugin),
       );
     }
-    final theme = Theme.of(context);
+
+    final c = SrmColors.of(context);
 
     return Scaffold(
       appBar: AppBar(
-        titleSpacing: 16,
+        titleSpacing: 20,
+        toolbarHeight: 64,
+        shape: Border(bottom: BorderSide(color: c.border)),
         title: Row(
           children: [
-            Container(
-              width: 32,
-              height: 32,
-              decoration: BoxDecoration(
-                color: const Color(0xFF2D6A4F),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              alignment: Alignment.center,
-              child: const Text(
-                'S1',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 14,
-                ),
-              ),
-            ),
+            Image.asset(AssetPaths.logo, width: 32, height: 32),
             const SizedBox(width: 10),
-            const Text(
-              'SRM One',
-              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+            Text(
+              'SRM ONE',
+              style: TextStyle(
+                fontFamily: SrmFonts.display,
+                fontWeight: FontWeight.w700,
+                fontSize: 20,
+                letterSpacing: -0.4,
+                color: c.text,
+              ),
             ),
           ],
         ),
@@ -68,22 +63,27 @@ class DashboardShellScreen extends ConsumerWidget {
           // Reactive Notification Bell
           const NotificationBell(),
 
-          // Settings / Profile Avatar
+          // Settings / Profile Avatar, black with initials as on the web
           IconButton(
             icon: Consumer(
               builder: (context, ref, _) {
                 final name =
-                    ref.watch(studentProfileProvider).valueOrNull?.name ?? 'S';
-                final initial = name.isNotEmpty ? name[0].toUpperCase() : 'S';
-                return CircleAvatar(
-                  radius: 14,
-                  backgroundColor: const Color(0xFF2D6A4F),
+                    ref.watch(studentProfileProvider).valueOrNull?.name ?? '';
+                return Container(
+                  width: 36,
+                  height: 36,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: c.hero,
+                    shape: BoxShape.circle,
+                    border: Border.all(color: c.card, width: 2),
+                  ),
                   child: Text(
-                    initial,
-                    style: const TextStyle(
-                      color: Colors.white,
+                    _initials(name),
+                    style: TextStyle(
+                      color: c.onHero,
                       fontSize: 12,
-                      fontWeight: FontWeight.bold,
+                      fontWeight: FontWeight.w700,
                     ),
                   ),
                 );
@@ -92,7 +92,7 @@ class DashboardShellScreen extends ConsumerWidget {
             tooltip: 'Settings',
             onPressed: () => context.push('/settings'),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: 12),
         ],
       ),
       body: Column(
@@ -101,45 +101,49 @@ class DashboardShellScreen extends ConsumerWidget {
           Expanded(child: navigationShell),
         ],
       ),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: navigationShell.currentIndex,
-        onDestinationSelected: (index) {
-          navigationShell.goBranch(
-            index,
-            initialLocation: index == navigationShell.currentIndex,
-          );
-        },
-        indicatorColor: theme.colorScheme.primaryContainer.withAlpha(120),
-        destinations: const [
-          NavigationDestination(
-            icon: Icon(LucideIcons.layoutDashboard),
-            selectedIcon:
-                Icon(LucideIcons.layoutDashboard, color: Color(0xFF2D6A4F)),
-            label: 'Overview',
-          ),
-          NavigationDestination(
-            icon: Icon(LucideIcons.checkCheck),
-            selectedIcon:
-                Icon(LucideIcons.checkCheck, color: Color(0xFF2D6A4F)),
-            label: 'Attendance',
-          ),
-          NavigationDestination(
-            icon: Icon(LucideIcons.clock),
-            selectedIcon: Icon(LucideIcons.clock, color: Color(0xFF2D6A4F)),
-            label: 'Timetable',
-          ),
-          NavigationDestination(
-            icon: Icon(LucideIcons.award),
-            selectedIcon: Icon(LucideIcons.award, color: Color(0xFF2D6A4F)),
-            label: 'Marks',
-          ),
-          NavigationDestination(
-            icon: Icon(LucideIcons.calendar),
-            selectedIcon: Icon(LucideIcons.calendar, color: Color(0xFF2D6A4F)),
-            label: 'Calendar',
-          ),
-        ],
+      bottomNavigationBar: DecoratedBox(
+        decoration: BoxDecoration(
+          border: Border(top: BorderSide(color: c.border)),
+        ),
+        child: NavigationBar(
+          selectedIndex: navigationShell.currentIndex,
+          onDestinationSelected: (index) {
+            navigationShell.goBranch(
+              index,
+              initialLocation: index == navigationShell.currentIndex,
+            );
+          },
+          destinations: const [
+            NavigationDestination(
+              icon: Icon(LucideIcons.house),
+              label: 'Home',
+            ),
+            NavigationDestination(
+              icon: Icon(LucideIcons.calendarCheck),
+              label: 'Attendance',
+            ),
+            NavigationDestination(
+              icon: Icon(LucideIcons.clock),
+              label: 'Timetable',
+            ),
+            NavigationDestination(
+              icon: Icon(LucideIcons.award),
+              label: 'Marks',
+            ),
+            NavigationDestination(
+              icon: Icon(LucideIcons.calendar),
+              label: 'Calendar',
+            ),
+          ],
+        ),
       ),
     );
+  }
+
+  /// Up to two initials from [name], like the web app's avatar.
+  static String _initials(String name) {
+    final parts = name.trim().split(RegExp(r'\s+')).where((w) => w.isNotEmpty);
+    final s = parts.take(2).map((w) => w[0]).join().toUpperCase();
+    return s.isEmpty ? 'S' : s;
   }
 }

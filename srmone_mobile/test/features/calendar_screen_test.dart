@@ -1,7 +1,5 @@
 // test/features/calendar_screen_test.dart
-// Scrolling the calendar and coming back to a month must not crash: each
-// month remembers whether it is expanded, separately from the list's scroll
-// offset.
+// Moving between months and scrolling the calendar must not crash.
 
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
@@ -48,8 +46,7 @@ List<Map<String, dynamic>> _months() => [
     ];
 
 void main() {
-  testWidgets('scrolling away from a month and back does not crash',
-      (tester) async {
+  testWidgets('switching months and scrolling does not crash', (tester) async {
     final db = AppDatabase.forTesting(NativeDatabase.memory());
     addTearDown(db.close);
     final vault = _SignedInVault();
@@ -69,15 +66,16 @@ void main() {
       child: const MaterialApp(home: CalendarScreen()),
     ));
     await tester.pumpAndSettle();
-    expect(find.text("Jul '26"), findsOneWidget);
 
-    // Expand every month so the list is long, then scroll far down and back.
-    for (final name in ["Jul '26", "Aug '26"]) {
-      if (find.text(name).evaluate().isNotEmpty) {
-        await tester.tap(find.text(name));
-        await tester.pumpAndSettle();
-      }
-    }
+    // Pick a month from the pills, step with the arrow, then scroll the
+    // page far down and back.
+    await tester.tap(find.text("Jul '26").first);
+    await tester.pumpAndSettle();
+    expect(find.text("Jul '26"), findsNWidgets(2)); // header and pill
+    await tester.tap(find.byTooltip('Next month'));
+    await tester.pumpAndSettle();
+    expect(find.text("Aug '26"), findsNWidgets(2));
+
     final list = find.byType(Scrollable).first;
     await tester.drag(list, const Offset(0, -6000));
     await tester.pumpAndSettle();
@@ -85,6 +83,6 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(tester.takeException(), isNull);
-    expect(find.text("Jul '26"), findsOneWidget);
+    expect(find.text("Aug '26"), findsNWidgets(2));
   });
 }

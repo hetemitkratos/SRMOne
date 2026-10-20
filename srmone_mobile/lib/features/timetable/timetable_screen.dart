@@ -1,15 +1,17 @@
 // lib/features/timetable/timetable_screen.dart
-// Timetable screen with swipeable Day 1–5 views, live/upcoming class highlights,
-// calendar day order sync, and one-tap PNG poster export.
+// Timetable, laid out like the web app's Timetable page: the hero with a
+// poster download, Day 1–5 pills (swipe the list to change day), pastel
+// class cards with live/up-next highlights, and the course details panel.
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:flutter_svg/flutter_svg.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../../core/constants/asset_paths.dart';
+import '../../core/theme/app_theme.dart';
 import '../../domain/services/calendar_day_resolver.dart';
 import '../../domain/services/current_class_detector.dart';
+import '../../domain/services/session_sync_orchestrator.dart';
 import '../../domain/services/timetable_schedule.dart';
 import '../../main.dart';
 import '../auth/auth_controller.dart';
@@ -17,7 +19,10 @@ import '../faculty/faculty_avatar.dart';
 import 'widgets/exportable_timetable_poster.dart';
 import '../shared/app_refresher.dart';
 import '../shared/cached_data_providers.dart';
-import '../shared/refreshable_empty.dart';
+import '../shared/ui/srm_ui.dart';
+
+/// The web's per-course pastel cycle (`SLOT_COLORS`).
+const _slotColors = [SrmPalette.mint, SrmPalette.lavender, SrmPalette.beige];
 
 class TimetableScreen extends ConsumerStatefulWidget {
   const TimetableScreen({super.key});
@@ -26,30 +31,15 @@ class TimetableScreen extends ConsumerStatefulWidget {
   ConsumerState<TimetableScreen> createState() => _TimetableScreenState();
 }
 
-class _TimetableScreenState extends ConsumerState<TimetableScreen>
-    with SingleTickerProviderStateMixin {
-  late final TabController _tabController;
-  int _todayDayOrder = 1;
-  bool _openedTodayTab = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _tabController = TabController(length: 5, vsync: this);
-  }
-
-  @override
-  void dispose() {
-    _tabController.dispose();
-    super.dispose();
-  }
+class _TimetableScreenState extends ConsumerState<TimetableScreen> {
+  /// The day order shown (1–5), or null for today's.
+  int? _picked;
+  bool _exporting = false;
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     final authState = ref.watch(authControllerProvider);
     final email = authState is Authenticated ? authState.email : '';
-    final db = ref.watch(appDatabaseProvider);
 
     if (email.isEmpty) {
       return const Scaffold(
@@ -57,281 +47,104 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen>
       );
     }
 
-    return Consumer(
-      builder: (context, ref, _) {
-        final timetable = ref.watch(timetableProvider).valueOrNull;
-        final rawCourses = ref.watch(timetableCoursesProvider);
+    final courses = ref.watch(timetableCoursesProvider);
+    final calendarMap = ref.watch(calendarMapProvider(currentSemester()));
+    final todayStatus =
+        CalendarDayResolver.getDayStatus(calendarMap, DateTime.now());
+    final todayOrder =
+        todayStatus.isWorkingDay ? todayStatus.dayOrderNum : null;
+    final day = _picked ?? todayOrder ?? 1;
 
-        return Consumer(
-          builder: (context, ref, _) {
-            final calendarMap =
-                ref.watch(calendarMapProvider(currentSemester()));
-            final todayStatus = CalendarDayResolver.getDayStatus(
-              calendarMap,
-              DateTime.now(),
-            );
+    final colors = {
+      for (final (i, c) in courses.indexed)
+        c['courseCode']?.toString() ?? '': _slotColors[i % _slotColors.length],
+    };
 
-            if (todayStatus.dayOrderNum != null &&
-                todayStatus.dayOrderNum! >= 1 &&
-                todayStatus.dayOrderNum! <= 5) {
-              _todayDayOrder = todayStatus.dayOrderNum!;
-              // Open on today's day order once, then leave tabs to the user.
-              if (!_openedTodayTab && todayStatus.isWorkingDay) {
-                _openedTodayTab = true;
-                _tabController.index = _todayDayOrder - 1;
-              }
-            }
-
-            final dayScheduleMap = TimetableSchedule.daySchedule(rawCourses);
-
-            return Scaffold(
-              appBar: AppBar(
-                title: const Text('Timetable'),
-                actions: [
-                  IconButton(
-                    icon: const Icon(LucideIcons.share2),
-                    tooltip: 'Export Timetable Poster',
-                    onPressed: () async {
-                      final profile = await db.getStudentProfile(email);
-                      if (context.mounted) {
-                        await ExportableTimetablePoster.exportAndShare(
-                          context,
-                          studentName: profile?.name ?? 'Student',
-                          regNumber: profile?.regNumber ?? '',
-                          batch: timetable?.batch ?? '1',
-                          schedule: dayScheduleMap,
-                        );
-                      }
-                    },
-                  ),
-                ],
-                bottom: TabBar(
-                  controller: _tabController,
-                  isScrollable: false,
-                  labelPadding: const EdgeInsets.symmetric(horizontal: 4),
-                  tabs: List.generate(5, (index) {
-                    final dayNum = index + 1;
-                    final isToday =
-                        dayNum == _todayDayOrder && todayStatus.isWorkingDay;
-
-                    return Tab(
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Text('Day $dayNum'),
-                          if (isToday) ...[
-                            const SizedBox(width: 4),
-                            Container(
-                              width: 6,
-                              height: 6,
-                              decoration: const BoxDecoration(
-                                color: Color(0xFF2D6A4F),
-                                shape: BoxShape.circle,
-                              ),
-                            ),
-                          ],
-                        ],
-                      ),
-                    );
-                  }),
-                ),
-              ),
-              body: RefreshIndicator(
-                onRefresh: () async {
-                  await ref
-                      .read(appRefresherProvider)
-                      .refresh(waitForDetails: true);
-                },
-                notificationPredicate: tabbedRefreshPredicate,
-                child: rawCourses.isEmpty
-                    ? RefreshableEmpty(
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            SvgPicture.asset(
-                              AssetPaths.studying,
-                              height: 140,
-                            ),
-                            const SizedBox(height: 16),
-                            const Text(
-                              'No timetable data found.',
-                              style:
-                                  TextStyle(fontSize: 16, color: Colors.grey),
-                            ),
-                            const SizedBox(height: 8),
-                            const Text(
-                              'Pull down to refresh from portal',
-                              style:
-                                  TextStyle(fontSize: 12, color: Colors.grey),
-                            ),
-                          ],
-                        ),
-                      )
-                    : TabBarView(
-                        controller: _tabController,
-                        children: List.generate(5, (index) {
-                          final dayLabel = 'Day ${index + 1}';
-                          return _buildDayView(
-                            theme,
-                            dayLabel,
-                            rawCourses,
-                            dayLabel == todayStatus.dayLabel,
-                          );
-                        }),
-                      ),
-              ),
-            );
-          },
-        );
-      },
-    );
-  }
-
-  Widget _buildDayView(
-    ThemeData theme,
-    String dayLabel,
-    List<Map<String, dynamic>> courses,
-    bool isToday,
-  ) {
-    final slotsWithTiming = TimetableSchedule.slotsForDay(courses, dayLabel);
-
-    if (slotsWithTiming.isEmpty) {
-      return RefreshableEmpty(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
+    return Scaffold(
+      body: RefreshIndicator(
+        onRefresh: () =>
+            ref.read(appRefresherProvider).refresh(waitForDetails: true),
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
           children: [
-            SvgPicture.asset(AssetPaths.aDayOff, height: 120),
+            HeroBanner(
+              title: 'Timetable',
+              subtitle: 'Organize your week and plan your classes.',
+              illustration: AssetPaths.timeManagement,
+              action: courses.isEmpty
+                  ? null
+                  : HeroPillButton(
+                      label: _exporting ? 'Generating…' : 'Share poster',
+                      icon: LucideIcons.download,
+                      light: true,
+                      onPressed: _exporting ? null : () => _export(email),
+                    ),
+            ),
             const SizedBox(height: 16),
-            Text(
-              'No classes scheduled for $dayLabel',
-              style: const TextStyle(fontSize: 15, color: Colors.grey),
+            const SyncSectionNotice(
+              sections: [SyncSection.timetable],
+              what: 'the timetable',
             ),
-          ],
-        ),
-      );
-    }
-
-    final classified = isToday
-        ? CurrentClassDetector.classify(
-            slotsWithTiming,
-            dayLabel,
-            DateTime.now(),
-          )
-        : slotsWithTiming
-            .map((s) => (
-                  s,
-                  const ClassTimeInfo(
-                    state: ClassTimeState.future,
-                    startMinutes: 0,
-                    endMinutes: 0,
-                  )
-                ))
-            .toList();
-
-    return ListView.builder(
-      padding: const EdgeInsets.all(16),
-      itemCount: classified.length,
-      itemBuilder: (context, idx) {
-        final (slot, info) = classified[idx];
-        return _buildClassCard(theme, slot, info, courses);
-      },
-    );
-  }
-
-  Widget _buildClassCard(
-    ThemeData theme,
-    TimetableSlotWithTiming slot,
-    ClassTimeInfo info,
-    List<Map<String, dynamic>> courses,
-  ) {
-    final matchingCourse = courses.firstWhere(
-      (c) => c['courseCode']?.toString() == slot.courseCode,
-      orElse: () => {},
-    );
-
-    final faculty = matchingCourse['facultyName']?.toString() ?? '';
-    final roomNo = matchingCourse['roomNo']?.toString() ?? '';
-    final room = roomNo.isEmpty ? '-' : roomNo;
-
-    final isLive = info.state == ClassTimeState.ongoing;
-    final isNext = info.state == ClassTimeState.upcomingNext;
-    final isDone = info.state == ClassTimeState.completed;
-
-    Color borderColor = Colors.transparent;
-    if (isLive) borderColor = const Color(0xFF2D6A4F);
-    if (isNext) borderColor = Colors.orangeAccent;
-
-    return Card(
-      elevation: isLive ? 3 : 0,
-      margin: const EdgeInsets.only(bottom: 12),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-        side: BorderSide(
-          color: borderColor != Colors.transparent
-              ? borderColor
-              : theme.dividerColor.withAlpha(40),
-          width: isLive ? 2 : 1,
-        ),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                FacultyAvatar(
-                  facultyName: faculty.isNotEmpty ? faculty : slot.courseTitle,
-                  showsProfile: faculty.isNotEmpty,
-                  radius: 18,
+            if (courses.isEmpty)
+              const Padding(
+                padding: EdgeInsets.only(top: 16),
+                child: EmptyPanel(
+                  illustration: AssetPaths.studying,
+                  title: 'No timetable data yet',
+                  message: 'Pull down to refresh from the portal.',
                 ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        slot.courseTitle.isNotEmpty
-                            ? slot.courseTitle
-                            : slot.courseCode,
-                        style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 14,
-                          color: isDone ? Colors.grey : null,
+              )
+            else ...[
+              const SizedBox(height: 16),
+              _todayBanner(context, todayStatus),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  for (var d = 1; d <= 5; d++)
+                    Expanded(
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 3),
+                        child: _DayPill(
+                          day: d,
+                          selected: d == day,
+                          today: d == todayOrder,
+                          onTap: () => setState(() => _picked = d),
                         ),
                       ),
-                      const SizedBox(height: 2),
-                      Text(
-                        '${slot.timing} • Room $room',
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: Colors.grey,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                if (isLive)
-                  _statusBadge('LIVE NOW', const Color(0xFF2D6A4F))
-                else if (isNext)
-                  _statusBadge(
-                    'UP NEXT (${info.minutesUntilStart ?? 0}m)',
-                    Colors.orangeAccent,
-                  )
-                else if (isDone)
-                  const Icon(LucideIcons.check, size: 16, color: Colors.grey),
-              ],
-            ),
-            if (isLive && info.progressFraction != null) ...[
-              const SizedBox(height: 12),
-              ClipRRect(
-                borderRadius: BorderRadius.circular(4),
-                child: LinearProgressIndicator(
-                  value: info.progressFraction,
-                  backgroundColor: theme.dividerColor.withAlpha(40),
-                  color: const Color(0xFF2D6A4F),
-                  minHeight: 4,
+                    ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              GestureDetector(
+                behavior: HitTestBehavior.translucent,
+                onHorizontalDragEnd: (d) {
+                  final v = d.primaryVelocity ?? 0;
+                  if (v.abs() < 300) return;
+                  setState(
+                      () => _picked = (day + (v < 0 ? 1 : -1)).clamp(1, 5));
+                },
+                child: _dayClasses(
+                  context,
+                  'Day $day',
+                  courses,
+                  colors,
+                  isToday: day == todayOrder,
                 ),
               ),
+              const SizedBox(height: 8),
+              Center(
+                child: Text(
+                  'SWIPE LEFT & RIGHT TO CHANGE DAYS',
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 1,
+                    color: SrmColors.of(context).faint,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 20),
+              _courseDetails(context, courses),
             ],
           ],
         ),
@@ -339,20 +152,451 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen>
     );
   }
 
-  Widget _statusBadge(String text, Color color) {
+  Future<void> _export(String email) async {
+    setState(() => _exporting = true);
+    try {
+      final db = ref.read(appDatabaseProvider);
+      final profile = await db.getStudentProfile(email);
+      if (!mounted) return;
+      await ExportableTimetablePoster.exportAndShare(
+        context,
+        studentName: profile?.name ?? 'Student',
+        regNumber: profile?.regNumber ?? '',
+        batch: ref.read(timetableProvider).valueOrNull?.batch ?? '1',
+        schedule:
+            TimetableSchedule.daySchedule(ref.read(timetableCoursesProvider)),
+      );
+    } finally {
+      if (mounted) setState(() => _exporting = false);
+    }
+  }
+
+  /// Today's status, as the web's TodayBanner.
+  Widget _todayBanner(BuildContext context, DayStatus s) {
+    final c = SrmColors.of(context);
+    final (icon, title, text, bg) = s.isHoliday
+        ? (
+            LucideIcons.calendarX,
+            s.event.isNotEmpty ? s.event : 'Holiday today',
+            'No classes today. Enjoy your day off!',
+            SrmPalette.terracotta.withAlpha(36),
+          )
+        : s.isWeekend
+            ? (
+                LucideIcons.sun,
+                "It's the weekend",
+                'Pick a day order below to preview it.',
+                SrmPalette.lavender.withAlpha(110),
+              )
+            : s.isWorkingDay
+                ? (
+                    LucideIcons.calendarCheck,
+                    'Today is ${s.dayLabel}',
+                    'Your classes for today are selected below.',
+                    SrmPalette.mint.withAlpha(110),
+                  )
+                : (
+                    LucideIcons.info,
+                    'Calendar day order unavailable',
+                    "Today isn't in the academic calendar yet.",
+                    c.track,
+                  );
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: color.withAlpha(30),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: color.withAlpha(120)),
+        color: bg,
+        borderRadius: BorderRadius.circular(SrmRadii.card),
       ),
-      child: Text(
-        text,
-        style: TextStyle(
+      child: Row(
+        children: [
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(color: c.card, shape: BoxShape.circle),
+            child: Icon(icon, size: 18, color: c.text),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title,
+                    style: TextStyle(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 14,
+                        color: c.text)),
+                const SizedBox(height: 2),
+                Text(text, style: TextStyle(fontSize: 12, color: c.muted)),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _dayClasses(
+    BuildContext context,
+    String dayLabel,
+    List<Map<String, dynamic>> courses,
+    Map<String, Color> colors, {
+    required bool isToday,
+  }) {
+    final slots = TimetableSchedule.slotsForDay(courses, dayLabel);
+    if (slots.isEmpty) {
+      return EmptyPanel(
+        illustration: AssetPaths.aDayOff,
+        title: 'Free day!',
+        message: 'No classes scheduled for $dayLabel.',
+      );
+    }
+
+    final classified = isToday
+        ? CurrentClassDetector.classify(slots, dayLabel, DateTime.now())
+        : [
+            for (final s in slots)
+              (
+                s,
+                const ClassTimeInfo(
+                  state: ClassTimeState.future,
+                  startMinutes: 0,
+                  endMinutes: 0,
+                ),
+              ),
+          ];
+    final byCode = {
+      for (final c in courses) c['courseCode']?.toString() ?? '': c,
+    };
+
+    return Column(
+      children: [
+        for (final (slot, info) in classified)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: _ClassCell(
+              slot: slot,
+              info: info,
+              course: byCode[slot.courseCode] ?? const {},
+              color: colors[slot.courseCode] ?? SrmPalette.mint,
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _courseDetails(
+      BuildContext context, List<Map<String, dynamic>> courses) {
+    final c = SrmColors.of(context);
+    String v(Map<String, dynamic> m, String k) => m[k]?.toString().trim() ?? '';
+
+    return SrmPanel(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const SectionTitle('Course Details'),
+          const SizedBox(height: 14),
+          for (final course in courses) ...[
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: c.page == SrmPalette.cream
+                    ? const Color(0xFFF8FAFC)
+                    : c.track,
+                borderRadius: BorderRadius.circular(SrmRadii.card),
+                border: Border.all(color: c.border),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      CodePill(v(course, 'courseCode')),
+                      const Spacer(),
+                      if (v(course, 'slot').isNotEmpty)
+                        SoftPill(
+                          label:
+                              'SLOT ${v(course, 'slot').replaceAll(RegExp(r'-+$'), '')}',
+                          background: c.border,
+                          foreground: c.text,
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  Text(
+                    v(course, 'courseTitle'),
+                    style: TextStyle(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 14,
+                        color: c.text),
+                  ),
+                  const SizedBox(height: 12),
+                  if (v(course, 'facultyName').isNotEmpty)
+                    _detailRow(
+                      context,
+                      FacultyAvatar(
+                          facultyName: v(course, 'facultyName'), radius: 12),
+                      v(course, 'facultyName')
+                          .replaceAll(RegExp(r'\(.*?\)'), '')
+                          .trim(),
+                    ),
+                  if (v(course, 'roomNo').isNotEmpty)
+                    _detailRow(
+                      context,
+                      Icon(LucideIcons.mapPin, size: 14, color: c.muted),
+                      v(course, 'roomNo'),
+                    ),
+                  if (v(course, 'courseType').isNotEmpty ||
+                      v(course, 'credit').isNotEmpty)
+                    _detailRow(
+                      context,
+                      Icon(LucideIcons.clock, size: 14, color: c.muted),
+                      [
+                        if (v(course, 'courseType').isNotEmpty)
+                          v(course, 'courseType'),
+                        if (v(course, 'credit').isNotEmpty)
+                          '${v(course, 'credit')} credits',
+                      ].join(' · '),
+                    ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 10),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _detailRow(BuildContext context, Widget lead, String text) {
+    final c = SrmColors.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        children: [
+          SizedBox(width: 26, child: Center(child: lead)),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              text,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                  fontSize: 12, fontWeight: FontWeight.w500, color: c.muted),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// A Day 1–5 selector pill: black when selected, terracotta ring for today.
+class _DayPill extends StatelessWidget {
+  final int day;
+  final bool selected;
+  final bool today;
+  final VoidCallback onTap;
+
+  const _DayPill({
+    required this.day,
+    required this.selected,
+    required this.today,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final c = SrmColors.of(context);
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: 'Day $day${today ? ', today' : ''}',
+      child: ExcludeSemantics(
+        child: Material(
+          color: selected ? c.hero : c.card,
+          shape: StadiumBorder(
+            side: selected
+                ? BorderSide.none
+                : today
+                    ? const BorderSide(color: SrmPalette.terracotta, width: 2)
+                    : BorderSide(color: c.border),
+          ),
+          child: InkWell(
+            customBorder: const StadiumBorder(),
+            onTap: onTap,
+            child: SizedBox(
+              height: 44,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    'Day $day',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 13,
+                      color: selected ? c.onHero : c.text,
+                    ),
+                  ),
+                  if (today) ...[
+                    const SizedBox(width: 4),
+                    Container(
+                      width: 6,
+                      height: 6,
+                      decoration: const BoxDecoration(
+                        color: SrmPalette.terracotta,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// A class, as the web's pastel timetable cells.
+class _ClassCell extends StatelessWidget {
+  final TimetableSlotWithTiming slot;
+  final ClassTimeInfo info;
+  final Map<String, dynamic> course;
+  final Color color;
+
+  const _ClassCell({
+    required this.slot,
+    required this.info,
+    required this.course,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final faculty = course['facultyName']?.toString().trim() ?? '';
+    final room = course['roomNo']?.toString().trim() ?? '';
+    final live = info.state == ClassTimeState.ongoing;
+    final next = info.state == ClassTimeState.upcomingNext;
+    final done = info.state == ClassTimeState.completed;
+    const ink = SrmPalette.ink;
+
+    return Opacity(
+      opacity: done ? 0.55 : 1,
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
           color: color,
-          fontSize: 10,
-          fontWeight: FontWeight.bold,
+          borderRadius: BorderRadius.circular(SrmRadii.card),
+          border: Border.all(
+            color: live ? ink : Colors.black.withAlpha(13),
+            width: live ? 2 : 1,
+          ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Text(
+                  slot.courseCode.toUpperCase(),
+                  style: TextStyle(
+                    fontFamily: SrmFonts.mono,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.6,
+                    color: ink.withAlpha(178),
+                  ),
+                ),
+                const Spacer(),
+                if (live)
+                  const SoftPill(
+                    label: 'LIVE NOW',
+                    icon: LucideIcons.radio,
+                    background: ink,
+                    foreground: Colors.white,
+                  )
+                else if (next)
+                  SoftPill(
+                    label: 'UP NEXT · ${info.minutesUntilStart ?? 0} MIN',
+                    background: Colors.white.withAlpha(178),
+                    foreground: ink,
+                  )
+                else if (done)
+                  const Icon(LucideIcons.check, size: 16, color: ink),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              slot.courseTitle.isNotEmpty ? slot.courseTitle : slot.courseCode,
+              style: const TextStyle(
+                fontWeight: FontWeight.w700,
+                fontSize: 15,
+                height: 1.3,
+                color: ink,
+              ),
+            ),
+            if (faculty.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  FacultyAvatar(facultyName: faculty, radius: 12),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      faculty.replaceAll(RegExp(r'\(.*?\)'), '').trim(),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                        color: ink.withAlpha(204),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+            const SizedBox(height: 12),
+            Container(height: 1, color: Colors.black.withAlpha(13)),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                SoftPill(
+                  label: slot.timing,
+                  icon: LucideIcons.clock,
+                  background: Colors.black.withAlpha(13),
+                  foreground: ink,
+                ),
+                const Spacer(),
+                if (room.isNotEmpty) ...[
+                  const Icon(LucideIcons.mapPin, size: 13, color: ink),
+                  const SizedBox(width: 4),
+                  Text(
+                    room,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: ink,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+            if (live && info.progressFraction != null) ...[
+              const SizedBox(height: 12),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(6),
+                child: LinearProgressIndicator(
+                  value: info.progressFraction,
+                  minHeight: 6,
+                  color: ink,
+                  backgroundColor: Colors.white.withAlpha(128),
+                ),
+              ),
+            ],
+          ],
         ),
       ),
     );

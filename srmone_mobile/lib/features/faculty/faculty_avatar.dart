@@ -4,6 +4,7 @@
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import '../../core/theme/app_theme.dart';
 import '../../scrapers/faculty/faculty_client.dart';
 import 'faculty_profile_sheet.dart';
 
@@ -43,22 +44,9 @@ class FacultyAvatar extends StatelessWidget {
     return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
   }
 
-  Color _getBackgroundColor(String name) {
-    final colors = [
-      const Color(0xFF2D6A4F),
-      const Color(0xFF1D3557),
-      const Color(0xFF457B9D),
-      const Color(0xFFE76F51),
-      const Color(0xFF6B705C),
-      const Color(0xFF8338EC),
-      const Color(0xFF3A86FF),
-    ];
-    final hash = name.codeUnits.fold(0, (acc, c) => acc + c);
-    return colors[hash % colors.length];
-  }
-
   @override
   Widget build(BuildContext context) {
+    final dark = Theme.of(context).brightness == Brightness.dark;
     final hasValidPhoto = photoUrl != null &&
         photoUrl!.isNotEmpty &&
         (photoUrl!.startsWith('http://') || photoUrl!.startsWith('https://'));
@@ -78,33 +66,39 @@ class FacultyAvatar extends StatelessWidget {
                     ),
                   );
                 }),
-      child: CircleAvatar(
-        radius: radius,
-        backgroundColor: _getBackgroundColor(facultyName),
-        child: hasValidPhoto
-            ? ClipOval(
-                child: CachedNetworkImage(
-                  imageUrl: photoUrl!,
-                  httpHeaders: FacultyClient.photoHeaders,
-                  width: radius * 2,
-                  height: radius * 2,
-                  fit: BoxFit.cover,
-                  errorWidget: (_, __, ___) => _buildInitials(),
-                  placeholder: (_, __) => _buildInitials(),
-                ),
-              )
-            : _buildInitials(),
+      child: Container(
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          border: Border.all(color: Colors.white.withAlpha(180)),
+        ),
+        child: CircleAvatar(
+          radius: radius,
+          backgroundColor: dark ? SrmPalette.ink500 : SrmPalette.slate200,
+          child: hasValidPhoto
+              ? ClipOval(
+                  child: CachedNetworkImage(
+                    imageUrl: photoUrl!,
+                    httpHeaders: FacultyClient.photoHeaders,
+                    width: radius * 2,
+                    height: radius * 2,
+                    fit: BoxFit.cover,
+                    errorWidget: (_, __, ___) => _buildInitials(dark),
+                    placeholder: (_, __) => _buildInitials(dark),
+                  ),
+                )
+              : _buildInitials(dark),
+        ),
       ),
     );
   }
 
-  Widget _buildInitials() {
+  Widget _buildInitials(bool dark) {
     return Text(
       _getInitials(facultyName),
       style: TextStyle(
-        color: Colors.white,
+        color: dark ? SrmPalette.cream : SrmPalette.ink,
         fontWeight: FontWeight.bold,
-        fontSize: radius * 0.8,
+        fontSize: radius * 0.75,
       ),
     );
   }

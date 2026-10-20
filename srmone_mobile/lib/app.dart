@@ -8,6 +8,7 @@ import 'package:go_router/go_router.dart';
 
 import 'core/constants/asset_paths.dart';
 import 'core/navigation/root_navigator.dart';
+import 'core/theme/app_theme.dart';
 import 'features/attendance/attendance_screen.dart';
 import 'features/auth/auth_controller.dart';
 import 'features/auth/biometric_lock_screen.dart';
@@ -31,8 +32,8 @@ class SrmOneApp extends ConsumerWidget {
     return MaterialApp.router(
       title: 'SRM One',
       debugShowCheckedModeBanner: false,
-      theme: _lightTheme(),
-      darkTheme: _darkTheme(),
+      theme: srmLightTheme(),
+      darkTheme: srmDarkTheme(),
       themeMode: ThemeMode.system,
       routerConfig: router,
     );
@@ -168,81 +169,44 @@ class BiometricLockGate extends ConsumerWidget {
 
 // ─── Splash Screen ─────────────────────────────────────────────────────────────
 
+/// The logo and "SRM ONE" wordmark on cream, as in the web app's header.
 class _SplashScreen extends StatelessWidget {
   const _SplashScreen();
 
   @override
   Widget build(BuildContext context) {
+    final c = SrmColors.of(context);
     return Scaffold(
-      backgroundColor: const Color(0xFF0F0F0F),
       body: Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Image.asset(AssetPaths.logo, width: 100, height: 100),
-            const SizedBox(height: 24),
-            const Text(
-              'SRM One',
+            Image.asset(AssetPaths.logo, width: 88, height: 88),
+            const SizedBox(height: 20),
+            Text(
+              'SRM ONE',
               style: TextStyle(
-                color: Colors.white,
-                fontSize: 28,
-                fontWeight: FontWeight.bold,
-                letterSpacing: 1.1,
+                fontFamily: SrmFonts.display,
+                fontWeight: FontWeight.w700,
+                fontSize: 30,
+                letterSpacing: -0.5,
+                color: c.text,
               ),
             ),
-            const SizedBox(height: 8),
-            const Text(
+            const SizedBox(height: 6),
+            Text(
               'Local-first academic companion',
-              style: TextStyle(color: Colors.white54, fontSize: 13),
+              style: TextStyle(color: c.muted, fontSize: 13),
             ),
             const SizedBox(height: 36),
-            const SizedBox(
+            SizedBox(
               width: 24,
               height: 24,
-              child: CircularProgressIndicator(
-                strokeWidth: 2.5,
-                color: Color(0xFFBDE3D5),
-              ),
+              child: CircularProgressIndicator(strokeWidth: 2.5, color: c.text),
             ),
           ],
         ),
       ),
     );
   }
-}
-
-// ─── Themes ───────────────────────────────────────────────────────────────────
-
-ThemeData _lightTheme() {
-  return ThemeData(
-    useMaterial3: true,
-    brightness: Brightness.light,
-    colorScheme: ColorScheme.fromSeed(
-      seedColor: const Color(0xFF2D6A4F),
-      brightness: Brightness.light,
-    ),
-    appBarTheme: const AppBarTheme(
-      elevation: 0,
-      centerTitle: false,
-    ),
-  );
-}
-
-ThemeData _darkTheme() {
-  return ThemeData(
-    useMaterial3: true,
-    brightness: Brightness.dark,
-    colorScheme: ColorScheme.fromSeed(
-      seedColor: const Color(0xFFBDE3D5),
-      brightness: Brightness.dark,
-      surface: const Color(0xFF0F0F0F),
-    ),
-    scaffoldBackgroundColor: const Color(0xFF0F0F0F),
-    cardColor: const Color(0xFF1A1A1A),
-    appBarTheme: const AppBarTheme(
-      backgroundColor: Color(0xFF0F0F0F),
-      elevation: 0,
-      centerTitle: false,
-    ),
-  );
 }

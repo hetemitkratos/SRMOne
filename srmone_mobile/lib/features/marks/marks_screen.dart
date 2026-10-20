@@ -7,15 +7,16 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:flutter_svg/flutter_svg.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../../core/constants/asset_paths.dart';
 import '../../core/database/app_database.dart';
+import '../../core/theme/app_theme.dart';
+import '../../domain/services/session_sync_orchestrator.dart';
 import '../auth/auth_controller.dart';
 import '../shared/app_refresher.dart';
 import '../shared/cached_data_providers.dart';
-import '../shared/refreshable_empty.dart';
+import '../shared/ui/srm_ui.dart';
 
 /// One course's internal marks from both portals.
 class CourseMarks {
@@ -108,11 +109,8 @@ final _courseMarksProvider = Provider<List<CourseMarks>>((ref) {
 class MarksScreen extends ConsumerWidget {
   const MarksScreen({super.key});
 
-  static const _green = Color(0xFF2D6A4F);
-
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final theme = Theme.of(context);
     final authState = ref.watch(authControllerProvider);
     if (authState is! Authenticated) {
       return const Scaffold(
@@ -121,179 +119,269 @@ class MarksScreen extends ConsumerWidget {
     }
 
     final courses = ref.watch(_courseMarksProvider);
+    final c = SrmColors.of(context);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Internal Marks')),
       body: RefreshIndicator(
-        onRefresh: () async {
-          await ref.read(appRefresherProvider).refresh();
-        },
-        child: courses.isEmpty
-            ? RefreshableEmpty(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
+        onRefresh: () => ref.read(appRefresherProvider).refresh(),
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
+          children: [
+            const HeroBanner(
+              title: 'Marks',
+              subtitle:
+                  'Review your test scores and track your internal marks.',
+              illustration: AssetPaths.success,
+            ),
+            const SizedBox(height: 16),
+            const SyncSectionNotice(
+              sections: [SyncSection.marks, SyncSection.studentPortalMarks],
+              what: 'marks',
+            ),
+            if (courses.isEmpty)
+              const Padding(
+                padding: EdgeInsets.only(top: 16),
+                child: EmptyPanel(
+                  illustration: AssetPaths.learning,
+                  title: 'No internal marks published yet',
+                  message: 'Pull down to refresh.',
+                ),
+              )
+            else ...[
+              Padding(
+                padding: const EdgeInsets.fromLTRB(4, 0, 4, 12),
+                child: Row(
                   children: [
-                    SvgPicture.asset(AssetPaths.learning, height: 140),
-                    const SizedBox(height: 16),
-                    const Text(
-                      'No internal marks published yet.',
-                      style: TextStyle(fontSize: 16, color: Colors.grey),
+                    Container(
+                      width: 8,
+                      height: 8,
+                      decoration: const BoxDecoration(
+                          color: SrmPalette.mint, shape: BoxShape.circle),
                     ),
-                    const SizedBox(height: 8),
-                    const Text(
-                      'Pull down to refresh',
-                      style: TextStyle(fontSize: 12, color: Colors.grey),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Tests from Academia, internal totals from the Student Portal',
+                        style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: c.muted),
+                      ),
                     ),
                   ],
                 ),
-              )
-            : ListView.builder(
-                padding: const EdgeInsets.all(16),
-                itemCount: courses.length,
-                itemBuilder: (context, index) =>
-                    _courseCard(theme, courses[index]),
               ),
-      ),
-    );
-  }
-
-  Widget _courseCard(ThemeData theme, CourseMarks course) {
-    final total = course.portalTotal;
-    final subtitle = [
-      course.courseCode,
-      if (course.courseType.isNotEmpty) course.courseType,
-    ].join(' • ');
-
-    return Card(
-      elevation: 0,
-      margin: const EdgeInsets.only(bottom: 12),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-        side: BorderSide(color: theme.dividerColor.withAlpha(40)),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                CircleAvatar(
-                  backgroundColor: _green.withAlpha(30),
-                  child: const Icon(LucideIcons.graduationCap,
-                      color: _green, size: 20),
+              for (final course in courses)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: _CourseMarksCard(course: course),
                 ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        course.courseTitle.isNotEmpty
-                            ? course.courseTitle
-                            : course.courseCode,
-                        style: const TextStyle(
-                            fontWeight: FontWeight.bold, fontSize: 14),
-                      ),
-                      Text(
-                        subtitle,
-                        style: theme.textTheme.bodySmall
-                            ?.copyWith(color: Colors.grey),
-                      ),
-                    ],
-                  ),
-                ),
-                if (total != null)
-                  Text(
-                    '${_fmt(total.scored)}/${_fmt(total.max)}',
-                    style: const TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 16,
-                      color: _green,
-                    ),
-                  ),
-              ],
-            ),
-            if (total != null) ...[
-              const SizedBox(height: 12),
-              ClipRRect(
-                borderRadius: BorderRadius.circular(4),
-                child: LinearProgressIndicator(
-                  value: (total.scored / total.max).clamp(0.0, 1.0),
-                  minHeight: 6,
-                  color: _green,
-                  backgroundColor: _green.withAlpha(30),
-                ),
-              ),
-              const SizedBox(height: 6),
-              const Text(
-                'Internal total · Student Portal',
-                style: TextStyle(fontSize: 11, color: Colors.grey),
-              ),
-            ],
-            if (course.academiaTests.isNotEmpty) ...[
-              const SizedBox(height: 12),
-              const Text(
-                'Tests · Academia',
-                style: TextStyle(fontSize: 11, color: Colors.grey),
-              ),
-              _testsTable(theme, course.academiaTests),
             ],
           ],
         ),
       ),
     );
   }
+}
 
-  Widget _testsTable(ThemeData theme, List<Map<String, dynamic>> tests) {
-    TableRow row(List<String> cells, {bool header = false}) => TableRow(
-          decoration: header
-              ? BoxDecoration(
-                  border: Border(
-                    bottom: BorderSide(color: theme.dividerColor.withAlpha(50)),
+/// One course, as the web's marks cards: code and type pills, the title,
+/// the portal's internal total, and the Academia tests (tap to show them).
+class _CourseMarksCard extends StatefulWidget {
+  final CourseMarks course;
+  const _CourseMarksCard({required this.course});
+
+  @override
+  State<_CourseMarksCard> createState() => _CourseMarksCardState();
+}
+
+class _CourseMarksCardState extends State<_CourseMarksCard> {
+  bool _open = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = SrmColors.of(context);
+    final course = widget.course;
+    final total = course.portalTotal;
+    final tests = course.academiaTests;
+    final testCount = '${tests.length} test${tests.length == 1 ? '' : 's'}';
+
+    return SrmPanel(
+      padding: EdgeInsets.zero,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          InkWell(
+            onTap: tests.isEmpty ? null : () => setState(() => _open = !_open),
+            child: Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      CodePill(course.courseCode),
+                      if (course.courseType.isNotEmpty) ...[
+                        const SizedBox(width: 6),
+                        Flexible(
+                          child: SoftPill(
+                            label: course.courseType,
+                            background: c.track,
+                            foreground: c.muted,
+                          ),
+                        ),
+                      ],
+                      const Spacer(),
+                      if (tests.isNotEmpty) ...[
+                        SoftPill(
+                          label: testCount,
+                          background: c.track,
+                          foreground: c.faint,
+                        ),
+                        const SizedBox(width: 6),
+                        AnimatedRotation(
+                          turns: _open ? 0.5 : 0,
+                          duration: const Duration(milliseconds: 200),
+                          child: Container(
+                            width: 30,
+                            height: 30,
+                            decoration: BoxDecoration(
+                                color: c.track, shape: BoxShape.circle),
+                            child: Icon(LucideIcons.chevronDown,
+                                size: 18, color: c.muted),
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
-                )
-              : null,
-          children: [
-            for (final (i, text) in cells.indexed)
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 8),
+                  const SizedBox(height: 10),
+                  Text(
+                    course.courseTitle.isNotEmpty
+                        ? course.courseTitle
+                        : course.courseCode,
+                    style: TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 17,
+                      height: 1.25,
+                      color: c.text,
+                    ),
+                  ),
+                  if (total != null) ...[
+                    const SizedBox(height: 14),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Expanded(
+                          child: Text(
+                            'INTERNAL TOTAL · STUDENT PORTAL',
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: 0.8,
+                              color: c.faint,
+                            ),
+                          ),
+                        ),
+                        _score(c, _fmt(total.scored), _fmt(total.max), 26),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    SrmProgressBar(
+                      value: total.scored / total.max,
+                      color: SrmPalette.mint,
+                      height: 8,
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+          AnimatedSize(
+            duration: const Duration(milliseconds: 250),
+            curve: Curves.easeOutCubic,
+            alignment: Alignment.topCenter,
+            child: !_open
+                ? const SizedBox(width: double.infinity)
+                : Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+                    child: Column(
+                      children: [
+                        for (final (i, t) in tests.indexed) ...[
+                          if (i > 0) const SizedBox(height: 10),
+                          _testBox(c, t, i),
+                        ],
+                      ],
+                    ),
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _testBox(SrmColors c, Map<String, dynamic> t, int i) {
+    final scored = num.tryParse('${t['scored']}');
+    final max = num.tryParse('${t['maxMarks']}');
+    final name = '${t['testName'] ?? 'Test ${i + 1}'}';
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: c.page == SrmPalette.cream ? const Color(0xFFF8FAFC) : c.track,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: c.border),
+      ),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              Expanded(
                 child: Text(
-                  text,
-                  textAlign: const [
-                    TextAlign.left,
-                    TextAlign.center,
-                    TextAlign.right,
-                  ][i],
+                  name.toUpperCase(),
                   style: TextStyle(
-                    fontSize: header ? 12 : 13,
-                    fontWeight:
-                        header || i == 1 ? FontWeight.bold : FontWeight.normal,
-                    color: header || i == 2
-                        ? Colors.grey
-                        : (i == 1 ? _green : null),
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.8,
+                    color: c.muted,
                   ),
                 ),
               ),
+              _score(c, '${t['scored'] ?? '—'}', '${t['maxMarks'] ?? '—'}', 22),
+            ],
+          ),
+          if (scored != null && max != null && max > 0) ...[
+            const SizedBox(height: 10),
+            SrmProgressBar(
+              value: scored / max,
+              color: SrmPalette.mint,
+              height: 6,
+            ),
           ],
-        );
-
-    return Table(
-      columnWidths: const {
-        0: FlexColumnWidth(3),
-        1: FlexColumnWidth(2),
-        2: FlexColumnWidth(2),
-      },
-      children: [
-        row(['Assessment', 'Scored', 'Max'], header: true),
-        for (final t in tests)
-          row([
-            '${t['testName'] ?? 'Test'}',
-            '${t['scored'] ?? '-'}',
-            '${t['maxMarks'] ?? '-'}',
-          ]),
-      ],
+        ],
+      ),
     );
+  }
+
+  /// "18 / 20" with the score large, as on the web.
+  static Widget _score(SrmColors c, String scored, String max, double size) {
+    return Text.rich(TextSpan(children: [
+      TextSpan(
+        text: scored,
+        style: TextStyle(
+          fontFamily: SrmFonts.display,
+          fontWeight: FontWeight.w700,
+          fontSize: size,
+          height: 1,
+          color: c.text,
+        ),
+      ),
+      TextSpan(
+        text: ' / $max',
+        style: TextStyle(
+          fontWeight: FontWeight.w700,
+          fontSize: 13,
+          color: c.faint,
+        ),
+      ),
+    ]));
   }
 
   /// 18.7 → "18.7", 20.0 → "20".
