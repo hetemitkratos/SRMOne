@@ -1,6 +1,7 @@
 // lib/features/overview/overview_screen.dart
-// Dashboard Overview screen with Monday–Friday day-order strip,
-// clock-based Live/Upcoming class detector, quick attendance stats, and today's schedule.
+// Home, laid out like the web app's Overview page: the "Welcome back" hero,
+// mint/lavender stat cards, the live/up-next class, a beige schedule panel
+// whose Mon–Fri strip picks the day shown, and compact attendance bars.
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -10,25 +11,35 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../../core/constants/asset_paths.dart';
 import '../../core/database/app_database.dart';
+import '../../core/theme/app_theme.dart';
 import '../../domain/services/attendance_planner_math.dart';
 import '../../domain/services/calendar_day_resolver.dart';
 import '../../domain/services/current_class_detector.dart';
+import '../../domain/services/day_timeline.dart';
+import '../../domain/services/session_sync_orchestrator.dart';
 import '../../domain/services/timetable_schedule.dart';
-import '../../main.dart';
 import '../auth/auth_controller.dart';
 import '../faculty/faculty_avatar.dart';
 import '../shared/app_refresher.dart';
 import '../shared/cached_data_providers.dart';
+import '../shared/ui/srm_ui.dart';
 
-class OverviewScreen extends ConsumerWidget {
+class OverviewScreen extends ConsumerStatefulWidget {
   const OverviewScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final theme = Theme.of(context);
+  ConsumerState<OverviewScreen> createState() => _OverviewScreenState();
+}
+
+class _OverviewScreenState extends ConsumerState<OverviewScreen> {
+  /// The weekday (1 = Mon … 5 = Fri) picked in the schedule strip, or null
+  /// for today.
+  int? _pickedWeekday;
+
+  @override
+  Widget build(BuildContext context) {
     final authState = ref.watch(authControllerProvider);
     final email = authState is Authenticated ? authState.email : '';
-    final db = ref.watch(appDatabaseProvider);
 
     if (email.isEmpty) {
       return const Scaffold(
@@ -36,604 +47,686 @@ class OverviewScreen extends ConsumerWidget {
       );
     }
 
+    final profile = ref.watch(studentProfileProvider).valueOrNull;
+    final courses = ref.watch(timetableCoursesProvider);
+    final records = ref.watch(attendanceRecordsProvider).valueOrNull ?? [];
+    final calMap = ref.watch(calendarMapProvider(currentSemester()));
+    final now = DateTime.now();
+    final todayStatus = CalendarDayResolver.getDayStatus(calMap, now);
+
     return Scaffold(
       body: RefreshIndicator(
-        onRefresh: () async {
-          await ref.read(appRefresherProvider).refresh();
-        },
-        child: CustomScrollView(
-          slivers: [
-            // Top App Bar
-            SliverAppBar(
-              floating: true,
-              pinned: true,
-              title: Consumer(
-                builder: (context, ref, _) {
-                  final snapshot = ref.watch(studentProfileProvider);
-                  final name = snapshot.valueOrNull?.name ?? 'Student';
-                  return Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Hi, ${name.split(' ').first}',
-                        style: const TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 18,
-                        ),
-                      ),
-                      Text(
-                        snapshot.valueOrNull?.regNumber ?? email,
-                        style: theme.textTheme.labelSmall
-                            ?.copyWith(color: Colors.grey),
-                      ),
-                    ],
-                  );
-                },
-              ),
+        onRefresh: () => ref.read(appRefresherProvider).refresh(),
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
+          children: staggeredEntrance(context, [
+            _hero(context, profile),
+            const SizedBox(height: 16),
+            const SyncSectionNotice(
+              sections: [SyncSection.academia, SyncSection.attendance],
+              what: 'your data',
             ),
-
-            // Content
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Consumer(
-                  builder: (context, ref, _) {
-                    final calMap =
-                        ref.watch(calendarMapProvider(currentSemester()));
-                    final now = DateTime.now();
-                    final todayStatus =
-                        CalendarDayResolver.getDayStatus(calMap, now);
-
-                    return Consumer(
-                      builder: (context, ref, _) {
-                        final courses = ref.watch(timetableCoursesProvider);
-
-                        return Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            // 1. Week Day-Order Strip
-                            _buildWeekDayStrip(theme, calMap, now),
-                            const SizedBox(height: 20),
-
-                            // 2. Live Now / Up Next Hero Card
-                            _buildLiveHeroCard(
-                              context,
-                              theme,
-                              todayStatus,
-                              courses,
-                              now,
-                            ),
-                            const SizedBox(height: 20),
-
-                            // 3. Quick Attendance Stat Card
-                            _buildQuickAttendanceCard(
-                              context,
-                              theme,
-                              db,
-                              email,
-                            ),
-                            const SizedBox(height: 24),
-
-                            // 4. Today's Classes Header
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                Text(
-                                  todayStatus.dayLabel.isNotEmpty
-                                      ? "TODAY'S SCHEDULE (${todayStatus.dayLabel})"
-                                      : "TODAY'S SCHEDULE",
-                                  style: const TextStyle(
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.bold,
-                                    letterSpacing: 1.1,
-                                    color: Colors.grey,
-                                  ),
-                                ),
-                                TextButton(
-                                  onPressed: () => context.go('/timetable'),
-                                  child: const Text('View Full'),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 8),
-
-                            // 5. Today's Classes List
-                            _buildTodayScheduleList(
-                              theme,
-                              todayStatus,
-                              courses,
-                              now,
-                            ),
-                          ],
-                        );
-                      },
-                    );
-                  },
-                ),
-              ),
-            ),
-          ],
+            _statsRow(courses, records),
+            const SizedBox(height: 16),
+            _LiveClassCard(
+                todayStatus: todayStatus, courses: courses, now: now),
+            const SizedBox(height: 16),
+            _schedulePanel(context, calMap, todayStatus, courses, now),
+            const SizedBox(height: 16),
+            if (records.isNotEmpty) _attendancePanel(context, records),
+          ]),
         ),
       ),
     );
   }
 
-  // ─── 1. Week Day-Order Strip (Mon–Fri) ────────────────────────────────────────
+  // ─── Hero ────────────────────────────────────────────────────────────────
 
-  Widget _buildWeekDayStrip(
-    ThemeData theme,
-    Map<String, CalendarEntry> calMap,
-    DateTime now,
-  ) {
-    // Determine the Monday of the current week
-    final monday = now.subtract(Duration(days: now.weekday - 1));
-    final weekdays = List.generate(5, (i) => monday.add(Duration(days: i)));
-
-    return Card(
-      elevation: 0,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-        side: BorderSide(color: theme.dividerColor.withAlpha(40)),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceAround,
-          children: weekdays.map((date) {
-            final isToday = date.year == now.year &&
-                date.month == now.month &&
-                date.day == now.day;
-            final status = CalendarDayResolver.getDayStatus(calMap, date);
-            final dayName =
-                ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'][date.weekday - 1];
-
-            return Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-              decoration: BoxDecoration(
-                color: isToday ? const Color(0xFF2D6A4F) : Colors.transparent,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Column(
-                children: [
-                  Text(
-                    dayName,
-                    style: TextStyle(
-                      fontSize: 11,
-                      color: isToday ? Colors.white70 : Colors.grey,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    '${date.day}',
-                    style: TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.bold,
-                      color: isToday ? Colors.white : null,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  if (status.isWorkingDay)
-                    Text(
-                      'D${status.dayOrderNum}',
-                      style: TextStyle(
-                        fontSize: 10,
-                        fontWeight: FontWeight.bold,
-                        color: isToday
-                            ? const Color(0xFFBDE3D5)
-                            : const Color(0xFF2D6A4F),
-                      ),
-                    )
-                  else if (status.isHoliday)
-                    const Text(
-                      'HOL',
-                      style: TextStyle(
-                        fontSize: 9,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.redAccent,
-                      ),
-                    )
-                  else
-                    const Text(
-                      '-',
-                      style: TextStyle(fontSize: 10, color: Colors.grey),
-                    ),
-                ],
-              ),
-            );
-          }).toList(),
-        ),
+  Widget _hero(BuildContext context, StudentProfile? profile) {
+    final first = (profile?.name ?? '').trim().split(RegExp(r'\s+')).first;
+    final details = [
+      if ((profile?.branch ?? '').isNotEmpty) profile!.branch,
+      if ((profile?.batch ?? '').isNotEmpty) 'Batch ${profile!.batch}',
+    ].join(' • ');
+    return HeroBanner(
+      eyebrow: 'Welcome back,',
+      title: first.isEmpty ? 'Student' : _titleCase(first),
+      subtitle: details,
+      illustration: AssetPaths.learning,
+      action: HeroPillButton(
+        label: 'View Timetable',
+        icon: LucideIcons.calendarDays,
+        onPressed: () => context.go('/timetable'),
       ),
     );
   }
 
-  // ─── 2. Live Now / Up Next Hero Card ─────────────────────────────────────────
+  // ─── Stats ───────────────────────────────────────────────────────────────
 
-  Widget _buildLiveHeroCard(
+  Widget _statsRow(
+      List<Map<String, dynamic>> courses, List<AttendanceCacheData> records) {
+    final summary = computeAttendanceSummary(_inputs(records));
+    return IntrinsicHeight(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Expanded(
+            child: PastelStatCard(
+              label: 'Total Courses',
+              value: '${courses.length}',
+              caption: 'Enrolled',
+              icon: LucideIcons.arrowUpRight,
+              color: SrmPalette.mint,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: PastelStatCard(
+              label: 'Attendance',
+              value: records.isEmpty
+                  ? '—'
+                  : summary.unweightedMeanPct.toStringAsFixed(1),
+              suffix: records.isEmpty ? null : '%',
+              caption: records.isEmpty
+                  ? 'Not loaded yet'
+                  : '${summary.below75} below 75%',
+              color: SrmPalette.lavender,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ─── Schedule panel ──────────────────────────────────────────────────────
+
+  Widget _schedulePanel(
     BuildContext context,
-    ThemeData theme,
+    Map<String, CalendarEntry> calMap,
     DayStatus todayStatus,
     List<Map<String, dynamic>> courses,
     DateTime now,
   ) {
-    if (todayStatus.isHoliday ||
-        todayStatus.isWeekend ||
-        !todayStatus.isWorkingDay) {
-      return Card(
-        elevation: 0,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-          side: BorderSide(color: theme.dividerColor.withAlpha(40)),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.all(20),
-          child: Row(
+    final c = SrmColors.of(context);
+    final monday = DateTime(now.year, now.month, now.day)
+        .subtract(Duration(days: now.weekday - 1));
+    final weekdays = List.generate(5, (i) => monday.add(Duration(days: i)));
+    final todayWeekday = now.weekday <= 5 ? now.weekday : null;
+    final picked = _pickedWeekday ?? todayWeekday;
+    final pickedDate = picked == null ? null : weekdays[picked - 1];
+    final pickedStatus = pickedDate == null
+        ? null
+        : CalendarDayResolver.getDayStatus(calMap, pickedDate);
+    final isToday = picked != null && picked == todayWeekday;
+
+    final todayLabel = todayStatus.isHoliday
+        ? 'Holiday'
+        : todayStatus.isWeekend
+            ? 'Weekend'
+            : todayStatus.dayLabel.isNotEmpty
+                ? todayStatus.dayLabel
+                : '—';
+
+    return SrmPanel(
+      color: SrmPalette.beige.withAlpha(c.page == SrmPalette.cream ? 102 : 40),
+      padding: const EdgeInsets.all(18),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SectionTitle(
+            isToday ? "Today's Schedule" : 'Schedule',
+            trailing: SoftPill(
+              label: 'Today: $todayLabel',
+              background: SrmPalette.terracotta.withAlpha(26),
+              foreground: SrmPalette.terracottaText,
+            ),
+          ),
+          const SizedBox(height: 14),
+          Row(
             children: [
-              SvgPicture.asset(AssetPaths.chilling, height: 60),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      todayStatus.isHoliday
-                          ? 'Holiday Today!'
-                          : todayStatus.isWeekend
-                              ? 'Weekend!'
-                              : 'No day order yet',
-                      style: const TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 16,
-                      ),
+              for (final date in weekdays)
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 3),
+                    child: _DayChip(
+                      date: date,
+                      status: CalendarDayResolver.getDayStatus(calMap, date),
+                      selected: date.weekday == picked,
+                      today: date.weekday == todayWeekday,
+                      onTap: () =>
+                          setState(() => _pickedWeekday = date.weekday),
                     ),
-                    const SizedBox(height: 4),
-                    Text(
-                      todayStatus.event.isNotEmpty
-                          ? todayStatus.event
-                          : todayStatus.type == DayStatusType.unknown
-                              ? "Today's day order isn't in the academic calendar yet."
-                              : 'No classes scheduled today. Relax!',
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: Colors.grey,
-                      ),
-                    ),
-                  ],
+                  ),
                 ),
-              ),
             ],
           ),
-        ),
+          const SizedBox(height: 14),
+          _scheduleBody(context, pickedStatus, courses, now, isToday),
+          const SizedBox(height: 4),
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton.icon(
+              onPressed: () => context.go('/timetable'),
+              icon: const Icon(LucideIcons.arrowUpRight, size: 16),
+              label: const Text('Full timetable'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _scheduleBody(
+    BuildContext context,
+    DayStatus? status,
+    List<Map<String, dynamic>> courses,
+    DateTime now,
+    bool isToday,
+  ) {
+    if (status == null) {
+      return _scheduleNote(
+        context,
+        AssetPaths.chilling,
+        "It's the weekend!",
+        'Pick a day above to preview its classes.',
+      );
+    }
+    if (status.isHoliday) {
+      return _scheduleNote(
+        context,
+        AssetPaths.vacationSelfie,
+        status.event.isNotEmpty ? status.event : "It's a holiday!",
+        'No classes this day.',
+      );
+    }
+    if (!status.isWorkingDay) {
+      return _scheduleNote(
+        context,
+        AssetPaths.calendar,
+        'No day order yet',
+        "This day isn't in the academic calendar yet.",
       );
     }
 
-    final slots = TimetableSchedule.slotsForDay(courses, todayStatus.dayLabel);
-    final classified = CurrentClassDetector.classify(
-      slots,
-      todayStatus.dayLabel,
-      now,
+    final slots = TimetableSchedule.slotsForDay(courses, status.dayLabel);
+    if (slots.isEmpty) {
+      return _scheduleNote(
+        context,
+        AssetPaths.coffeeTime,
+        'No classes scheduled for ${status.dayLabel}',
+        'Enjoy your free time!',
+      );
+    }
+
+    final byCode = {
+      for (final c in courses) c['courseCode']?.toString() ?? '': c,
+    };
+    final states = isToday
+        ? {
+            for (final (s, info)
+                in CurrentClassDetector.classify(slots, status.dayLabel, now))
+              s: info.state,
+          }
+        : const <TimetableSlotWithTiming, ClassTimeState>{};
+
+    return Column(
+      children: [
+        for (final s in slots)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: _ClassCard(
+              slot: s,
+              course: byCode[s.courseCode] ?? const {},
+              state: states[s],
+            ),
+          ),
+      ],
     );
+  }
 
-    final ongoing =
-        classified.where((c) => c.$2.state == ClassTimeState.ongoing).toList();
-    final upcoming = classified
-        .where((c) => c.$2.state == ClassTimeState.upcomingNext)
-        .toList();
+  Widget _scheduleNote(
+      BuildContext context, String art, String title, String message) {
+    final c = SrmColors.of(context);
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+      decoration: BoxDecoration(
+        color: c.card.withAlpha(128),
+        borderRadius: BorderRadius.circular(SrmRadii.card),
+      ),
+      child: Column(
+        children: [
+          SvgPicture.asset(art, height: 96, excludeFromSemantics: true),
+          const SizedBox(height: 14),
+          Text(
+            title,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+                fontWeight: FontWeight.w700, fontSize: 16, color: c.text),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            message,
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 13, color: c.muted),
+          ),
+        ],
+      ),
+    );
+  }
 
-    if (ongoing.isNotEmpty) {
-      final (slot, info) = ongoing.first;
-      return Card(
-        elevation: 2,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-          side: const BorderSide(color: Color(0xFF2D6A4F), width: 1.5),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF2D6A4F),
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: const Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(LucideIcons.radio, size: 12, color: Colors.white),
-                        SizedBox(width: 4),
-                        Text(
-                          'LIVE NOW',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 10,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  Text(
-                    slot.timing,
-                    style: theme.textTheme.labelSmall?.copyWith(
-                      color: Colors.grey,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              Text(
-                slot.courseTitle.isNotEmpty
-                    ? slot.courseTitle
-                    : slot.courseCode,
-                style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
+  // ─── Attendance panel ────────────────────────────────────────────────────
+
+  Widget _attendancePanel(
+      BuildContext context, List<AttendanceCacheData> records) {
+    final c = SrmColors.of(context);
+    final sorted = [...records]
+      ..sort((a, b) => a.attendancePct.compareTo(b.attendancePct));
+    return SrmPanel(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SectionTitle(
+            'Attendance',
+            trailing: RoundIconButton(
+              icon: LucideIcons.arrowUpRight,
+              tooltip: 'Open attendance',
+              onPressed: () => context.go('/attendance'),
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Lowest first',
+            style: TextStyle(fontSize: 12, color: c.muted),
+          ),
+          const SizedBox(height: 14),
+          for (final r in sorted.take(5)) ...[
+            Row(
+              children: [
+                FacultyAvatar(
+                  facultyName:
+                      r.facultyName.isNotEmpty ? r.facultyName : r.courseTitle,
+                  showsProfile: r.facultyName.isNotEmpty,
+                  radius: 12,
                 ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                slot.courseCode,
-                style: theme.textTheme.bodySmall?.copyWith(color: Colors.grey),
-              ),
-              if (info.progressFraction != null) ...[
-                const SizedBox(height: 12),
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(4),
-                  child: LinearProgressIndicator(
-                    value: info.progressFraction,
-                    color: const Color(0xFF2D6A4F),
-                    backgroundColor: theme.dividerColor.withAlpha(40),
-                    minHeight: 4,
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    tidyTitle(r.courseTitle.isNotEmpty
+                        ? r.courseTitle
+                        : r.courseCode),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                      color: c.text,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  '${r.attendancePct.toStringAsFixed(1)}%',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: c.text,
                   ),
                 ),
               ],
-            ],
-          ),
-        ),
-      );
-    }
-
-    if (upcoming.isNotEmpty) {
-      final (slot, info) = upcoming.first;
-      return Card(
-        elevation: 0,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-          side: const BorderSide(color: Colors.orangeAccent),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Row(
-            children: [
-              CircleAvatar(
-                backgroundColor: Colors.orange.withAlpha(30),
-                child: const Icon(
-                  LucideIcons.clock,
-                  color: Colors.orangeAccent,
-                  size: 20,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'UP NEXT in ${info.minutesUntilStart ?? 0}m',
-                      style: const TextStyle(
-                        color: Colors.orangeAccent,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 12,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      slot.courseTitle.isNotEmpty
-                          ? slot.courseTitle
-                          : slot.courseCode,
-                      style: const TextStyle(fontWeight: FontWeight.bold),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
-
-    // All classes finished
-    return Card(
-      elevation: 0,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-        side: BorderSide(color: theme.dividerColor.withAlpha(40)),
+            ),
+            const SizedBox(height: 8),
+            SrmProgressBar(
+              value: r.attendancePct / 100,
+              color: attendanceBarColor(r.attendancePct),
+            ),
+            const SizedBox(height: 16),
+          ],
+        ],
       ),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Row(
-          children: [
-            SvgPicture.asset(AssetPaths.coffeeTime, height: 50),
-            const SizedBox(width: 16),
-            const Expanded(
+    );
+  }
+
+  static List<AttendanceInput> _inputs(List<AttendanceCacheData> records) => [
+        for (final r in records)
+          AttendanceInput(
+            courseCode: r.courseCode,
+            courseTitle: r.courseTitle,
+            hoursConducted: r.hoursConducted,
+            hoursAbsent: r.hoursAbsent,
+            attendancePct: r.attendancePct,
+          ),
+      ];
+
+  static String _titleCase(String w) =>
+      w.isEmpty ? w : w[0].toUpperCase() + w.substring(1).toLowerCase();
+}
+
+// ─── Week strip chip ─────────────────────────────────────────────────────────
+
+/// One weekday in the schedule strip: black when picked, a terracotta ring
+/// for today, as the web's day pills.
+class _DayChip extends StatelessWidget {
+  final DateTime date;
+  final DayStatus status;
+  final bool selected;
+  final bool today;
+  final VoidCallback onTap;
+
+  const _DayChip({
+    required this.date,
+    required this.status,
+    required this.selected,
+    required this.today,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final c = SrmColors.of(context);
+    final fg = selected ? c.onHero : c.text;
+    final sub = status.isWorkingDay
+        ? 'D${status.dayOrderNum}'
+        : status.isHoliday
+            ? 'HOL'
+            : '–';
+    final subColor = selected
+        ? c.onHero.withAlpha(178)
+        : status.isHoliday
+            ? SrmPalette.terracottaText
+            : c.muted;
+    final name = const ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'][date.weekday - 1];
+
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: '$name ${date.day}, '
+          '${status.isWorkingDay ? 'day order ${status.dayOrderNum}' : status.isHoliday ? 'holiday' : 'no day order'}'
+          '${today ? ', today' : ''}',
+      child: ExcludeSemantics(
+        child: Material(
+          color: selected ? c.hero : c.card,
+          shape: StadiumBorder(
+            side: selected
+                ? BorderSide.none
+                : today
+                    ? const BorderSide(color: SrmPalette.terracotta, width: 2)
+                    : BorderSide(color: c.border),
+          ),
+          child: InkWell(
+            customBorder: const StadiumBorder(),
+            onTap: onTap,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 10),
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    'All Classes Done!',
-                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
-                  ),
-                  SizedBox(height: 2),
-                  Text(
-                    'No more scheduled lectures today.',
-                    style: TextStyle(color: Colors.grey, fontSize: 12),
-                  ),
+                  Text(name,
+                      style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                          color: selected ? c.onHero.withAlpha(178) : c.muted)),
+                  const SizedBox(height: 2),
+                  Text('${date.day}',
+                      style: TextStyle(
+                          fontFamily: SrmFonts.display,
+                          fontSize: 17,
+                          fontWeight: FontWeight.w700,
+                          color: fg)),
+                  const SizedBox(height: 2),
+                  Text(sub,
+                      style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w700,
+                          color: subColor)),
                 ],
               ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Class card ──────────────────────────────────────────────────────────────
+
+/// A class in the schedule panel, like the web's white schedule cards.
+class _ClassCard extends StatelessWidget {
+  final TimetableSlotWithTiming slot;
+  final Map<String, dynamic> course;
+  final ClassTimeState? state;
+
+  const _ClassCard({required this.slot, required this.course, this.state});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = SrmColors.of(context);
+    final faculty = course['facultyName']?.toString().trim() ?? '';
+    final room = course['roomNo']?.toString().trim() ?? '';
+    final done = state == ClassTimeState.completed;
+    final live = state == ClassTimeState.ongoing;
+
+    return Opacity(
+      opacity: done ? 0.55 : 1,
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: c.card,
+          borderRadius: BorderRadius.circular(SrmRadii.card),
+          border: live
+              ? Border.all(color: c.text, width: 1.5)
+              : Border.all(color: c.card),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                CodePill(slot.courseCode),
+                if (live) ...[
+                  const SizedBox(width: 6),
+                  const SoftPill(
+                    label: 'LIVE',
+                    background: SrmPalette.mint,
+                    foreground: SrmPalette.ink,
+                  ),
+                ],
+                const Spacer(),
+                Text(
+                  formatTiming(slot.timing),
+                  style: TextStyle(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 13,
+                    color: c.text,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Text(
+              tidyTitle(slot.courseTitle.isNotEmpty
+                  ? slot.courseTitle
+                  : slot.courseCode),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontWeight: FontWeight.w700,
+                fontSize: 15,
+                height: 1.3,
+                color: c.text,
+              ),
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                if (faculty.isNotEmpty) ...[
+                  FacultyAvatar(facultyName: faculty, radius: 11),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      _cleanName(faculty),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                        color: c.muted,
+                      ),
+                    ),
+                  ),
+                ] else
+                  const Spacer(),
+                if (room.isNotEmpty) ...[
+                  const SizedBox(width: 8),
+                  Icon(LucideIcons.mapPin, size: 14, color: c.muted),
+                  const SizedBox(width: 3),
+                  Text(
+                    room,
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                      color: c.muted,
+                    ),
+                  ),
+                ],
+              ],
             ),
           ],
         ),
       ),
     );
   }
+}
 
-  // ─── 3. Quick Attendance Stat Card ───────────────────────────────────────────
+/// "Dr. Jane Doe (103528)" → "Dr. Jane Doe", as the web's `cleanName`.
+String _cleanName(String name) =>
+    name.replaceAll(RegExp(r'\(.*?\)'), '').trim();
 
-  Widget _buildQuickAttendanceCard(
-    BuildContext context,
-    ThemeData theme,
-    AppDatabase db,
-    String email,
-  ) {
-    return Consumer(
-      builder: (context, ref, _) {
-        final snapshot = ref.watch(attendanceRecordsProvider);
-        final records = snapshot.valueOrNull ?? [];
-        if (records.isEmpty) return const SizedBox.shrink();
+// ─── Live / up-next card ─────────────────────────────────────────────────────
 
-        final inputs = records
-            .map((r) => AttendanceInput(
-                  courseCode: r.courseCode,
-                  courseTitle: r.courseTitle,
-                  hoursConducted: r.hoursConducted,
-                  hoursAbsent: r.hoursAbsent,
-                  attendancePct: r.attendancePct,
-                ))
-            .toList();
+/// What is on now or next today; nothing on days without classes.
+class _LiveClassCard extends StatelessWidget {
+  final DayStatus todayStatus;
+  final List<Map<String, dynamic>> courses;
+  final DateTime now;
 
-        final summary = computeAttendanceSummary(inputs);
+  const _LiveClassCard({
+    required this.todayStatus,
+    required this.courses,
+    required this.now,
+  });
 
-        return GestureDetector(
-          onTap: () => context.go('/attendance'),
-          child: Card(
-            elevation: 0,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(16),
-              side: BorderSide(color: theme.dividerColor.withAlpha(40)),
-            ),
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+  @override
+  Widget build(BuildContext context) {
+    if (!todayStatus.isWorkingDay) return const SizedBox.shrink();
+    final slots = TimetableSchedule.slotsForDay(courses, todayStatus.dayLabel);
+    if (slots.isEmpty) return const SizedBox.shrink();
+
+    final classified =
+        CurrentClassDetector.classify(slots, todayStatus.dayLabel, now);
+    final ongoing =
+        classified.where((x) => x.$2.state == ClassTimeState.ongoing);
+    final upcoming =
+        classified.where((x) => x.$2.state == ClassTimeState.upcomingNext);
+    final c = SrmColors.of(context);
+
+    if (ongoing.isEmpty && upcoming.isEmpty) {
+      return SrmPanel(
+        radius: SrmRadii.card,
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          children: [
+            SvgPicture.asset(AssetPaths.coffeeTime,
+                height: 48, excludeFromSemantics: true),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
-                    children: [
-                      CircleAvatar(
-                        radius: 22,
-                        backgroundColor: const Color(0xFF2D6A4F).withAlpha(30),
-                        child: Text(
-                          '${summary.unweightedMeanPct.toInt()}%',
-                          style: const TextStyle(
-                            color: Color(0xFF2D6A4F),
-                            fontWeight: FontWeight.bold,
-                            fontSize: 14,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            'Overall Attendance',
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 14,
-                            ),
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            '${summary.above75} safe • ${summary.below75} below 75%',
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: Colors.grey,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                  const Icon(LucideIcons.chevronRight,
-                      size: 18, color: Colors.grey),
+                  Text('All classes done!',
+                      style: TextStyle(
+                          fontWeight: FontWeight.w700,
+                          fontSize: 15,
+                          color: c.text)),
+                  const SizedBox(height: 2),
+                  Text('No more lectures today.',
+                      style: TextStyle(fontSize: 12, color: c.muted)),
                 ],
               ),
             ),
-          ),
-        );
-      },
-    );
-  }
-
-  // ─── 4. Today's Classes List ─────────────────────────────────────────────────
-
-  Widget _buildTodayScheduleList(
-    ThemeData theme,
-    DayStatus todayStatus,
-    List<Map<String, dynamic>> courses,
-    DateTime now,
-  ) {
-    if (!todayStatus.isWorkingDay) {
-      return Container(
-        padding: const EdgeInsets.all(24),
-        alignment: Alignment.center,
-        child: const Text(
-          'No timetable slots for today.',
-          style: TextStyle(color: Colors.grey),
+          ],
         ),
       );
     }
 
-    final slots = TimetableSchedule.slotsForDay(courses, todayStatus.dayLabel);
-    if (slots.isEmpty) {
-      return Container(
-        padding: const EdgeInsets.all(24),
-        alignment: Alignment.center,
-        child: const Text(
-          'No classes mapped to this Day Order.',
-          style: TextStyle(color: Colors.grey),
-        ),
-      );
-    }
+    final isLive = ongoing.isNotEmpty;
+    final (slot, info) = isLive ? ongoing.first : upcoming.first;
+    final label = isLive
+        ? 'LIVE NOW'
+        : 'NEXT ${startsIn(info.minutesUntilStart ?? 0, info.startMinutes).toUpperCase()}';
 
-    final facultyByCode = {
-      for (final c in courses)
-        if ((c['facultyName']?.toString() ?? '').trim().isNotEmpty)
-          c['courseCode']?.toString() ?? '': c['facultyName'].toString().trim(),
-    };
-
-    return Column(
-      children: slots.map((s) {
-        return Card(
-          elevation: 0,
-          margin: const EdgeInsets.only(bottom: 8),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-            side: BorderSide(color: theme.dividerColor.withAlpha(30)),
+    return SrmPanel(
+      color: isLive ? SrmPalette.mint : c.card,
+      radius: SrmRadii.card,
+      padding: const EdgeInsets.all(18),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              SoftPill(
+                label: label,
+                icon: isLive ? LucideIcons.radio : LucideIcons.clock,
+                background: SrmPalette.ink,
+                foreground: Colors.white,
+              ),
+              const Spacer(),
+              Text(
+                formatTiming(slot.timing),
+                style: TextStyle(
+                  fontWeight: FontWeight.w700,
+                  fontSize: 13,
+                  color: isLive ? SrmPalette.ink : c.text,
+                ),
+              ),
+            ],
           ),
-          child: ListTile(
-            leading: FacultyAvatar(
-              facultyName: facultyByCode[s.courseCode] ??
-                  (s.courseTitle.isNotEmpty ? s.courseTitle : s.courseCode),
-              showsProfile: facultyByCode[s.courseCode] != null,
-              radius: 16,
-            ),
-            title: Text(
-              s.courseTitle.isNotEmpty ? s.courseTitle : s.courseCode,
-              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
-            ),
-            subtitle: Text(
-              '${s.courseCode} • ${s.timing}',
-              style: const TextStyle(fontSize: 11, color: Colors.grey),
+          const SizedBox(height: 12),
+          Text(
+            tidyTitle(slot.courseTitle.isNotEmpty
+                ? slot.courseTitle
+                : slot.courseCode),
+            style: TextStyle(
+              fontFamily: SrmFonts.display,
+              fontWeight: FontWeight.w700,
+              fontSize: 19,
+              height: 1.2,
+              color: isLive ? SrmPalette.ink : c.text,
             ),
           ),
-        );
-      }).toList(),
+          const SizedBox(height: 4),
+          Text(
+            slot.courseCode,
+            style: TextStyle(
+              fontFamily: SrmFonts.mono,
+              fontSize: 12,
+              color: isLive ? SrmPalette.ink.withAlpha(178) : c.muted,
+            ),
+          ),
+          if (isLive && info.progressFraction != null) ...[
+            const SizedBox(height: 14),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: LinearProgressIndicator(
+                value: info.progressFraction,
+                minHeight: 8,
+                color: SrmPalette.ink,
+                backgroundColor: Colors.white.withAlpha(128),
+              ),
+            ),
+          ],
+        ],
+      ),
     );
   }
 }

@@ -21,6 +21,9 @@ void backgroundSyncCallbackDispatcher() {
     AppDatabase? db;
     try {
       await ErrorLog.init();
+      // Nothing to refresh, and no alerts, once the student has signed out.
+      final vault = SecureVaultService();
+      if ((await vault.getAcademiaEmail() ?? '').isEmpty) return true;
       db = AppDatabase();
       final notifPlugin = FlutterLocalNotificationsPlugin();
       await notifPlugin.initialize(
@@ -36,7 +39,7 @@ void backgroundSyncCallbackDispatcher() {
 
       final orchestrator = SessionSyncOrchestrator(
         db: db,
-        vault: SecureVaultService(),
+        vault: vault,
         notifEngine: NotificationRuleEngine(db: db, notifPlugin: notifPlugin),
       );
 

@@ -3,6 +3,8 @@
 
 import 'package:flutter/material.dart';
 
+import '../../core/theme/app_theme.dart';
+
 class LegalMarkdownScreen extends StatelessWidget {
   final String title;
   final bool isPrivacyPolicy;
@@ -43,7 +45,8 @@ class LegalMarkdownScreen extends StatelessWidget {
         const SizedBox(height: 8),
         Text(
           'Last updated: October 2026',
-          style: theme.textTheme.bodySmall?.copyWith(color: Colors.grey),
+          style:
+              theme.textTheme.bodySmall?.copyWith(color: SrmPalette.slate500),
         ),
         const SizedBox(height: 24),
         _section(
@@ -83,7 +86,8 @@ class LegalMarkdownScreen extends StatelessWidget {
         const SizedBox(height: 8),
         Text(
           'Last updated: October 2026',
-          style: theme.textTheme.bodySmall?.copyWith(color: Colors.grey),
+          style:
+              theme.textTheme.bodySmall?.copyWith(color: SrmPalette.slate500),
         ),
         const SizedBox(height: 24),
         _section(

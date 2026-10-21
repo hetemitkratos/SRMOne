@@ -6,7 +6,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
-import '../../core/database/app_database.dart';
+import '../../core/theme/app_theme.dart';
+import '../../../core/database/app_database.dart';
 import '../../main.dart';
 import '../auth/auth_controller.dart';
 
@@ -41,6 +42,7 @@ class NotificationBell extends ConsumerWidget {
           onPressed: () {
             showModalBottomSheet(
               context: context,
+              useRootNavigator: true,
               isScrollControlled: true,
               backgroundColor: Colors.transparent,
               builder: (ctx) => NotificationBellSheet(academiaEmail: email),
@@ -76,11 +78,11 @@ class NotificationBellSheet extends ConsumerWidget {
   Color _colorForType(String type) {
     switch (type) {
       case 'low_attendance':
-        return Colors.orangeAccent;
+        return SrmPalette.terracotta;
       case 'holiday_alert':
-        return const Color(0xFF457B9D);
+        return SrmPalette.lavenderText;
       case 'welcome':
-        return const Color(0xFF2D6A4F);
+        return SrmPalette.mintText;
       default:
         return Colors.blueGrey;
     }
@@ -89,144 +91,158 @@ class NotificationBellSheet extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final db = ref.watch(appDatabaseProvider);
-    final theme = Theme.of(context);
+    final c = SrmColors.of(context);
 
     return Container(
       constraints: BoxConstraints(
-        maxHeight: MediaQuery.of(context).size.height * 0.75,
+        maxHeight: MediaQuery.sizeOf(context).height * 0.75,
       ),
       decoration: BoxDecoration(
-        color: theme.colorScheme.surface,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+        color: c.card,
+        borderRadius:
+            const BorderRadius.vertical(top: Radius.circular(SrmRadii.panel)),
       ),
-      child: Column(
-        children: [
-          // Drag handle
-          Container(
-            width: 40,
-            height: 4,
-            margin: const EdgeInsets.symmetric(vertical: 12),
-            decoration: BoxDecoration(
-              color: Colors.white24,
-              borderRadius: BorderRadius.circular(2),
-            ),
-          ),
-
-          // Header
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  'Notifications',
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.bold,
+      child: StreamBuilder<List<NotificationsTableData>>(
+        stream: db.watchNotifications(academiaEmail),
+        builder: (context, snapshot) {
+          final notifications = snapshot.data ?? const [];
+          return Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 40,
+                height: 4,
+                margin: const EdgeInsets.only(top: 12, bottom: 8),
+                decoration: BoxDecoration(
+                  color: c.border,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(24, 4, 16, 8),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'Notifications',
+                        style: TextStyle(
+                          fontFamily: SrmFonts.display,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 22,
+                          color: c.text,
+                        ),
+                      ),
+                    ),
+                    if (notifications.isNotEmpty)
+                      TextButton.icon(
+                        onPressed: () =>
+                            db.clearAllNotifications(academiaEmail),
+                        icon: const Icon(LucideIcons.checkCheck, size: 16),
+                        label: const Text('Clear all'),
+                      ),
+                  ],
+                ),
+              ),
+              if (notifications.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(24, 32, 24, 48),
+                  child: Column(
+                    children: [
+                      Icon(LucideIcons.bellOff, size: 36, color: c.faint),
+                      const SizedBox(height: 12),
+                      Text(
+                        "You're all caught up",
+                        style: TextStyle(
+                          fontWeight: FontWeight.w600,
+                          fontSize: 15,
+                          color: c.muted,
+                        ),
+                      ),
+                    ],
+                  ),
+                )
+              else
+                Flexible(
+                  child: ListView.separated(
+                    shrinkWrap: true,
+                    padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+                    itemCount: notifications.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 8),
+                    itemBuilder: (context, index) =>
+                        _tile(c, notifications[index]),
                   ),
                 ),
-                TextButton.icon(
-                  onPressed: () async {
-                    await db.markAllNotificationsRead(academiaEmail);
-                  },
-                  icon: const Icon(LucideIcons.checkCheck, size: 16),
-                  label: const Text('Mark all read'),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _tile(SrmColors c, NotificationsTableData item) {
+    // createdAt is in milliseconds.
+    final date = DateTime.fromMillisecondsSinceEpoch(item.createdAt);
+    final isUnread = item.read == 0;
+    final accent = _colorForType(item.type);
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: isUnread ? c.track : c.card,
+        borderRadius: BorderRadius.circular(SrmRadii.field),
+        border: Border.all(color: c.border),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              color: accent.withAlpha(36),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(_iconForType(item.type), size: 18, color: accent),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        item.title,
+                        style: TextStyle(
+                          fontWeight: FontWeight.w700,
+                          fontSize: 14,
+                          color: c.text,
+                        ),
+                      ),
+                    ),
+                    if (isUnread)
+                      Container(
+                        width: 8,
+                        height: 8,
+                        decoration: const BoxDecoration(
+                          color: SrmPalette.terracotta,
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  item.body,
+                  style: TextStyle(fontSize: 13, height: 1.4, color: c.muted),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  DateFormat('d MMM, h:mm a').format(date),
+                  style: TextStyle(fontSize: 11, color: c.faint),
                 ),
               ],
-            ),
-          ),
-          const Divider(height: 1),
-
-          // Notification List
-          Expanded(
-            child: StreamBuilder<List<NotificationsTableData>>(
-              stream: db.watchNotifications(academiaEmail),
-              builder: (context, snapshot) {
-                final notifications = snapshot.data ?? [];
-
-                if (notifications.isEmpty) {
-                  return Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(
-                          LucideIcons.bellOff,
-                          size: 48,
-                          color: Colors.grey.withAlpha(100),
-                        ),
-                        const SizedBox(height: 12),
-                        Text(
-                          'No notifications yet',
-                          style: theme.textTheme.bodyMedium?.copyWith(
-                            color: Colors.grey,
-                          ),
-                        ),
-                      ],
-                    ),
-                  );
-                }
-
-                final dateFormat = DateFormat('MMM d, h:mm a');
-
-                return ListView.separated(
-                  padding: const EdgeInsets.all(16),
-                  itemCount: notifications.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 8),
-                  itemBuilder: (context, index) {
-                    final item = notifications[index];
-                    final date = DateTime.fromMillisecondsSinceEpoch(
-                      item.createdAt * 1000,
-                    );
-                    final isUnread = item.read == 0;
-
-                    return Card(
-                      elevation: 0,
-                      color: isUnread
-                          ? theme.colorScheme.primaryContainer.withAlpha(40)
-                          : theme.cardColor.withAlpha(150),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        side: BorderSide(
-                          color: isUnread
-                              ? theme.colorScheme.primary.withAlpha(80)
-                              : Colors.transparent,
-                        ),
-                      ),
-                      child: ListTile(
-                        leading: CircleAvatar(
-                          backgroundColor:
-                              _colorForType(item.type).withAlpha(40),
-                          child: Icon(
-                            _iconForType(item.type),
-                            color: _colorForType(item.type),
-                            size: 20,
-                          ),
-                        ),
-                        title: Text(
-                          item.title,
-                          style: TextStyle(
-                            fontWeight:
-                                isUnread ? FontWeight.bold : FontWeight.normal,
-                          ),
-                        ),
-                        subtitle: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const SizedBox(height: 4),
-                            Text(item.body),
-                            const SizedBox(height: 4),
-                            Text(
-                              dateFormat.format(date),
-                              style: theme.textTheme.labelSmall?.copyWith(
-                                color: Colors.grey,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    );
-                  },
-                );
-              },
             ),
           ),
         ],

@@ -1,243 +1,442 @@
 // lib/features/timetable/widgets/exportable_timetable_poster.dart
-// High-DPI printable timetable poster rendered offscreen and exported via screenshot & share_plus.
+// The shareable timetable image: a week grid (Day 1–5 by hour, one colour
+// per course) under a black header, with a legend of courses, in the app's
+// cream and ink look. Rendered offscreen at its own 1080 px width.
 
 import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:screenshot/screenshot.dart';
 import 'package:share_plus/share_plus.dart';
 
+import '../../../core/constants/asset_paths.dart';
+import '../../../core/theme/app_theme.dart';
+import '../../../domain/services/current_class_detector.dart';
+import '../../../domain/services/day_timeline.dart';
+import '../../../domain/services/timetable_schedule.dart';
+import '../../shared/ui/srm_ui.dart';
+
+/// The poster's width in logical pixels; captured at 2x.
+const posterWidth = 1080.0;
+
 class ExportableTimetablePoster extends StatelessWidget {
   final String studentName;
   final String regNumber;
   final String batch;
-  final Map<String, List<Map<String, String>>> dayOrderSchedule;
+
+  /// The timetable courses, as stored (`courseCode`, `courseTitle`,
+  /// `facultyName`, `roomNo`, `schedule`).
+  final List<Map<String, dynamic>> courses;
 
   const ExportableTimetablePoster({
     super.key,
     required this.studentName,
     required this.regNumber,
     required this.batch,
-    required this.dayOrderSchedule,
+    required this.courses,
   });
 
-  /// Captures this widget as high-resolution PNG and opens native OS share sheet.
+  /// Renders the poster as a PNG and opens the share sheet.
   static Future<void> exportAndShare(
     BuildContext context, {
     required String studentName,
     required String regNumber,
     required String batch,
-    required Map<String, List<Map<String, String>>> schedule,
+    required List<Map<String, dynamic>> courses,
   }) async {
-    final controller = ScreenshotController();
-
-    final posterWidget = MediaQuery(
-      data: const MediaQueryData(),
-      child: Directionality(
-        textDirection: TextDirection.ltr,
-        child: ExportableTimetablePoster(
-          studentName: studentName,
-          regNumber: regNumber,
-          batch: batch,
-          dayOrderSchedule: schedule,
+    final messenger = ScaffoldMessenger.of(context);
+    final poster = Theme(
+      data: srmLightTheme(),
+      child: MediaQuery(
+        data: const MediaQueryData(textScaler: TextScaler.noScaling),
+        child: Directionality(
+          textDirection: TextDirection.ltr,
+          child: Material(
+            color: SrmPalette.cream,
+            child: ExportableTimetablePoster(
+              studentName: studentName,
+              regNumber: regNumber,
+              batch: batch,
+              courses: courses,
+            ),
+          ),
         ),
       ),
     );
 
     try {
-      final imageBytes = await controller.captureFromWidget(
-        posterWidget,
-        pixelRatio: 3.0,
+      // Laid out at the poster's own width (not the phone's), so nothing
+      // overflows; the height follows the content.
+      final bytes = await ScreenshotController().captureFromLongWidget(
+        poster,
+        pixelRatio: 2,
+        delay: const Duration(milliseconds: 300),
+        constraints:
+            const BoxConstraints(minWidth: posterWidth, maxWidth: posterWidth),
       );
 
-      final tempDir = await getTemporaryDirectory();
+      final dir = await getTemporaryDirectory();
       final file = File(
-        '${tempDir.path}/SRMOne_Timetable_${DateTime.now().millisecondsSinceEpoch}.png',
-      );
-      await file.writeAsBytes(imageBytes);
+          '${dir.path}/SRMOne_Timetable_${DateTime.now().millisecondsSinceEpoch}.png');
+      await file.writeAsBytes(bytes);
 
       await Share.shareXFiles(
         [XFile(file.path, mimeType: 'image/png')],
-        text: '$studentName - SRMOne Timetable',
+        text: '$studentName - SRM One timetable',
       );
     } catch (e) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to export timetable: $e')),
-        );
-      }
+      messenger.showSnackBar(
+        SnackBar(content: Text("Couldn't create the timetable image: $e")),
+      );
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final colors =
+        courseColorMap(courses.map((c) => c['courseCode']?.toString() ?? ''));
+    final days = [
+      for (var d = 1; d <= 5; d++)
+        TimetableSchedule.slotsForDay(courses, 'Day $d'),
+    ];
+
+    // Hour columns: every period any day uses, with its timing.
+    final hours = <int, String>{};
+    for (final day in days) {
+      for (final s in day) {
+        hours.putIfAbsent(s.hourIndex, () => s.timing);
+      }
+    }
+    final columns = hours.keys.toList()..sort();
+
     return Container(
-      width: 1080,
-      padding: const EdgeInsets.all(32),
-      decoration: const BoxDecoration(
-        color: Color(0xFF0F0F0F),
-      ),
+      width: posterWidth,
+      color: SrmPalette.cream,
+      padding: const EdgeInsets.all(40),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         mainAxisSize: MainAxisSize.min,
         children: [
-          // Header
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'SRM One',
+          _header(),
+          const SizedBox(height: 28),
+          if (columns.isEmpty)
+            const Text('No classes in the timetable yet.',
+                style: TextStyle(fontSize: 20, color: SrmPalette.slate500))
+          else
+            _grid(columns, hours, days, colors),
+          const SizedBox(height: 28),
+          _legend(colors),
+          const SizedBox(height: 24),
+          const Text(
+            'Made with SRM One',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              color: SrmPalette.slate400,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _header() {
+    final details = [
+      if (regNumber.isNotEmpty) regNumber,
+      if (batch.isNotEmpty) 'Batch $batch',
+    ].join('  •  ');
+    return Container(
+      padding: const EdgeInsets.fromLTRB(36, 32, 36, 32),
+      decoration: BoxDecoration(
+        color: SrmPalette.ink,
+        borderRadius: BorderRadius.circular(32),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'WEEKLY TIMETABLE',
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 2,
+                    color: SrmPalette.mint,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  studentName,
+                  style: const TextStyle(
+                    fontFamily: SrmFonts.display,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 44,
+                    height: 1.05,
+                    letterSpacing: -1,
+                    color: Colors.white,
+                  ),
+                ),
+                if (details.isNotEmpty) ...[
+                  const SizedBox(height: 10),
+                  Text(
+                    details,
                     style: TextStyle(
-                      color: Color(0xFFBDE3D5),
-                      fontSize: 32,
-                      fontWeight: FontWeight.bold,
-                      letterSpacing: 1.2,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w500,
+                      color: Colors.white.withAlpha(170),
                     ),
                   ),
-                  const SizedBox(height: 4),
-                  Text(
-                    '$studentName • $regNumber • Batch $batch',
-                    style: const TextStyle(color: Colors.white70, fontSize: 16),
-                  ),
                 ],
-              ),
-              Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF2D6A4F),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: const Text(
-                  'ACADEMIC TIMETABLE',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 14,
-                  ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 24),
+          Column(
+            children: [
+              Image.asset(AssetPaths.logo, width: 72, height: 72),
+              const SizedBox(height: 8),
+              const Text(
+                'SRM ONE',
+                style: TextStyle(
+                  fontFamily: SrmFonts.display,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 18,
+                  color: Colors.white,
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 24),
-          const Divider(color: Colors.white24, thickness: 1.5),
-          const SizedBox(height: 16),
+        ],
+      ),
+    );
+  }
 
-          // Days 1 through 5 Grid
-          ...['Day 1', 'Day 2', 'Day 3', 'Day 4', 'Day 5'].map((day) {
-            final classes = dayOrderSchedule[day] ?? [];
+  Widget _grid(
+    List<int> columns,
+    Map<int, String> hours,
+    List<List<TimetableSlotWithTiming>> days,
+    Map<String, Color> colors,
+  ) {
+    const dayWidth = 92.0;
+    const rowHeight = 92.0;
 
-            return Padding(
-              padding: const EdgeInsets.only(bottom: 16),
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(32),
+      ),
+      child: Column(
+        children: [
+          // Hour headings.
+          Row(
+            children: [
+              const SizedBox(width: dayWidth),
+              for (final h in columns)
+                Expanded(
+                  child: Builder(builder: (_) {
+                    final t = CurrentClassDetector.parseTiming(hours[h]!);
+                    return Column(
+                      children: [
+                        Text(
+                          t == null
+                              ? hours[h]!
+                              : formatClock(t.$1, suffix: false),
+                          style: const TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w700,
+                            color: SrmPalette.ink,
+                          ),
+                        ),
+                        if (t != null)
+                          Text(
+                            formatClock(t.$2, suffix: false),
+                            style: const TextStyle(
+                                fontSize: 12, color: SrmPalette.slate400),
+                          ),
+                      ],
+                    );
+                  }),
+                ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          for (final (i, slots) in days.indexed) ...[
+            if (i > 0) const SizedBox(height: 8),
+            SizedBox(
+              height: rowHeight,
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  SizedBox(
+                    width: dayWidth,
+                    child: Center(
+                      child: Text(
+                        'Day\n${i + 1}',
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          fontFamily: SrmFonts.display,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 20,
+                          height: 1.1,
+                          color: SrmPalette.ink,
+                        ),
+                      ),
+                    ),
+                  ),
+                  ..._rowCells(columns, slots, colors),
+                ],
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  /// One day's cells; consecutive periods of a course share one wide cell.
+  List<Widget> _rowCells(
+    List<int> columns,
+    List<TimetableSlotWithTiming> slots,
+    Map<String, Color> colors,
+  ) {
+    final byHour = {for (final s in slots) s.hourIndex: s};
+    final rooms = {
+      for (final c in courses)
+        c['courseCode']?.toString() ?? '': c['roomNo']?.toString() ?? '',
+    };
+    final cells = <Widget>[];
+    var i = 0;
+    while (i < columns.length) {
+      final s = byHour[columns[i]];
+      var span = 1;
+      while (s != null &&
+          i + span < columns.length &&
+          byHour[columns[i + span]]?.courseCode == s.courseCode) {
+        span++;
+      }
+      cells.add(Expanded(
+        flex: span,
+        child: Padding(
+          padding: const EdgeInsets.all(3),
+          child: s == null
+              ? Container(
+                  decoration: BoxDecoration(
+                    color: SrmPalette.slate100,
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                )
+              : Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  decoration: BoxDecoration(
+                    color:
+                        colors[s.courseCode.toUpperCase()] ?? SrmPalette.mint,
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text(
+                          s.courseCode,
+                          style: const TextStyle(
+                            fontFamily: SrmFonts.mono,
+                            fontWeight: FontWeight.w700,
+                            fontSize: 13,
+                            color: SrmPalette.ink,
+                          ),
+                        ),
+                      ),
+                      if ((rooms[s.courseCode] ?? '').isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        FittedBox(
+                          fit: BoxFit.scaleDown,
+                          child: Text(
+                            rooms[s.courseCode]!,
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: SrmPalette.ink.withAlpha(170),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+        ),
+      ));
+      i += span;
+    }
+    return cells;
+  }
+
+  Widget _legend(Map<String, Color> colors) {
+    String v(Map<String, dynamic> c, String k) => c[k]?.toString().trim() ?? '';
+    return Container(
+      padding: const EdgeInsets.all(28),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(32),
+      ),
+      child: Wrap(
+        spacing: 24,
+        runSpacing: 20,
+        children: [
+          for (final c in courses)
+            SizedBox(
+              width: (posterWidth - 80 - 56 - 24) / 2,
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Container(
-                    width: 90,
-                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    width: 18,
+                    height: 18,
+                    margin: const EdgeInsets.only(top: 3),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF1E1E1E),
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: Colors.white12),
-                    ),
-                    alignment: Alignment.center,
-                    child: Text(
-                      day,
-                      style: const TextStyle(
-                        color: Color(0xFFBDE3D5),
-                        fontWeight: FontWeight.bold,
-                        fontSize: 14,
-                      ),
+                      color: colors[v(c, 'courseCode').toUpperCase()],
+                      borderRadius: BorderRadius.circular(6),
                     ),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
-                    child: classes.isEmpty
-                        ? Container(
-                            padding: const EdgeInsets.all(10),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF161616),
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: const Text(
-                              'No classes scheduled',
-                              style: TextStyle(
-                                color: Colors.white38,
-                                fontStyle: FontStyle.italic,
-                              ),
-                            ),
-                          )
-                        : Wrap(
-                            spacing: 8,
-                            runSpacing: 8,
-                            children: classes.map((c) {
-                              return Container(
-                                width: 175,
-                                padding: const EdgeInsets.all(10),
-                                decoration: BoxDecoration(
-                                  color: const Color(0xFF1A1A1A),
-                                  borderRadius: BorderRadius.circular(8),
-                                  border: Border.all(color: Colors.white10),
-                                ),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      c['code'] ?? '',
-                                      style: const TextStyle(
-                                        color: Colors.white,
-                                        fontWeight: FontWeight.bold,
-                                        fontSize: 12,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 2),
-                                    Text(
-                                      c['title'] ?? '',
-                                      style: const TextStyle(
-                                        color: Colors.white70,
-                                        fontSize: 10,
-                                      ),
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                    const SizedBox(height: 4),
-                                    Text(
-                                      'Room: ${c['room'] ?? '-'}',
-                                      style: const TextStyle(
-                                        color: Color(0xFFBDE3D5),
-                                        fontSize: 9,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              );
-                            }).toList(),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          tidyTitle(v(c, 'courseTitle')),
+                          style: const TextStyle(
+                            fontSize: 17,
+                            fontWeight: FontWeight.w700,
+                            color: SrmPalette.ink,
                           ),
+                        ),
+                        const SizedBox(height: 3),
+                        Text(
+                          [
+                            v(c, 'courseCode'),
+                            if (v(c, 'roomNo').isNotEmpty) v(c, 'roomNo'),
+                            if (v(c, 'facultyName').isNotEmpty)
+                              v(c, 'facultyName')
+                                  .replaceAll(RegExp(r'\(.*?\)'), '')
+                                  .trim(),
+                          ].join('  ·  '),
+                          style: const TextStyle(
+                            fontSize: 14,
+                            color: SrmPalette.slate500,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ],
               ),
-            );
-          }),
-
-          const SizedBox(height: 16),
-          const Divider(color: Colors.white24),
-          const SizedBox(height: 8),
-          const Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                'Generated with SRMOne Mobile — Zero-Server Local-First Client',
-                style: TextStyle(color: Colors.white38, fontSize: 10),
-              ),
-              Text(
-                'srmone.in',
-                style: TextStyle(color: Colors.white38, fontSize: 10),
-              ),
-            ],
-          ),
+            ),
         ],
       ),
     );

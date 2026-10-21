@@ -6,7 +6,8 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
-import '../../scrapers/faculty/faculty_client.dart';
+import '../../core/theme/app_theme.dart';
+import '../../../scrapers/faculty/faculty_client.dart';
 import '../../scrapers/faculty/faculty_parser.dart';
 
 class FacultyProfileSheet extends StatefulWidget {
@@ -79,7 +80,7 @@ class _FacultyProfileSheetState extends State<FacultyProfileSheet> {
             // Avatar
             CircleAvatar(
               radius: 44,
-              backgroundColor: const Color(0xFF2D6A4F),
+              backgroundColor: SrmPalette.ink,
               child: photo != null && photo.startsWith('http')
                   ? ClipOval(
                       child: CachedNetworkImage(
@@ -127,8 +128,8 @@ class _FacultyProfileSheetState extends State<FacultyProfileSheet> {
                   [_profile!.department, _profile!.campus]
                       .where((t) => t.isNotEmpty)
                       .join(' · '),
-                  style:
-                      theme.textTheme.bodySmall?.copyWith(color: Colors.grey),
+                  style: theme.textTheme.bodySmall
+                      ?.copyWith(color: SrmPalette.slate500),
                   textAlign: TextAlign.center,
                 ),
               ),
@@ -191,8 +192,8 @@ class _FacultyProfileSheetState extends State<FacultyProfileSheet> {
                   padding: const EdgeInsets.symmetric(vertical: 12),
                   child: Text(
                     'No extended directory profile found on SRMIST portal.',
-                    style:
-                        theme.textTheme.bodySmall?.copyWith(color: Colors.grey),
+                    style: theme.textTheme.bodySmall
+                        ?.copyWith(color: SrmPalette.slate500),
                     textAlign: TextAlign.center,
                   ),
                 ),
@@ -222,7 +223,7 @@ class _FacultyProfileSheetState extends State<FacultyProfileSheet> {
             Text(
               value,
               style: theme.textTheme.bodySmall?.copyWith(
-                color: Colors.grey[400],
+                color: SrmPalette.slate400,
               ),
             ),
           ],

@@ -27,11 +27,36 @@ class SPMarkRecord {
   final String obtained;
   final String maxMark;
 
+  /// The portal's subject id and status from the row's "View Details"
+  /// button, used to fetch the component marks; null when absent.
+  final String? subjectId;
+  final String? status;
+
   const SPMarkRecord({
     required this.courseCode,
     required this.courseTitle,
     required this.obtained,
     required this.maxMark,
+    this.subjectId,
+    this.status,
+  });
+}
+
+/// One component (FT-I, FT-II, …) of a course's internal marks, from the
+/// portal's "View Details".
+class SPMarkComponent {
+  final String component;
+  final String obtained;
+  final String maxMark;
+
+  /// When the mark was entered, as the portal shows it (01/Sep/2026).
+  final String enteredOn;
+
+  const SPMarkComponent({
+    required this.component,
+    required this.obtained,
+    required this.maxMark,
+    required this.enteredOn,
   });
 }
 
@@ -283,12 +308,15 @@ class SPParsers {
           maxMark = match.group(2) ?? '';
         }
 
+        final details = _viewDetails.firstMatch(row.innerHtml);
         out.add(
           SPMarkRecord(
             courseCode: code,
             courseTitle: title,
             obtained: obtained,
             maxMark: maxMark,
+            subjectId: details?.group(1),
+            status: details?.group(2),
           ),
         );
       }
@@ -297,6 +325,47 @@ class SPParsers {
     }
 
     return out;
+  }
+
+  /// `funViewComponentWiseMarks('42213', '21CSC403T', '...', 2)` → the
+  /// subject id and status.
+  static final _viewDetails = RegExp(
+      r"""funViewComponentWiseMarks\(\s*'([^']*)'\s*,[^)]*?,\s*'?(\d+)'?\s*\)""");
+
+  /// Parses studentInternalMarkDetailsInner.jsp (a course's "View Details"):
+  /// Entered on | Component | Mark / Max. Mark.
+  static List<SPMarkComponent> parseMarkComponents(String html) {
+    final doc = html_parser.parse(html);
+    final reSplit = RegExp(r'^\s*([0-9.]+)\s*/\s*([0-9.]+)\s*$');
+    for (final table in doc.querySelectorAll('table')) {
+      final headers = table
+          .querySelectorAll('th')
+          .map((e) => e.text.trim().toLowerCase())
+          .toList();
+      final comp = headers.indexWhere((h) => h.contains('component'));
+      final mark = headers.indexWhere((h) => h.contains('mark'));
+      if (comp < 0 || mark < 0) continue;
+      final entered = headers.indexWhere((h) => h.contains('enter'));
+
+      final out = <SPMarkComponent>[];
+      for (final row in table.querySelectorAll('tr')) {
+        final cells =
+            row.querySelectorAll('td').map((e) => e.text.trim()).toList();
+        if (cells.length <= comp || cells.length <= mark) continue;
+        final name = cells[comp];
+        if (name.isEmpty) continue;
+        final m = reSplit.firstMatch(cells[mark]);
+        out.add(SPMarkComponent(
+          component: name,
+          obtained: m?.group(1) ?? cells[mark],
+          maxMark: m?.group(2) ?? '',
+          enteredOn:
+              entered >= 0 && entered < cells.length ? cells[entered] : '',
+        ));
+      }
+      return out;
+    }
+    return const [];
   }
 
   // ─── 5. Student Portal Profile Parser ───────────────────────────────────────

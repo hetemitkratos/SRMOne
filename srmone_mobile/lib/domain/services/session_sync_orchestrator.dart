@@ -27,6 +27,7 @@ import '../../core/security/secure_vault_service.dart';
 import '../../scrapers/academia/academia_client.dart';
 import '../../scrapers/academia/academia_parsers.dart';
 import '../../scrapers/student_portal/sp_client.dart';
+import '../../scrapers/student_portal/sp_parsers.dart';
 import 'attendance_planner_math.dart';
 import 'calendar_day_resolver.dart';
 import 'notification_rule_engine.dart';
@@ -640,6 +641,9 @@ class SessionSyncOrchestrator {
           () => _notifEngine.upsertDailySnapshot(email, records));
 
       await _guard('notification rules', () async {
+        // Signed out while this sync ran: no alerts for an account that
+        // is no longer on the phone.
+        if (await _vault.getAcademiaEmail() != email) return;
         // Low attendance alerts: enabled unless the user turned them off;
         // the threshold is the one the Settings slider writes.
         final notifSettings = await _db.watchNotificationSettings(email).first;
@@ -907,12 +911,26 @@ class SessionSyncOrchestrator {
   Future<void> get spMarksDone => _spMarks;
 
   /// Stores the Student Portal internal marks as a synthetic "Total
-  /// (Internal)" test (Bug Fix #6). Optional: a failure is logged and the
-  /// cached marks are kept.
+  /// (Internal)" test (Bug Fix #6), followed by its components (FT-I,
+  /// FT-II, …) from the portal's "View Details". Optional: a failure is
+  /// logged and the cached marks are kept.
   Future<void> _syncSpMarks(String email, SPClient client) async {
     final sw = Stopwatch()..start();
     try {
       final spMarks = await client.fetchInternalMarks(prime: false);
+      // Each course's components ("View Details"), one request each; a
+      // course whose details fail keeps just its total.
+      final components = <String, List<SPMarkComponent>>{};
+      for (final m in spMarks) {
+        final id = m.subjectId;
+        if (id == null || id.isEmpty) continue;
+        try {
+          components[m.courseCode] =
+              await client.fetchMarkComponents(id, m.status ?? '');
+        } catch (e) {
+          _log('components for ${m.courseCode} skipped: ${e.runtimeType}');
+        }
+      }
       if (spMarks.isNotEmpty) {
         final now = DateTime.now().millisecondsSinceEpoch;
         await _db.replaceMarksRecords(email, 'student_portal', [
@@ -928,7 +946,17 @@ class SessionSyncOrchestrator {
                   'scored': m.obtained,
                   'maxMarks': m.maxMark,
                   'source': 'student_portal',
-                }
+                },
+                for (final p
+                    in components[m.courseCode] ?? const <SPMarkComponent>[])
+                  {
+                    'testName': p.component,
+                    'scored': p.obtained,
+                    'maxMarks': p.maxMark,
+                    'enteredOn': p.enteredOn,
+                    'kind': 'component',
+                    'source': 'student_portal',
+                  },
               ])),
               updatedAt: drift.Value(now),
             ),
