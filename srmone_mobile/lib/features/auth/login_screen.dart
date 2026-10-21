@@ -7,6 +7,7 @@ import 'dart:async';
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:go_router/go_router.dart';
@@ -219,15 +220,22 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
             const SizedBox(height: 16),
           ],
 
-          // NetID / Email Input
-          Text('NetID / Email', style: label),
+          // NetID only; the domain is fixed. A pasted full address keeps just
+          // the part before the @.
+          Text('NetID', style: label),
           const SizedBox(height: 6),
           TextFormField(
             controller: _emailController,
-            keyboardType: TextInputType.emailAddress,
+            keyboardType: TextInputType.visiblePassword,
+            autocorrect: false,
+            textInputAction: TextInputAction.next,
+            inputFormatters: [_NetIdFormatter()],
             decoration: InputDecoration(
-              hintText: 'e.g. ab1234 or ab1234@srmist.edu.in',
+              hintText: 'ab1234',
               prefixIcon: Icon(Icons.person_outline, color: c.faint),
+              suffixText: '@srmist.edu.in',
+              suffixStyle: TextStyle(
+                  color: c.muted, fontSize: 14, fontWeight: FontWeight.w500),
             ),
             validator: (v) {
               if (v == null || v.trim().isEmpty) {
@@ -276,12 +284,14 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
           if (!_spSamePassword) ...[
             const SizedBox(height: 8),
+            Text('Student Portal Password', style: label),
+            const SizedBox(height: 6),
             TextFormField(
               key: const ValueKey('sp-password'),
               controller: _spPasswordController,
               obscureText: _obscureSpPassword,
               decoration: InputDecoration(
-                hintText: 'Student Portal Password (sp.srmist.edu.in)',
+                hintText: 'Your sp.srmist.edu.in password',
                 prefixIcon: Icon(Icons.vpn_key_outlined, color: c.faint),
                 suffixIcon: eye(
                     _obscureSpPassword,
@@ -394,6 +404,22 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
           ],
         ],
       ),
+    );
+  }
+}
+
+/// Keeps only the NetID: drops anything from an "@" on and spaces.
+class _NetIdFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(
+      TextEditingValue oldValue, TextEditingValue newValue) {
+    final at = newValue.text.indexOf('@');
+    final text = (at >= 0 ? newValue.text.substring(0, at) : newValue.text)
+        .replaceAll(' ', '');
+    if (text == newValue.text) return newValue;
+    return TextEditingValue(
+      text: text,
+      selection: TextSelection.collapsed(offset: text.length),
     );
   }
 }

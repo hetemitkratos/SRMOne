@@ -62,13 +62,13 @@ Future<void> main() async {
   );
 
   // Not needed for the first frame, so it runs after runApp.
-  unawaited(_registerBackgroundSync().catchError((Object e) {
+  unawaited(registerBackgroundSync().catchError((Object e) {
     debugPrint('[Startup] background sync registration failed: $e');
   }));
 }
 
 /// Registers the periodic background sync (every ~6 hours, mobile only).
-Future<void> _registerBackgroundSync() async {
+Future<void> registerBackgroundSync() async {
   if (!(Platform.isAndroid || Platform.isIOS)) return;
   await Workmanager().initialize(backgroundSyncCallbackDispatcher);
   await Workmanager().registerPeriodicTask(
@@ -80,6 +80,12 @@ Future<void> _registerBackgroundSync() async {
     ),
     existingWorkPolicy: ExistingPeriodicWorkPolicy.keep,
   );
+}
+
+/// Stops the periodic background sync (on sign-out).
+Future<void> cancelBackgroundSync() async {
+  if (!(Platform.isAndroid || Platform.isIOS)) return;
+  await Workmanager().cancelByUniqueName(backgroundSyncTask);
 }
 
 // Global providers for DB and notifications plugin

@@ -13,6 +13,7 @@ import 'package:uuid/uuid.dart';
 import '../../core/database/app_database.dart';
 import 'attendance_planner_math.dart';
 import 'calendar_day_resolver.dart';
+import 'day_timeline.dart';
 
 const _uuid = Uuid();
 
@@ -78,7 +79,7 @@ class NotificationRuleEngine {
   // ─── Rule 2: Low Attendance Alert ──────────────────────────────────────────
 
   /// Fires a native notification if any subjects are below the configured
-  /// attendance threshold, respecting 6h/18h fingerprint deduplication.
+  /// attendance threshold, at most once per calendar day.
   Future<void> maybeNotifyLowAttendance(
     String academiaEmail,
     List<AttendanceInput> records, {
@@ -89,51 +90,47 @@ class NotificationRuleEngine {
 
     final effectiveThreshold = threshold > 0 ? threshold : 75.0;
     final below = records
-        .where((r) => r.attendancePct < effectiveThreshold)
+        .where(
+            (r) => r.hoursConducted > 0 && r.attendancePct < effectiveThreshold)
         .toList()
-      ..sort((a, b) => a.courseCode.compareTo(b.courseCode));
+      ..sort((a, b) => a.attendancePct.compareTo(b.attendancePct));
 
     if (below.isEmpty) return;
 
-    // Build deterministic fingerprint
-    final fingerprint = below
-        .map((r) => '${r.courseCode}:${r.attendancePct.round()}')
-        .join(',');
-
-    // Check last 'low_attendance' notification
+    // Once a day: skip if one was already sent today (cleared ones count).
     final recent = await _db.getRecentNotificationsByType(
       academiaEmail,
       'low_attendance',
       limit: 1,
     );
-
-    if (recent.isNotEmpty) {
-      final last = recent.first;
-      final lastMs = last.createdAt;
-      final nowMs = DateTime.now().millisecondsSinceEpoch;
-      final elapsedH = (nowMs - lastMs) / (1000 * 3600);
-
-      // Suppress if < 6 hours old
-      if (elapsedH < 6) return;
-
-      // Suppress if same fingerprint and < 18 hours old
-      final lastData = jsonDecode(last.dataJson) as Map<String, dynamic>;
-      final lastFingerprint = lastData['fingerprint'] as String? ?? '';
-      if (lastFingerprint == fingerprint && elapsedH < 18) return;
+    if (recent.isNotEmpty &&
+        _sameDay(DateTime.fromMillisecondsSinceEpoch(recent.first.createdAt),
+            DateTime.now())) {
+      return;
     }
 
-    // Insert notification to database
-    final body =
-        '${below.length} subject(s) below ${effectiveThreshold.toStringAsFixed(0)}%: '
-        '${below.map((r) => r.courseCode).join(', ')}. '
-        'Check the attendance page for details.';
+    final pct = effectiveThreshold.toStringAsFixed(0);
+    final title = 'Attendance below $pct%';
+    final String body;
+    if (below.length == 1) {
+      final r = below.single;
+      final needed = computeSubjectCardMetrics(r).needed75;
+      body = '${_name(r)} is at ${r.attendancePct.toStringAsFixed(1)}%.'
+          '${needed > 0 && effectiveThreshold == 75 ? ' Attend the next $needed class${needed == 1 ? '' : 'es'} to get back to 75%.' : ''}';
+    } else {
+      body = '${below.length} courses are below $pct%: '
+          '${below.map((r) => '${_name(r)} (${r.attendancePct.toStringAsFixed(1)}%)').join(', ')}.';
+    }
+    final fingerprint = below
+        .map((r) => '${r.courseCode}:${r.attendancePct.round()}')
+        .join(',');
 
     await _db.insertNotification(
       NotificationsTableCompanion(
         id: drift.Value(_uuid.v4()),
         academiaEmail: drift.Value(academiaEmail),
         type: const drift.Value('low_attendance'),
-        title: const drift.Value('Low Attendance Alert'),
+        title: drift.Value(title),
         body: drift.Value(body),
         dataJson: drift.Value(jsonEncode({'fingerprint': fingerprint})),
         read: const drift.Value(0),
@@ -141,10 +138,9 @@ class NotificationRuleEngine {
       ),
     );
 
-    // Fire native OS notification
     await _notifPlugin.show(
       'low_attendance'.hashCode,
-      'Low Attendance Alert',
+      title,
       body,
       _notifDetails,
     );
@@ -161,9 +157,9 @@ class NotificationRuleEngine {
     );
     if (existing.isNotEmpty) return;
 
-    const title = 'Welcome to SRM One! 🎉';
-    const body = 'Your attendance, marks, and timetable are now syncing. '
-        'Pull down to refresh anytime!';
+    const title = 'Welcome to SRM One';
+    const body = 'Your attendance, marks and timetable are synced. '
+        'Pull down on any screen to refresh.';
 
     await _db.insertNotification(
       NotificationsTableCompanion(
@@ -188,8 +184,8 @@ class NotificationRuleEngine {
 
   // ─── Rule 4: Holiday Alert ──────────────────────────────────────────────────
 
-  /// Scans today through today+7 for upcoming holidays.
-  /// Fires a notification if found and no unread holiday_alert exists.
+  /// Scans today through today+7 for upcoming holidays and notifies once per
+  /// holiday date.
   Future<void> maybeNotifyHoliday(
     String academiaEmail,
     Map<String, CalendarEntry> calendarMap, {
@@ -213,24 +209,39 @@ class NotificationRuleEngine {
 
     if (upcomingHolidayName == null) return;
 
-    // Check if there is already an unread holiday_alert
+    // Once per holiday date, even after the alert was read or cleared.
+    final dateStr = CalendarDayResolver.localDateKey(upcomingDate!);
     final existing = await _db.getRecentNotificationsByType(
       academiaEmail,
       'holiday_alert',
-      limit: 5,
+      limit: 10,
     );
-    final hasUnread = existing.any((n) => (n.read) == 0);
-    if (hasUnread) return;
+    final alreadySent = existing.any((n) {
+      try {
+        return (jsonDecode(n.dataJson) as Map<String, dynamic>)['date'] ==
+            dateStr;
+      } catch (_) {
+        return false;
+      }
+    });
+    if (alreadySent) return;
 
-    final dateStr = CalendarDayResolver.localDateKey(upcomingDate!);
-    final body = '$upcomingHolidayName on $dateStr — enjoy your break!';
+    final name = upcomingHolidayName
+        .replaceAll(RegExp(r'\s*-\s*holiday\s*$', caseSensitive: false), '')
+        .trim();
+    final title = _sameDay(upcomingDate, today)
+        ? 'Holiday today'
+        : 'Holiday on ${_weekdays[upcomingDate.weekday - 1]}, '
+            '${upcomingDate.day} ${_months[upcomingDate.month - 1]}';
+    final body = '${name.isEmpty ? upcomingHolidayName : name}. '
+        'No classes that day.';
 
     await _db.insertNotification(
       NotificationsTableCompanion(
         id: drift.Value(_uuid.v4()),
         academiaEmail: drift.Value(academiaEmail),
         type: const drift.Value('holiday_alert'),
-        title: const drift.Value('📅 Upcoming Holiday'),
+        title: drift.Value(title),
         body: drift.Value(body),
         dataJson: drift.Value(
             jsonEncode({'holiday': upcomingHolidayName, 'date': dateStr})),
@@ -241,9 +252,34 @@ class NotificationRuleEngine {
 
     await _notifPlugin.show(
       'holiday_alert'.hashCode,
-      '📅 Upcoming Holiday',
+      title,
       body,
       _notifDetails,
     );
   }
+
+  static bool _sameDay(DateTime a, DateTime b) =>
+      a.year == b.year && a.month == b.month && a.day == b.day;
+
+  /// A course's name for a notification, falling back to its code.
+  static String _name(AttendanceInput r) {
+    final t = r.courseTitle.trim();
+    return t.isEmpty ? r.courseCode : tidyTitle(t);
+  }
+
+  static const _weekdays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  static const _months = [
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec',
+  ];
 }

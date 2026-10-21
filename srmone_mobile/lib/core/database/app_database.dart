@@ -191,6 +191,9 @@ class NotificationsTable extends Table {
   TextColumn get title => text()();
   TextColumn get body => text()();
   TextColumn get dataJson => text().withDefault(const Constant('{}'))();
+
+  /// 0 unread, 1 read, 2 cleared from the bell (kept so alerts are not
+  /// repeated).
   IntColumn get read => integer().withDefault(const Constant(0))();
   IntColumn get createdAt => integer().withDefault(const Constant(0))();
 
@@ -340,10 +343,14 @@ class AppDatabase extends _$AppDatabase {
         .watchSingle();
   }
 
+  /// The notifications shown in the bell. Cleared ones (read = 2) are kept
+  /// only so alerts are not repeated, and stay hidden.
   Stream<List<NotificationsTableData>> watchNotifications(
       String academiaEmail) {
     return (select(notificationsTable)
-          ..where((t) => t.academiaEmail.equals(academiaEmail))
+          ..where((t) =>
+              t.academiaEmail.equals(academiaEmail) &
+              t.read.isSmallerThanValue(2))
           ..orderBy([
             (t) =>
                 OrderingTerm(expression: t.createdAt, mode: OrderingMode.desc)
@@ -357,8 +364,29 @@ class AppDatabase extends _$AppDatabase {
 
   Future<void> markAllNotificationsRead(String academiaEmail) async {
     await (update(notificationsTable)
-          ..where((t) => t.academiaEmail.equals(academiaEmail)))
+          ..where(
+              (t) => t.academiaEmail.equals(academiaEmail) & t.read.equals(0)))
         .write(const NotificationsTableCompanion(read: Value(1)));
+  }
+
+  /// Clears every notification from the bell. Rows are hidden (read = 2)
+  /// rather than deleted so the same alert is not sent again; hidden rows
+  /// older than 60 days are deleted.
+  Future<void> clearAllNotifications(String academiaEmail) async {
+    final cutoff = DateTime.now()
+        .subtract(const Duration(days: 60))
+        .millisecondsSinceEpoch;
+    await transaction(() async {
+      await (update(notificationsTable)
+            ..where((t) => t.academiaEmail.equals(academiaEmail)))
+          .write(const NotificationsTableCompanion(read: Value(2)));
+      await (delete(notificationsTable)
+            ..where((t) =>
+                t.academiaEmail.equals(academiaEmail) &
+                t.read.equals(2) &
+                t.createdAt.isSmallerThanValue(cutoff)))
+          .go();
+    });
   }
 
   Future<List<NotificationsTableData>> getRecentNotificationsByType(

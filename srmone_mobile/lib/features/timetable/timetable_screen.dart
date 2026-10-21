@@ -757,6 +757,7 @@ void _showClassSheet(BuildContext context, ClassBlock? block,
     Map<String, dynamic> course, Color color) {
   showModalBottomSheet<void>(
     context: context,
+    useRootNavigator: true,
     isScrollControlled: true,
     showDragHandle: true,
     builder: (ctx) => _ClassSheet(block: block, course: course, color: color),
@@ -811,130 +812,133 @@ class _ClassSheet extends ConsumerWidget {
           ),
         );
 
-    return SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(24, 0, 24, 20),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                CodePill(code),
-                if (slot.isNotEmpty) ...[
-                  const SizedBox(width: 6),
-                  SoftPill(
-                    label: 'SLOT $slot',
-                    background: c.track,
-                    foreground: c.muted,
+    return SizedBox(
+      width: double.infinity,
+      child: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(24, 0, 24, 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  CodePill(code),
+                  if (slot.isNotEmpty) ...[
+                    const SizedBox(width: 6),
+                    SoftPill(
+                      label: 'SLOT $slot',
+                      background: c.track,
+                      foreground: c.muted,
+                    ),
+                  ],
+                  const Spacer(),
+                  Container(
+                    width: 14,
+                    height: 14,
+                    decoration: BoxDecoration(
+                        color: color, borderRadius: BorderRadius.circular(4)),
                   ),
                 ],
-                const Spacer(),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                title,
+                style: TextStyle(
+                  fontFamily: SrmFonts.display,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 22,
+                  height: 1.2,
+                  color: c.text,
+                ),
+              ),
+              const SizedBox(height: 18),
+              if (block?.start != null && block?.end != null)
+                row(
+                  LucideIcons.clock,
+                  [
+                    formatRange(block!.start!, block!.end!),
+                    if (block!.periods > 1) '${block!.periods} periods',
+                  ].join('  ·  '),
+                ),
+              if (v('roomNo').isNotEmpty) row(LucideIcons.mapPin, v('roomNo')),
+              if (v('courseType').isNotEmpty || v('credit').isNotEmpty)
+                row(
+                  LucideIcons.bookOpen,
+                  [
+                    if (v('courseType').isNotEmpty) v('courseType'),
+                    if (v('credit').isNotEmpty) '${v('credit')} credits',
+                  ].join('  ·  '),
+                ),
+              if (faculty.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: Row(
+                    children: [
+                      FacultyAvatar(facultyName: faculty, radius: 17),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          faculty.replaceAll(RegExp(r'\(.*?\)'), '').trim(),
+                          style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w500,
+                              color: c.text),
+                        ),
+                      ),
+                      Text('Tap photo for profile',
+                          style: TextStyle(fontSize: 11, color: c.faint)),
+                    ],
+                  ),
+                ),
+              if (attendance != null) ...[
+                const SizedBox(height: 6),
                 Container(
-                  width: 14,
-                  height: 14,
+                  padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
-                      color: color, borderRadius: BorderRadius.circular(4)),
+                    color: c.track,
+                    borderRadius: BorderRadius.circular(SrmRadii.card),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Text('Attendance',
+                              style: TextStyle(
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 14,
+                                  color: c.text)),
+                          const Spacer(),
+                          Text(
+                            '${attendance.attendancePct.toStringAsFixed(1)}%',
+                            style: TextStyle(
+                              fontFamily: SrmFonts.display,
+                              fontWeight: FontWeight.w700,
+                              fontSize: 20,
+                              color: c.text,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      SrmProgressBar(
+                        value: attendance.attendancePct / 100,
+                        color: attendanceBarColor(attendance.attendancePct),
+                        height: 8,
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        '${attendance.hoursConducted - attendance.hoursAbsent} of '
+                        '${attendance.hoursConducted} hours attended',
+                        style: TextStyle(fontSize: 12, color: c.muted),
+                      ),
+                    ],
+                  ),
                 ),
               ],
-            ),
-            const SizedBox(height: 12),
-            Text(
-              title,
-              style: TextStyle(
-                fontFamily: SrmFonts.display,
-                fontWeight: FontWeight.w700,
-                fontSize: 22,
-                height: 1.2,
-                color: c.text,
-              ),
-            ),
-            const SizedBox(height: 18),
-            if (block?.start != null && block?.end != null)
-              row(
-                LucideIcons.clock,
-                [
-                  formatRange(block!.start!, block!.end!),
-                  if (block!.periods > 1) '${block!.periods} periods',
-                ].join('  ·  '),
-              ),
-            if (v('roomNo').isNotEmpty) row(LucideIcons.mapPin, v('roomNo')),
-            if (v('courseType').isNotEmpty || v('credit').isNotEmpty)
-              row(
-                LucideIcons.bookOpen,
-                [
-                  if (v('courseType').isNotEmpty) v('courseType'),
-                  if (v('credit').isNotEmpty) '${v('credit')} credits',
-                ].join('  ·  '),
-              ),
-            if (faculty.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 12),
-                child: Row(
-                  children: [
-                    FacultyAvatar(facultyName: faculty, radius: 17),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Text(
-                        faculty.replaceAll(RegExp(r'\(.*?\)'), '').trim(),
-                        style: TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w500,
-                            color: c.text),
-                      ),
-                    ),
-                    Text('Tap photo for profile',
-                        style: TextStyle(fontSize: 11, color: c.faint)),
-                  ],
-                ),
-              ),
-            if (attendance != null) ...[
-              const SizedBox(height: 6),
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: c.track,
-                  borderRadius: BorderRadius.circular(SrmRadii.card),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Text('Attendance',
-                            style: TextStyle(
-                                fontWeight: FontWeight.w700,
-                                fontSize: 14,
-                                color: c.text)),
-                        const Spacer(),
-                        Text(
-                          '${attendance.attendancePct.toStringAsFixed(1)}%',
-                          style: TextStyle(
-                            fontFamily: SrmFonts.display,
-                            fontWeight: FontWeight.w700,
-                            fontSize: 20,
-                            color: c.text,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    SrmProgressBar(
-                      value: attendance.attendancePct / 100,
-                      color: attendanceBarColor(attendance.attendancePct),
-                      height: 8,
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      '${attendance.hoursConducted - attendance.hoursAbsent} of '
-                      '${attendance.hoursConducted} hours attended',
-                      style: TextStyle(fontSize: 12, color: c.muted),
-                    ),
-                  ],
-                ),
-              ),
             ],
-          ],
+          ),
         ),
       ),
     );

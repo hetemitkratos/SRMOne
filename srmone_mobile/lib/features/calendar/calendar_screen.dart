@@ -376,6 +376,8 @@ class _DayCell extends StatelessWidget {
         child: GestureDetector(
           onTap: () => showModalBottomSheet<void>(
             context: context,
+            useRootNavigator: true,
+            isScrollControlled: true,
             showDragHandle: true,
             builder: (_) => _DaySheet(day: day),
           ),
@@ -622,99 +624,102 @@ class _DaySheet extends ConsumerWidget {
             .whereType<ClassBlock>()
             .toList();
 
-    return SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(24, 0, 24, 20),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              heading,
-              style: TextStyle(
-                fontFamily: SrmFonts.display,
-                fontWeight: FontWeight.w700,
-                fontSize: 22,
-                color: c.text,
+    return SizedBox(
+      width: double.infinity,
+      child: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(24, 0, 24, 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                heading,
+                style: TextStyle(
+                  fontFamily: SrmFonts.display,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 22,
+                  color: c.text,
+                ),
               ),
-            ),
-            const SizedBox(height: 10),
-            Wrap(
-              spacing: 6,
-              runSpacing: 6,
-              children: [
-                if (day.isToday)
-                  SoftPill(
-                    label: 'TODAY',
-                    background: SrmPalette.terracotta.withAlpha(26),
-                    foreground: SrmPalette.terracottaText,
-                  ),
-                if (day.isHoliday)
-                  SoftPill(
-                    label: 'HOLIDAY',
-                    icon: LucideIcons.sun,
-                    background: SrmPalette.terracotta.withAlpha(36),
-                    foreground: SrmPalette.terracottaText,
-                  )
-                else if (order != null)
-                  SoftPill(
-                    label: 'DAY ORDER $order',
-                    background: c.hero,
-                    foreground: c.onHero,
-                  )
-                else
-                  SoftPill(
-                    label: 'NO CLASSES',
-                    background: c.track,
-                    foreground: c.muted,
+              const SizedBox(height: 10),
+              Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: [
+                  if (day.isToday)
+                    SoftPill(
+                      label: 'TODAY',
+                      background: SrmPalette.terracotta.withAlpha(26),
+                      foreground: SrmPalette.terracottaText,
+                    ),
+                  if (day.isHoliday)
+                    SoftPill(
+                      label: 'HOLIDAY',
+                      icon: LucideIcons.sun,
+                      background: SrmPalette.terracotta.withAlpha(36),
+                      foreground: SrmPalette.terracottaText,
+                    )
+                  else if (order != null)
+                    SoftPill(
+                      label: 'DAY ORDER $order',
+                      background: c.hero,
+                      foreground: c.onHero,
+                    )
+                  else
+                    SoftPill(
+                      label: 'NO CLASSES',
+                      background: c.track,
+                      foreground: c.muted,
+                    ),
+                ],
+              ),
+              if (day.event.isNotEmpty) ...[
+                const SizedBox(height: 14),
+                Text(
+                  day.event,
+                  style: TextStyle(
+                      fontWeight: FontWeight.w600, fontSize: 15, color: c.text),
+                ),
+              ],
+              if (blocks.isNotEmpty) ...[
+                const SizedBox(height: 18),
+                const EyebrowLabel('Classes'),
+                const SizedBox(height: 8),
+                for (final b in blocks)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: Row(
+                      children: [
+                        SizedBox(
+                          width: 70,
+                          child: Text(
+                            b.start == null ? '—' : formatClock(b.start!),
+                            style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                                color: c.muted),
+                          ),
+                        ),
+                        Expanded(
+                          child: Text(
+                            tidyTitle(b.courseTitle.isNotEmpty
+                                ? b.courseTitle
+                                : b.courseCode),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                                color: c.text),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
               ],
-            ),
-            if (day.event.isNotEmpty) ...[
-              const SizedBox(height: 14),
-              Text(
-                day.event,
-                style: TextStyle(
-                    fontWeight: FontWeight.w600, fontSize: 15, color: c.text),
-              ),
             ],
-            if (blocks.isNotEmpty) ...[
-              const SizedBox(height: 18),
-              const EyebrowLabel('Classes'),
-              const SizedBox(height: 8),
-              for (final b in blocks)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  child: Row(
-                    children: [
-                      SizedBox(
-                        width: 70,
-                        child: Text(
-                          b.start == null ? '—' : formatClock(b.start!),
-                          style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w700,
-                              color: c.muted),
-                        ),
-                      ),
-                      Expanded(
-                        child: Text(
-                          tidyTitle(b.courseTitle.isNotEmpty
-                              ? b.courseTitle
-                              : b.courseCode),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w600,
-                              color: c.text),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-            ],
-          ],
+          ),
         ),
       ),
     );

@@ -641,6 +641,9 @@ class SessionSyncOrchestrator {
           () => _notifEngine.upsertDailySnapshot(email, records));
 
       await _guard('notification rules', () async {
+        // Signed out while this sync ran: no alerts for an account that
+        // is no longer on the phone.
+        if (await _vault.getAcademiaEmail() != email) return;
         // Low attendance alerts: enabled unless the user turned them off;
         // the threshold is the one the Settings slider writes.
         final notifSettings = await _db.watchNotificationSettings(email).first;

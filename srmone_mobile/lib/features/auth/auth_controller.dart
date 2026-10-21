@@ -40,11 +40,22 @@ class AuthController extends StateNotifier<AuthState> {
   final SecureVaultService _vault;
   final SessionSyncOrchestrator _orchestrator;
 
+  /// Runs after a sign-in, such as scheduling the background refresh.
+  final Future<void> Function()? _onSignedIn;
+
+  /// Runs after sign-out, such as stopping the background refresh and
+  /// clearing alerts already on screen.
+  final Future<void> Function()? _onSignedOut;
+
   AuthController({
     required SecureVaultService vault,
     required SessionSyncOrchestrator orchestrator,
+    Future<void> Function()? onSignedIn,
+    Future<void> Function()? onSignedOut,
   })  : _vault = vault,
         _orchestrator = orchestrator,
+        _onSignedIn = onSignedIn,
+        _onSignedOut = onSignedOut,
         super(const AuthInitial()) {
     checkInitialAuth();
   }
@@ -119,6 +130,7 @@ class AuthController extends StateNotifier<AuthState> {
       }
 
       state = Authenticated(cleanEmail);
+      await _onSignedIn?.call().catchError((Object _) {});
       return true;
     } catch (e) {
       if (kDebugMode) debugPrint('[Auth] sign-in failed: ${e.runtimeType}');
@@ -131,6 +143,7 @@ class AuthController extends StateNotifier<AuthState> {
   Future<void> logout() async {
     await _vault.clearAll();
     state = const Unauthenticated();
+    await _onSignedOut?.call().catchError((Object _) {});
   }
 }
 
@@ -161,8 +174,14 @@ final authControllerProvider =
   final vault = ref.watch(secureVaultProvider);
   final orchestrator = ref.watch(sessionSyncOrchestratorProvider);
 
+  final notifPlugin = ref.watch(notificationsPluginProvider);
   return AuthController(
     vault: vault,
     orchestrator: orchestrator,
+    onSignedIn: registerBackgroundSync,
+    onSignedOut: () async {
+      await cancelBackgroundSync();
+      await notifPlugin.cancelAll();
+    },
   );
 });
