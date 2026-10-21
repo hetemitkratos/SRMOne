@@ -14,7 +14,7 @@ import '../../domain/services/attendance_planner_math.dart';
 import '../../domain/services/session_sync_orchestrator.dart';
 import '../auth/auth_controller.dart';
 import '../faculty/faculty_avatar.dart';
-import 'widgets/attendance_planner_card.dart';
+import 'attendance_planner_screen.dart';
 import 'widgets/attendance_trend_chart.dart';
 import '../shared/app_refresher.dart';
 import '../shared/cached_data_providers.dart';
@@ -28,8 +28,6 @@ class AttendanceScreen extends ConsumerStatefulWidget {
 }
 
 class _AttendanceScreenState extends ConsumerState<AttendanceScreen> {
-  bool _showPlanner = false;
-
   @override
   Widget build(BuildContext context) {
     final authState = ref.watch(authControllerProvider);
@@ -59,13 +57,14 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> {
               actions: [
                 if (records.isNotEmpty)
                   HeaderAction(
-                    label: _showPlanner ? 'Hide plan' : 'Plan',
-                    icon: _showPlanner
-                        ? LucideIcons.chevronUp
-                        : LucideIcons.calculator,
-                    filled: !_showPlanner,
-                    onPressed: () =>
-                        setState(() => _showPlanner = !_showPlanner),
+                    label: 'Planner',
+                    icon: LucideIcons.calculator,
+                    filled: true,
+                    onPressed: () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => const AttendancePlannerScreen(),
+                      ),
+                    ),
                   ),
               ],
             ),
@@ -87,13 +86,6 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> {
             else ...[
               const SizedBox(height: 16),
               _summaryCards(records),
-              if (_showPlanner) ...[
-                const SizedBox(height: 16),
-                AttendancePlannerCard(
-                  academiaEmail: email,
-                  attendanceRecords: records,
-                ),
-              ],
               const SizedBox(height: 16),
               AttendanceTrendChart(snapshots: snapshots),
               const SizedBox(height: 24),
