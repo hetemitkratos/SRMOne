@@ -91,7 +91,9 @@ List<TimelineEntry> buildDayTimeline(
   for (final (i, b) in blocks.indexed) {
     if (i > 0) {
       final prevEnd = blocks[i - 1].end;
-      if (prevEnd != null && b.start != null && b.start! - prevEnd >= minBreak) {
+      if (prevEnd != null &&
+          b.start != null &&
+          b.start! - prevEnd >= minBreak) {
         out.add(BreakGap(start: prevEnd, end: b.start!));
       }
     }
@@ -126,8 +128,9 @@ String formatRange(int start, int end) {
 }
 
 /// How long until a class: "in 25 min" within the hour, else "at 2:20 PM".
-String startsIn(int minutesUntil, int startMinutes) =>
-    minutesUntil <= 60 ? 'in $minutesUntil min' : 'at ${formatClock(startMinutes)}';
+String startsIn(int minutesUntil, int startMinutes) => minutesUntil <= 60
+    ? 'in $minutesUntil min'
+    : 'at ${formatClock(startMinutes)}';
 
 /// A duration such as "50 min" or "1 h 35 min".
 String formatDuration(int minutes) {
@@ -139,8 +142,20 @@ String formatDuration(int minutes) {
 
 /// Small words kept lower case inside a title.
 const _minorWords = {
-  'a', 'an', 'and', 'as', 'at', 'by', 'for', 'in', 'of', 'on', 'or', 'the',
-  'to', 'with',
+  'a',
+  'an',
+  'and',
+  'as',
+  'at',
+  'by',
+  'for',
+  'in',
+  'of',
+  'on',
+  'or',
+  'the',
+  'to',
+  'with',
 };
 
 /// Title-cases [text] when it is ALL CAPS (as some portal pages send course
@@ -154,10 +169,11 @@ String tidyTitle(String text) {
     for (final (i, raw) in words.indexed)
       if (RegExp(r'\d').hasMatch(raw))
         raw
-      else if (raw.toLowerCase() case final w when
-          RegExp(r'^(i|ii|iii|iv|v|vi|vii|viii|ix|x)$').hasMatch(w))
+      else if (raw.toLowerCase() case final w
+          when RegExp(r'^(i|ii|iii|iv|v|vi|vii|viii|ix|x)$').hasMatch(w))
         w.toUpperCase()
-      else if (raw.toLowerCase() case final w when i > 0 && _minorWords.contains(w))
+      else if (raw.toLowerCase() case final w
+          when i > 0 && _minorWords.contains(w))
         w
       else if (raw.isEmpty)
         raw

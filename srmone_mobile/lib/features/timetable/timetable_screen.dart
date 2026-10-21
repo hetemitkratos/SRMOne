@@ -51,13 +51,12 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen> {
     final calendarMap = ref.watch(calendarMapProvider(currentSemester()));
     final now = DateTime.now();
     final todayStatus = CalendarDayResolver.getDayStatus(calendarMap, now);
-    final todayOrder = todayStatus.isWorkingDay ? todayStatus.dayOrderNum : null;
+    final todayOrder =
+        todayStatus.isWorkingDay ? todayStatus.dayOrderNum : null;
     final day = _picked ?? todayOrder ?? 1;
 
-    final colors = {
-      for (final (i, c) in courses.indexed)
-        c['courseCode']?.toString() ?? '': courseColorAt(i),
-    };
+    final colors =
+        courseColorMap(courses.map((c) => c['courseCode']?.toString() ?? ''));
     final c = SrmColors.of(context);
 
     return Scaffold(
@@ -97,7 +96,7 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen> {
               _DaySwitcher(
                 selected: day,
                 today: todayOrder,
-                dates: _datesThisWeek(calendarMap, now),
+                dates: _nextDates(calendarMap, now),
                 onPick: (d) => setState(() => _picked = d),
               ),
               const SizedBox(height: 18),
@@ -138,21 +137,20 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen> {
     }
     if (s.isWeekend) return 'Weekend, no classes today';
     if (!s.isWorkingDay) return "Today's day order isn't published yet";
-    final blocks = buildDayTimeline(
-            TimetableSchedule.slotsForDay(courses, s.dayLabel))
-        .whereType<ClassBlock>()
-        .length;
+    final blocks =
+        buildDayTimeline(TimetableSchedule.slotsForDay(courses, s.dayLabel))
+            .whereType<ClassBlock>()
+            .length;
     return '${s.dayLabel} today · $blocks class${blocks == 1 ? '' : 'es'}';
   }
 
-  /// Day order (1–5) → this week's date for it, from the calendar.
-  Map<int, DateTime> _datesThisWeek(
-      Map<String, CalendarEntry> cal, DateTime now) {
-    final monday = DateTime(now.year, now.month, now.day)
-        .subtract(Duration(days: now.weekday - 1));
+  /// Day order (1–5) → the next date (today or later) it falls on, from
+  /// the calendar, looking up to six weeks ahead.
+  Map<int, DateTime> _nextDates(Map<String, CalendarEntry> cal, DateTime now) {
+    final today = DateTime(now.year, now.month, now.day);
     final out = <int, DateTime>{};
-    for (var i = 0; i < 5; i++) {
-      final d = monday.add(Duration(days: i));
+    for (var i = 0; i < 42 && out.length < 5; i++) {
+      final d = DateTime(today.year, today.month, today.day + i);
       final s = CalendarDayResolver.getDayStatus(cal, d);
       if (s.isWorkingDay && s.dayOrderNum != null) {
         out.putIfAbsent(s.dayOrderNum!, () => d);
@@ -207,8 +205,8 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen> {
                   AnimatedRotation(
                     turns: _showCourses ? 0.5 : 0,
                     duration: const Duration(milliseconds: 200),
-                    child: Icon(LucideIcons.chevronDown,
-                        size: 20, color: c.muted),
+                    child:
+                        Icon(LucideIcons.chevronDown, size: 20, color: c.muted),
                   ),
                 ],
               ),
@@ -225,7 +223,9 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen> {
                       for (final course in courses)
                         _CourseRow(
                           course: course,
-                          color: colors[course['courseCode']?.toString()] ??
+                          color: colors[course['courseCode']
+                                  ?.toString()
+                                  .toUpperCase()] ??
                               SrmPalette.mint,
                         ),
                       const SizedBox(height: 6),
@@ -298,23 +298,28 @@ class _DaySwitcher extends StatelessWidget {
   Widget _segment(BuildContext context, SrmColors c, int d) {
     final isSel = d == selected;
     final date = dates[d];
-    final sub = date == null
-        ? ''
-        : '${_weekdays[date.weekday - 1]} ${date.day}';
+    final sub =
+        date == null ? '' : '${_weekdays[date.weekday - 1]} ${date.day}';
+    final label = sub.isEmpty ? 'No date' : sub;
     return Semantics(
       button: true,
       selected: isSel,
-      label: 'Day $d${sub.isEmpty ? '' : ', $sub'}${d == today ? ', today' : ''}',
+      label:
+          'Day $d${sub.isEmpty ? '' : ', $sub'}${d == today ? ', today' : ''}',
       child: ExcludeSemantics(
         child: GestureDetector(
           behavior: HitTestBehavior.opaque,
           onTap: () => onPick(d),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               Row(
+                mainAxisSize: MainAxisSize.min,
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
+                  // Balances the today dot so the label stays centred.
+                  if (d == today) const SizedBox(width: 9),
                   Text(
                     'Day $d',
                     style: TextStyle(
@@ -336,17 +341,16 @@ class _DaySwitcher extends StatelessWidget {
                   ],
                 ],
               ),
-              if (sub.isNotEmpty) ...[
-                const SizedBox(height: 2),
-                Text(
-                  sub,
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w500,
-                    color: isSel ? c.onHero.withAlpha(170) : c.faint,
-                  ),
+              const SizedBox(height: 2),
+              Text(
+                label,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w500,
+                  color: isSel ? c.onHero.withAlpha(170) : c.faint,
                 ),
-              ],
+              ),
             ],
           ),
         ),
@@ -397,7 +401,10 @@ class _DayTimeline extends StatelessWidget {
     if (nowMin != null && !inClass) {
       final first = blocks.first.start;
       final last = blocks.last.end;
-      if (first != null && last != null && nowMin >= first - 60 && nowMin < last) {
+      if (first != null &&
+          last != null &&
+          nowMin >= first - 60 &&
+          nowMin < last) {
         nowIndex = entries.indexWhere((e) => switch (e) {
               ClassBlock(:final start) => start != null && start > nowMin,
               BreakGap(:final end) => end > nowMin,
@@ -413,7 +420,7 @@ class _DayTimeline extends StatelessWidget {
             ClassBlock() => _ClassRow(
                 block: e,
                 course: byCode[e.courseCode] ?? const {},
-                color: colors[e.courseCode] ?? SrmPalette.mint,
+                color: colors[e.courseCode.toUpperCase()] ?? SrmPalette.mint,
                 nowMin: nowMin,
               ),
             BreakGap() => _BreakRow(gap: e),
@@ -450,7 +457,7 @@ class _ClassRow extends StatelessWidget {
     final done = nowMin != null && block.end != null && nowMin! >= block.end!;
     final start = block.start;
     final end = block.end;
-    final meta = [if (room.isNotEmpty) room, if (faculty.isNotEmpty) faculty];
+    const ink = SrmPalette.ink;
 
     return Opacity(
       opacity: done ? 0.5 : 1,
@@ -490,87 +497,118 @@ class _ClassRow extends StatelessWidget {
               ),
               Expanded(
                 child: Material(
-                  color: c.card,
+                  color: color,
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(20),
+                    borderRadius: BorderRadius.circular(22),
                     side: BorderSide(
-                      color: live ? c.text : c.border,
-                      width: live ? 1.5 : 1,
+                      color: live ? ink : Colors.black.withAlpha(13),
+                      width: live ? 2 : 1,
                     ),
                   ),
                   clipBehavior: Clip.antiAlias,
                   child: InkWell(
                     onTap: () => _showClassSheet(context, block, course, color),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        Container(width: 6, color: color),
-                        Expanded(
-                          child: Padding(
-                            padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 14, 14, 14),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Text(
+                                block.courseCode.toUpperCase(),
+                                style: TextStyle(
+                                  fontFamily: SrmFonts.mono,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w700,
+                                  letterSpacing: 0.6,
+                                  color: ink.withAlpha(150),
+                                ),
+                              ),
+                              const Spacer(),
+                              if (live)
+                                const SoftPill(
+                                  label: 'NOW',
+                                  icon: LucideIcons.radio,
+                                  background: ink,
+                                  foreground: Colors.white,
+                                )
+                              else if (block.periods > 1)
+                                SoftPill(
+                                  label: '${block.periods} periods',
+                                  background: Colors.white.withAlpha(150),
+                                  foreground: ink,
+                                ),
+                            ],
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            tidyTitle(block.courseTitle.isNotEmpty
+                                ? block.courseTitle
+                                : block.courseCode),
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w700,
+                              fontSize: 16,
+                              height: 1.25,
+                              color: ink,
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          Wrap(
+                            spacing: 6,
+                            runSpacing: 6,
+                            children: [
+                              if (start != null && end != null)
+                                SoftPill(
+                                  label: formatRange(start, end),
+                                  icon: LucideIcons.clock,
+                                  background: Colors.white.withAlpha(150),
+                                  foreground: ink,
+                                ),
+                              if (room.isNotEmpty)
+                                SoftPill(
+                                  label: room,
+                                  icon: LucideIcons.mapPin,
+                                  background: Colors.white.withAlpha(150),
+                                  foreground: ink,
+                                ),
+                            ],
+                          ),
+                          if (faculty.isNotEmpty) ...[
+                            const SizedBox(height: 10),
+                            Row(
                               children: [
-                                Row(
-                                  children: [
-                                    Expanded(
-                                      child: Text(
-                                        tidyTitle(block.courseTitle.isNotEmpty
-                                            ? block.courseTitle
-                                            : block.courseCode),
-                                        style: TextStyle(
-                                          fontWeight: FontWeight.w700,
-                                          fontSize: 15,
-                                          height: 1.25,
-                                          color: c.text,
-                                        ),
-                                      ),
-                                    ),
-                                    if (live)
-                                      const SoftPill(
-                                        label: 'NOW',
-                                        background: SrmPalette.ink,
-                                        foreground: Colors.white,
-                                      ),
-                                  ],
-                                ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  [
-                                    if (start != null && end != null)
-                                      formatRange(start, end),
-                                    if (block.periods > 1)
-                                      '${block.periods} periods',
-                                  ].join('  ·  '),
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w600,
-                                    color: c.muted,
-                                  ),
-                                ),
-                                if (meta.isNotEmpty) ...[
-                                  const SizedBox(height: 2),
-                                  Text(
-                                    meta.join('  ·  '),
+                                FacultyAvatar(facultyName: faculty, radius: 11),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    faculty,
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
                                     style: TextStyle(
-                                        fontSize: 12, color: c.faint),
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w500,
+                                      color: ink.withAlpha(190),
+                                    ),
                                   ),
-                                ],
-                                if (live && start != null && end != null) ...[
-                                  const SizedBox(height: 10),
-                                  SrmProgressBar(
-                                    value: (nowMin! - start) / (end - start),
-                                    color: c.text,
-                                    height: 4,
-                                  ),
-                                ],
+                                ),
                               ],
                             ),
-                          ),
-                        ),
-                      ],
+                          ],
+                          if (live && start != null && end != null) ...[
+                            const SizedBox(height: 12),
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(4),
+                              child: LinearProgressIndicator(
+                                value: (nowMin! - start) / (end - start),
+                                minHeight: 4,
+                                color: ink,
+                                backgroundColor: Colors.white.withAlpha(128),
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
                     ),
                   ),
                 ),
@@ -737,9 +775,8 @@ class _ClassSheet extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final c = SrmColors.of(context);
     String v(String k) => course[k]?.toString().trim() ?? '';
-    final code = v('courseCode').isNotEmpty
-        ? v('courseCode')
-        : block?.courseCode ?? '';
+    final code =
+        v('courseCode').isNotEmpty ? v('courseCode') : block?.courseCode ?? '';
     final title = tidyTitle(v('courseTitle').isNotEmpty
         ? v('courseTitle')
         : block?.courseTitle ?? code);
@@ -758,7 +795,8 @@ class _ClassSheet extends ConsumerWidget {
               Container(
                 width: 34,
                 height: 34,
-                decoration: BoxDecoration(color: c.track, shape: BoxShape.circle),
+                decoration:
+                    BoxDecoration(color: c.track, shape: BoxShape.circle),
                 child: Icon(icon, size: 16, color: c.muted),
               ),
               const SizedBox(width: 12),

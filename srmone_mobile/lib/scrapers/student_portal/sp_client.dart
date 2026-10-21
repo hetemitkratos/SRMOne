@@ -64,6 +64,8 @@ class SPClient {
       '$_spBaseUrl/srmiststudentportal/students/report/studentAttendanceDetails.jsp';
   static const String _spInternalMarksUrl =
       '$_spBaseUrl/srmiststudentportal/students/report/studentInternalMarkDetails.jsp';
+  static const String _spMarkComponentsUrl =
+      '$_spBaseUrl/srmiststudentportal/students/report/studentInternalMarkDetailsInner.jsp';
   static const String _spDashboardUrl =
       '$_spBaseUrl/srmiststudentportal/students/template/HRDSystem.jsp';
 
@@ -356,5 +358,23 @@ class SPClient {
 
     final html = response.data.toString();
     return Isolate.run(() => SPParsers.parseInternalMarks(html));
+  }
+
+  /// Fetches one course's component marks (the portal's "View Details"),
+  /// using the subject id and status from [fetchInternalMarks].
+  Future<List<SPMarkComponent>> fetchMarkComponents(
+      String subjectId, String status) async {
+    final body = 'iden=1&hdnSubjectId=${Uri.encodeQueryComponent(subjectId)}'
+        '&status=${Uri.encodeQueryComponent(status)}';
+    final response = await _client.post(
+      _spMarkComponentsUrl,
+      body: body,
+      headers: {
+        'Referer': _spDashboardUrl,
+        'X-Requested-With': 'XMLHttpRequest',
+      },
+    ).timeout(stepTimeout);
+    final html = response.data.toString();
+    return SPParsers.parseMarkComponents(html);
   }
 }

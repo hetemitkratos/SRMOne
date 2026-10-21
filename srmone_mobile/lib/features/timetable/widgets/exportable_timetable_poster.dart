@@ -72,8 +72,8 @@ class ExportableTimetablePoster extends StatelessWidget {
         poster,
         pixelRatio: 2,
         delay: const Duration(milliseconds: 300),
-        constraints: const BoxConstraints(
-            minWidth: posterWidth, maxWidth: posterWidth),
+        constraints:
+            const BoxConstraints(minWidth: posterWidth, maxWidth: posterWidth),
       );
 
       final dir = await getTemporaryDirectory();
@@ -94,10 +94,8 @@ class ExportableTimetablePoster extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colors = {
-      for (final (i, c) in courses.indexed)
-        c['courseCode']?.toString() ?? '': courseColorAt(i),
-    };
+    final colors =
+        courseColorMap(courses.map((c) => c['courseCode']?.toString() ?? ''));
     final days = [
       for (var d = 1; d <= 5; d++)
         TimetableSchedule.slotsForDay(courses, 'Day $d'),
@@ -245,7 +243,9 @@ class ExportableTimetablePoster extends StatelessWidget {
                     return Column(
                       children: [
                         Text(
-                          t == null ? hours[h]! : formatClock(t.$1, suffix: false),
+                          t == null
+                              ? hours[h]!
+                              : formatClock(t.$1, suffix: false),
                           style: const TextStyle(
                             fontSize: 15,
                             fontWeight: FontWeight.w700,
@@ -333,7 +333,8 @@ class ExportableTimetablePoster extends StatelessWidget {
               : Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8),
                   decoration: BoxDecoration(
-                    color: colors[s.courseCode] ?? SrmPalette.mint,
+                    color:
+                        colors[s.courseCode.toUpperCase()] ?? SrmPalette.mint,
                     borderRadius: BorderRadius.circular(14),
                   ),
                   child: Column(
@@ -398,7 +399,7 @@ class ExportableTimetablePoster extends StatelessWidget {
                     height: 18,
                     margin: const EdgeInsets.only(top: 3),
                     decoration: BoxDecoration(
-                      color: colors[v(c, 'courseCode')],
+                      color: colors[v(c, 'courseCode').toUpperCase()],
                       borderRadius: BorderRadius.circular(6),
                     ),
                   ),

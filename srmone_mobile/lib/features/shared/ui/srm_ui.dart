@@ -791,14 +791,34 @@ class PillToggle<T> extends StatelessWidget {
 const courseColors = [
   SrmPalette.mint,
   SrmPalette.lavender,
-  SrmPalette.beige,
   Color(0xFFF4CDBE), // soft terracotta
   Color(0xFFCFE0EE), // soft blue
   Color(0xFFEFE3B0), // soft yellow
+  Color(0xFFF2CFE0), // soft pink
+  Color(0xFFD5E5C3), // soft sage
+  SrmPalette.beige,
+  Color(0xFFDCCDEE), // soft lilac
+  Color(0xFFBFE3E8), // soft teal
 ];
 
-/// The colour for the course at [index] in the timetable.
-Color courseColorAt(int index) => courseColors[index % courseColors.length];
+/// One colour per course code, never shared between two courses: the
+/// palette first, then evenly spaced pastel hues if there are more courses.
+Map<String, Color> courseColorMap(Iterable<String> courseCodes) {
+  final codes = <String>[];
+  for (final c in courseCodes) {
+    final code = c.trim().toUpperCase();
+    if (code.isNotEmpty && !codes.contains(code)) codes.add(code);
+  }
+  final extra = codes.length - courseColors.length;
+  return {
+    for (final (i, code) in codes.indexed)
+      code: i < courseColors.length
+          ? courseColors[i]
+          : HSLColor.fromAHSL(
+                  1, (i - courseColors.length) * 360 / extra + 15, 0.55, 0.85)
+              .toColor(),
+  };
+}
 
 /// Fades and slides [children] in one after another when a screen first
 /// opens, like the web app's entrance animation. Does nothing when the

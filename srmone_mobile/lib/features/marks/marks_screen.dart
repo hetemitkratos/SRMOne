@@ -31,12 +31,16 @@ class CourseMarks {
   /// The Student Portal's internal total, if it has one for this course.
   final ({double scored, double max})? portalTotal;
 
+  /// The Student Portal's components (FT-I, FT-II, …), possibly empty.
+  final List<Map<String, dynamic>> portalComponents;
+
   const CourseMarks({
     required this.courseCode,
     required this.courseTitle,
     required this.courseType,
     required this.academiaTests,
     required this.portalTotal,
+    this.portalComponents = const [],
   });
 }
 
@@ -61,6 +65,12 @@ List<CourseMarks> groupCourseMarks(
       courseType: academia.isEmpty ? '' : academia.first.courseType,
       academiaTests: [for (final m in academia) ..._decodeTests(m.testsJson)],
       portalTotal: portal.isEmpty ? null : _portalTotal(portal.first.testsJson),
+      portalComponents: portal.isEmpty
+          ? const []
+          : [
+              for (final t in _decodeTests(portal.first.testsJson))
+                if (t['kind'] == 'component') t,
+            ],
     ));
   }
   out.sort((a, b) => (a.courseTitle.isEmpty ? a.courseCode : a.courseTitle)
@@ -78,6 +88,7 @@ List<Map<String, dynamic>> _decodeTests(String json) {
 
 ({double scored, double max})? _portalTotal(String json) {
   for (final t in _decodeTests(json)) {
+    if (t['kind'] == 'component') continue;
     final scored = num.tryParse('${t['scored']}');
     final max = num.tryParse('${t['maxMarks']}');
     if (scored != null && max != null && max > 0) {
@@ -160,7 +171,7 @@ class MarksScreen extends ConsumerWidget {
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
-                        'Tests from Academia, internal totals from the Student Portal',
+                        'Totals and components from the Student Portal',
                         style: TextStyle(
                             fontSize: 12,
                             fontWeight: FontWeight.w600,
@@ -201,8 +212,12 @@ class _CourseMarksCardState extends State<_CourseMarksCard> {
     final c = SrmColors.of(context);
     final course = widget.course;
     final total = course.portalTotal;
-    final tests = course.academiaTests;
-    final testCount = '${tests.length} test${tests.length == 1 ? '' : 's'}';
+    // The portal's components when it has them, else Academia's tests.
+    final tests = course.portalComponents.isNotEmpty
+        ? course.portalComponents
+        : course.academiaTests;
+    final noun = course.portalComponents.isNotEmpty ? 'component' : 'test';
+    final testCount = '${tests.length} $noun${tests.length == 1 ? '' : 's'}';
 
     return SrmPanel(
       padding: EdgeInsets.zero,
@@ -210,7 +225,7 @@ class _CourseMarksCardState extends State<_CourseMarksCard> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           InkWell(
-            onTap: tests.isEmpty ? null : () => setState(() => _open = !_open),
+            onTap: () => setState(() => _open = !_open),
             child: Padding(
               padding: const EdgeInsets.all(20),
               child: Column(
@@ -230,9 +245,9 @@ class _CourseMarksCardState extends State<_CourseMarksCard> {
                         ),
                       ],
                       const Spacer(),
-                      if (tests.isNotEmpty) ...[
+                      ...[
                         SoftPill(
-                          label: testCount,
+                          label: tests.isEmpty ? 'Components' : testCount,
                           background: c.track,
                           foreground: c.faint,
                         ),
@@ -310,6 +325,20 @@ class _CourseMarksCardState extends State<_CourseMarksCard> {
                     padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
                     child: Column(
                       children: [
+                        if (tests.isEmpty)
+                          Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.all(16),
+                            decoration: BoxDecoration(
+                              color: c.track,
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                            child: Text(
+                              'No component marks are published for this course yet.',
+                              style: TextStyle(
+                                  fontSize: 13, color: c.muted, height: 1.4),
+                            ),
+                          ),
                         for (final (i, t) in tests.indexed) ...[
                           if (i > 0) const SizedBox(height: 10),
                           _testBox(c, t, i),
@@ -339,14 +368,24 @@ class _CourseMarksCardState extends State<_CourseMarksCard> {
           Row(
             children: [
               Expanded(
-                child: Text(
-                  name.toUpperCase(),
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 0.8,
-                    color: c.muted,
-                  ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      name.toUpperCase(),
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.8,
+                        color: c.muted,
+                      ),
+                    ),
+                    if ('${t['enteredOn'] ?? ''}'.isNotEmpty)
+                      Text(
+                        'Entered ${t['enteredOn']}',
+                        style: TextStyle(fontSize: 11, color: c.faint),
+                      ),
+                  ],
                 ),
               ),
               _score(c, '${t['scored'] ?? '—'}', '${t['maxMarks'] ?? '—'}', 22),
